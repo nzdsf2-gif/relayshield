@@ -2629,6 +2629,134 @@ ENDPOINTS = [
                   "key covers the cryptographic checks; the hosted check exists for "
                   "callers who also need revocation state."),
     },
+    {
+        "path": "/v1/tap/intent-bind",
+        "price_cents": 0,
+        "tag": "Agent and MCP security",
+        "summary": "Bind a payment intent to its screened counterparty, amount, and artifacts",
+        "description": (
+            "Creates a signed intent binding for a TAP payment: the counterparty and the "
+            "identifiers named inside the invoice or cart artifacts are screened against the "
+            "RelayShield threat-intelligence corpus, and the payer, counterparty, amount, "
+            "currency, and artifact hashes are frozen into a KMS-signed record with a short "
+            "TTL and any step-up requirement baked in. Settlement is then verified against "
+            "the record with /v1/tap/settle-check, and each binding can settle exactly once. "
+            "Included in the TAP/PAP verifiers bundle at no per-call charge; the API key must "
+            "carry the verifiers entitlement. An invoice image is hashed and bound; when OCR "
+            "is configured its verdicts are advisory (they flag and require step-up rather "
+            "than refusing), because extraction errors are not fraud. A flagged screen "
+            "refuses the binding: binding never reports a counterparty as safe, only as no "
+            "flags found."
+        ),
+        "request": {
+            "props": {
+                "payer": _str("The paying agent or account identifier, as it will appear at settlement."),
+                "counterparty": _str("Who is being paid: a domain, email, URL, or EVM wallet address. Screened against the threat-intel corpus."),
+                "amount": _str("Decimal amount as a string, e.g. `25.00`. Bound exactly; settlement drift is governed by the binding policy tolerance (default zero)."),
+                "currency": _str("ISO 4217 currency code, e.g. `USD`."),
+                "rail": _str("Identifier canonicalization policy for this binding. Defaults to `tap` on this rail.", examples=["tap"]),
+                "tap_intent_ref": _str("Optional TAP intent token id this binding rides on."),
+                "artifacts": _arr(
+                    "At least one artifact (invoice, cart, invoice image) must be bound; an intent with nothing bound to it binds nothing.",
+                    _obj("One bound artifact.", {
+                        "artifact_id": _str("Caller-stable id used to match the artifact at settlement."),
+                        "kind": _str("`invoice`, `cart`, `invoice_image`, or `other`."),
+                        "descriptor": _obj("The artifact fields (invoice number, totals, payee, line items). Hashed canonically and screened for payee identifiers.", {}),
+                        "content_b64": _str("Optional base64 content bytes. For an invoice image these are the OCR input; without them the image binds by descriptor hash only and records no image verdict."),
+                    }),
+                ),
+            },
+            "required": ["payer", "counterparty", "amount", "currency", "artifacts"],
+            "example": {
+                "payer": "agent-4471",
+                "counterparty": "seller.example",
+                "amount": "25.00",
+                "currency": "USD",
+                "rail": "tap",
+                "tap_intent_ref": "tap_intent_9f2c",
+                "artifacts": [
+                    {"artifact_id": "invoice", "kind": "invoice",
+                     "descriptor": {"number": "INV-100", "total": "25.00",
+                                    "currency": "USD", "payee": "Seller Example LLC"}},
+                ],
+            },
+        },
+        "response": {
+            "props": {
+                "binding": _obj("The signed binding envelope: the record (including step_up and id_policy), its hex Ed25519 signature, the issuer public key, and the key id.", {}),
+            },
+            "example": {"binding": {"record": {"binding_id": "bind_9f2c4a1b3d5e6f708192a3b4c5d6e7f80",
+                                               "id_policy": "tap", "amount_minor": 2500,
+                                               "currency": "USD"},
+                                    "signature": "<hex>", "public_key": "<hex>",
+                                    "key_id": "kms-ed25519-prod"}},
+        },
+        "notes": ("Verifiers entitlement required (the TAP/PAP verifiers bundle); no per-call "
+                  "charge. A screening refusal returns 422 with error `binding_refused`, the "
+                  "machine-readable reason_codes, and the per-hook verdicts."),
+    },
+    {
+        "path": "/v1/tap/settle-check",
+        "price_cents": 0,
+        "tag": "Agent and MCP security",
+        "summary": "Verify an executed payment against its intent binding before release",
+        "description": (
+            "Checks what actually executed against the signed binding record: signature, "
+            "consumption state, expiry, payer, counterparty (canonicalized under the policy "
+            "the binding was issued with), currency, amount within the bound tolerance, and "
+            "the artifact hash set. When the record requires step-up, the caller presents "
+            "attestations (one signed attestation object per required method: method, "
+            "evidence_ref, attested_at, attestor); settle-check validates that every "
+            "required method is attested, that each attested_at falls inside the binding "
+            "TTL window, and that each evidence_ref is well-formed, and blocks (without "
+            "consuming) on missing or malformed attestations. It does not re-verify the "
+            "external approval system. An allow consumes the binding atomically, so the "
+            "same binding can never settle twice; a block does not consume it. Both "
+            "outcomes are successful calls: the decision is in the body. The step-up "
+            "requirement baked into the record at issuance is returned with the decision."
+        ),
+        "request": {
+            "props": {
+                "binding_id": _str("The binding_id from intent-bind. Alternatively present the whole binding envelope as `binding`; the registry is consulted for consumption either way."),
+                "binding": _obj("The signed binding envelope, as an alternative to binding_id.", {}),
+                "executed": _obj("What actually executed.", {
+                    "payer": _str("Executed payer identifier."),
+                    "counterparty": _str("Executed counterparty identifier."),
+                    "amount": _str("Executed amount as a decimal string."),
+                    "currency": _str("Executed currency, ISO 4217."),
+                    "rail_reference": _str("Settlement reference (token id, transaction id), informational."),
+                    "artifacts": _arr("The artifacts as executed, matched by artifact_id against the bound set.", _obj("One executed artifact.", {})),
+                }),
+                "attestations": _arr("Step-up evidence, required when the record requires step-up: one object per required method, each with method (human_approval, second_agent_approval, or policy_rule), evidence_ref (a URI or hash of the approval record), attested_at (epoch seconds, inside the binding TTL window), and attestor. Validated for presence, TTL window, and evidence_ref shape; the external approval system is not re-verified.", _obj("One step-up attestation.", {})),
+            },
+            "required": ["executed"],
+            "example": {
+                "binding_id": "bind_9f2c4a1b3d5e6f708192a3b4c5d6e7f80",
+                "executed": {"payer": "agent-4471", "counterparty": "seller.example",
+                             "amount": "25.00", "currency": "USD",
+                             "artifacts": [
+                                 {"artifact_id": "invoice", "kind": "invoice",
+                                  "descriptor": {"number": "INV-100", "total": "25.00",
+                                                 "currency": "USD", "payee": "Seller Example LLC"}}]},
+            },
+        },
+        "response": {
+            "props": {
+                "decision": _str("`allow` or `block`.", enum=["allow", "block"]),
+                "reason_codes": _arr("Machine-readable outcome codes: `OK` on allow; on block, codes such as `BINDING_ALREADY_CONSUMED`, `BINDING_EXPIRED`, `AMOUNT_MISMATCH`, `COUNTERPARTY_MISMATCH`, `ARTIFACT_TAMPERED`, `STEP_UP_ATTESTATION_MISSING`, `STEP_UP_ATTESTATION_INVALID`.", _str("")),
+                "reasons": _arr("Human-readable explanation of the decision.", _str("")),
+                "binding_id": _str("The binding the decision is about."),
+                "step_up": _obj("The step-up requirement baked into the signed record at issuance (required flag, triggers, satisfied_by), when the binding was found.", {}),
+            },
+            "example": {"decision": "allow", "reason_codes": ["OK"],
+                        "reasons": ["executed payment matches the signed binding"],
+                        "binding_id": "bind_9f2c4a1b3d5e6f708192a3b4c5d6e7f80",
+                        "step_up": {"required": False, "triggers": [],
+                                    "satisfied_by": ["human_approval"]}},
+        },
+        "notes": ("Verifiers entitlement required (the TAP/PAP verifiers bundle); no per-call "
+                  "charge. Presenting another tenant's binding_id answers as not found."),
+    },
 ]
 
 
@@ -3498,6 +3626,128 @@ PAYG_ENDPOINTS: dict[str, dict] = {
                 "evidence": {},
                 "url_pattern_class": "typosquat-brand",
                 "brand_marks": ["paypal"],
+            },
+        },
+    },
+    "/v1/payg/intent-bind": {
+        "summary": "Bind a payment intent to its screened counterparty, amount, and artifacts",
+        "description": (
+            "Creates a signed intent binding: the counterparty and the identifiers named "
+            "inside the invoice or cart artifacts are screened against the RelayShield "
+            "threat-intel corpus, and the payer, counterparty, amount, currency, and "
+            "artifact hashes are frozen into a KMS-signed record with a short TTL and any "
+            "step-up requirement baked in. Verify the executed payment against it with "
+            "intent-settle-check before settling; each binding settles exactly once. An "
+            "invoice image is hashed and bound; OCR verdicts (AWS Rekognition, the "
+            "MSGSCAN screenshot pipeline) are advisory (flag plus step-up, not refusal). "
+            "A flagged screen refuses the binding with 422. Nothing here is ever "
+            "reported as safe: the best outcome is no flags found. Price: $0.10 per "
+            "call (approved 2026-10-24, scamkit-match parity)."
+        ),
+        "price_units": 100000,
+        "x402_version": 2,
+        "body": {
+            "type": "object",
+            "properties": {
+                "payer": {"type": "string", "description": "The paying wallet or agent identifier, as it will appear at settlement."},
+                "counterparty": {"type": "string", "description": "Who is being paid: a domain, email, URL, or EVM wallet address. Screened against the threat-intel corpus."},
+                "amount": {"type": "string", "description": "Decimal amount as a string, e.g. `25.00`."},
+                "currency": {"type": "string", "description": "ISO 4217 currency code, e.g. `USD`."},
+                "rail": {"type": "string", "description": "Identifier canonicalization policy. Defaults to `x402` on this rail."},
+                "tap_intent_ref": {"type": "string", "description": "Optional TAP intent token id this binding rides on."},
+                "artifacts": {
+                    "type": "array",
+                    "description": "At least one artifact (invoice, cart, invoice image). Each item: artifact_id, kind, descriptor, and optional content_b64 (image bytes for OCR).",
+                    "items": {"type": "object"},
+                },
+            },
+            "required": ["payer", "counterparty", "amount", "currency", "artifacts"],
+        },
+        "example": {
+            "payer": "0x002CfD89c5636F45E3C8576D6E35154748412bAc",
+            "counterparty": "seller.example",
+            "amount": "25.00",
+            "currency": "USD",
+            "rail": "x402",
+            "artifacts": [
+                {"artifact_id": "invoice", "kind": "invoice",
+                 "descriptor": {"number": "INV-100", "total": "25.00",
+                                "currency": "USD", "payee": "Seller Example LLC"}},
+            ],
+        },
+        "output_example": {
+            "ok": True,
+            "data": {
+                "binding": {
+                    "record": {"binding_id": "bind_9f2c4a1b3d5e6f708192a3b4c5d6e7f80",
+                               "id_policy": "x402", "amount_minor": 2500,
+                               "currency": "USD",
+                               "step_up": {"required": False, "triggers": [],
+                                           "satisfied_by": ["human_approval"]}},
+                    "signature": "<hex>",
+                    "public_key": "<hex>",
+                    "key_id": "kms-ed25519-prod",
+                },
+            },
+        },
+    },
+    "/v1/payg/intent-settle-check": {
+        "summary": "Verify an executed payment against its intent binding before settling",
+        "description": (
+            "Checks what actually executed against the signed binding record: signature, "
+            "consumption state, expiry, payer, counterparty (canonicalized under the "
+            "policy the binding was issued with), currency, amount within the bound "
+            "tolerance, and the artifact hash set. When the record requires step-up, "
+            "the caller presents attestations (one signed attestation object per "
+            "required method: method, evidence_ref, attested_at, attestor); "
+            "settle-check validates that every required method is attested, that "
+            "each attested_at falls inside the binding TTL window, and that each "
+            "evidence_ref is well-formed, and blocks (without consuming) on "
+            "missing or malformed attestations. It does not re-verify the external "
+            "approval system. An allow consumes the binding atomically, so the same "
+            "binding can never settle twice; a block does not consume it. Both "
+            "outcomes are successful calls: the decision is in the body, with the "
+            "step-up requirement baked into the record at issuance. Price: $0.10 "
+            "per call (approved 2026-10-24, scamkit-match parity)."
+        ),
+        "price_units": 100000,
+        "x402_version": 2,
+        "body": {
+            "type": "object",
+            "properties": {
+                "binding_id": {"type": "string", "description": "The binding_id from intent-bind. Alternatively present the whole binding envelope as `binding`."},
+                "binding": {"type": "object", "description": "The signed binding envelope, as an alternative to binding_id."},
+                "executed": {
+                    "type": "object",
+                    "description": "What actually executed: payer, counterparty, amount, currency, rail_reference, artifacts (matched by artifact_id).",
+                },
+                "attestations": {
+                    "type": "array",
+                    "description": "Step-up evidence, required when the record requires step-up: one object per required method, each with method (human_approval, second_agent_approval, or policy_rule), evidence_ref (a URI or hash of the approval record), attested_at (epoch seconds, inside the binding TTL window), and attestor. Validated for presence, TTL window, and evidence_ref shape; the external approval system is not re-verified.",
+                    "items": {"type": "object"},
+                },
+            },
+            "required": ["executed"],
+        },
+        "example": {
+            "binding_id": "bind_9f2c4a1b3d5e6f708192a3b4c5d6e7f80",
+            "executed": {"payer": "0x002CfD89c5636F45E3C8576D6E35154748412bAc",
+                         "counterparty": "seller.example",
+                         "amount": "25.00", "currency": "USD",
+                         "artifacts": [
+                             {"artifact_id": "invoice", "kind": "invoice",
+                              "descriptor": {"number": "INV-100", "total": "25.00",
+                                             "currency": "USD", "payee": "Seller Example LLC"}}]},
+        },
+        "output_example": {
+            "ok": True,
+            "data": {
+                "decision": "allow",
+                "reason_codes": ["OK"],
+                "reasons": ["executed payment matches the signed binding"],
+                "binding_id": "bind_9f2c4a1b3d5e6f708192a3b4c5d6e7f80",
+                "step_up": {"required": False, "triggers": [],
+                            "satisfied_by": ["human_approval"]},
             },
         },
     },

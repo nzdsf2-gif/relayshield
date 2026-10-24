@@ -919,22 +919,28 @@ const PAGE_HTML = `<!DOCTYPE html>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 <style>
-body { font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto; padding: 24px 16px; color: #1a1a2e; }
+body { font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto; padding: 24px 16px; background: #141414; color: #eaeaea; }
+#matrix { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; opacity: 0.13; pointer-events: none; }
+.scanlines { position: fixed; inset: 0; z-index: 60; pointer-events: none; opacity: 0.35; background: repeating-linear-gradient(0deg, rgba(0,0,0,0.28) 0 1px, transparent 1px 3px); }
+body > :not(#matrix):not(.scanlines) { position: relative; z-index: 1; }
 h1 { font-size: 26px; margin-bottom: 4px; }
-.sub { color: #555; margin-top: 0; }
-input[type=text] { width: 100%; padding: 10px; font-size: 16px; box-sizing: border-box; }
-button { padding: 10px 18px; font-size: 16px; cursor: pointer; margin-top: 10px; }
-.card { border: 2px solid #1a1a2e; border-radius: 8px; padding: 16px; margin-top: 20px; }
-.badge-threat { color: #b00020; }
-.badge-suspicious { color: #b36b00; }
-.badge-clean { color: #1a7a2e; }
-.badge-unchecked { color: #555; }
-.botlinks a { display: inline-block; margin: 6px 8px 0 0; padding: 8px 12px; background: #1a1a2e; color: #fff; text-decoration: none; border-radius: 6px; }
-.note { color: #555; font-size: 13px; margin-top: 24px; }
-.error { color: #b00020; margin-top: 12px; }
+.sub { color: #a6a6a6; margin-top: 0; }
+input[type=text] { width: 100%; padding: 10px; font-size: 16px; box-sizing: border-box; background: #1f1f1f; color: #eaeaea; border: 1px solid #7c3aed; border-radius: 6px; }
+button { padding: 10px 18px; font-size: 16px; cursor: pointer; margin-top: 10px; background: linear-gradient(135deg, #7c3aed, #a855f7); color: #fff; border: none; border-radius: 6px; }
+.card { border: 2px solid #7c3aed; border-radius: 8px; padding: 16px; margin-top: 20px; background: #1f1f1f; }
+.badge-threat { color: #ff5252; }
+.badge-suspicious { color: #ffb020; }
+.badge-clean { color: #00ff41; }
+.badge-unchecked { color: #a6a6a6; }
+.botlinks a { display: inline-block; margin: 6px 8px 0 0; padding: 8px 12px; background: linear-gradient(135deg, #7c3aed, #a855f7); color: #fff; text-decoration: none; border-radius: 6px; }
+.note { color: #a6a6a6; font-size: 13px; margin-top: 24px; }
+.error { color: #ff5252; margin-top: 12px; }
+a { color: #00ff41; }
 </style>
 </head>
 <body>
+<canvas id="matrix"></canvas>
+<div class="scanlines"></div>
 <h1>RelayShield free check</h1>
 <p class="sub">Paste a link, wallet address, or email address. Or upload a QR code or screenshot. No signup, no account.</p>
 <label for="checkInput">Link, wallet, or email</label><br>
@@ -1109,6 +1115,43 @@ if (SITE_KEY) {
     } catch (e) {}
   }, 500);
 }
+</script>
+<script>
+/* Matrix code rain, same treatment as the relayshield.net landing page.
+   Decorative only and failure isolated: a missing canvas or drawing
+   context stops this block and never touches the check flow above. */
+(function () {
+  var canvas = document.getElementById('matrix');
+  if (!canvas) { return; }
+  var ctx = null;
+  try { ctx = canvas.getContext('2d'); } catch (e) { ctx = null; }
+  if (!ctx) { return; }
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var chars = 'アイウエオカキクケコサシスセソタチツテト0123456789ABCDEF$#@%&';
+  var fontSize = 18, columns = 0, drops = [];
+  function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    columns = Math.floor(canvas.width / fontSize);
+    drops = [];
+    for (var i = 0; i < columns; i++) { drops[i] = Math.random() * -100; }
+  }
+  function draw() {
+    ctx.fillStyle = 'rgba(20,20,20,0.08)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#00ff41';
+    ctx.font = fontSize + 'px monospace';
+    for (var i = 0; i < columns; i++) {
+      var ch = chars.charAt(Math.floor(Math.random() * chars.length));
+      ctx.fillText(ch, i * fontSize, drops[i] * fontSize);
+      if (drops[i] * fontSize > canvas.height && Math.random() > 0.975) { drops[i] = 0; }
+      drops[i]++;
+    }
+  }
+  window.addEventListener('resize', resize);
+  resize();
+  if (!reduce) { setInterval(draw, 66); }
+})();
 </script>
 </body>
 </html>

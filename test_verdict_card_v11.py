@@ -14,6 +14,11 @@ and still runs unchanged.
      a triple-backtick monospace span (the WhatsApp-native code span).
      Both close the flagged v1 residual: a URL carrying Markdown
      metacharacters cannot open an entity or break the send.
+  3. Web-check line (v1.2, 2026-10-24): a "Try it on the web:
+     https://relayshield.net/check" line below the bot link line, on
+     the same free-tier cards only, so a forwarded card reaches
+     recipients without Telegram or WhatsApp. Paid tier and the
+     WhatsApp file-scan path carry neither line.
 
 The metacharacter tests do not just assert string containment. They
 strip the code spans out of the rendered card and assert the URL's
@@ -74,6 +79,7 @@ FOOTER = ("Checked against a growing threat intelligence corpus "
           "with over 129 monitored marketplaces.")
 TG_BOT_LINE = "Try it yourself: https://t.me/relayshield_bot"
 WA_BOT_LINE = "Try it yourself: https://wa.me/17407373961"
+WEBCHECK_LINE = "Try it on the web: https://relayshield.net/check"
 # A URL carrying every legacy-Markdown/WhatsApp metacharacter that can
 # open an entity: underscore, asterisk, brackets, tilde.
 NASTY_URL = "https://evil.example.com/a_b*c[d]_e~f?x=1"
@@ -169,6 +175,46 @@ class TestWhatsAppBotLinkLine(unittest.TestCase):
         self.assertEqual(wa.WA_CARD_BOT_LINK, WA_BOT_LINE)
 
 
+class TestTelegramWebcheckLine(unittest.TestCase):
+    def test_scan_card_links_webcheck_after_bot_line(self):
+        card = tg._format_scan_verdict_card(
+            "evil-paypa1.com/login", "malicious",
+            "3/70 security vendors flagged this URL as malicious.")
+        self.assertIn(WEBCHECK_LINE, card)
+        self.assertLess(card.index(TG_BOT_LINE), card.index(WEBCHECK_LINE))
+        self.assertTrue(card.endswith(WEBCHECK_LINE))
+        _assert_v11_rules(self, card)
+
+    def test_token_cards_link_webcheck(self):
+        for danger in ("honeypot", None):
+            card = tg._format_token_free_card(
+                "0x1a2b3c4d5e6f7890abcdef1234567890abcdef", danger, 0)
+            self.assertIn(WEBCHECK_LINE, card)
+            self.assertLess(card.index(TG_BOT_LINE),
+                            card.index(WEBCHECK_LINE))
+            self.assertTrue(card.endswith(WEBCHECK_LINE))
+            _assert_v11_rules(self, card)
+
+    def test_webcheck_constant_is_the_live_check_url(self):
+        self.assertEqual(tg.CARD_WEBCHECK_LINK, WEBCHECK_LINE)
+
+
+class TestWhatsAppWebcheckLine(unittest.TestCase):
+    def test_scan_card_links_webcheck_after_bot_line(self):
+        card = wa.build_verdict_response(
+            {"malicious": 3, "suspicious": 0, "harmless": 60,
+             "undetected": 7},
+            {"flagged": False, "reasons": []},
+            "that URL", "https://evil.example.com/login")
+        self.assertIn(WEBCHECK_LINE, card)
+        self.assertLess(card.index(WA_BOT_LINE), card.index(WEBCHECK_LINE))
+        self.assertTrue(card.endswith(WEBCHECK_LINE))
+        _assert_v11_rules(self, card)
+
+    def test_webcheck_constant_is_the_live_check_url(self):
+        self.assertEqual(wa.WA_CARD_WEBCHECK_LINK, WEBCHECK_LINE)
+
+
 class TestWhatsAppBacktickedTarget(unittest.TestCase):
     def test_metacharacter_url_in_monospace_span(self):
         card = wa.build_verdict_response(
@@ -201,6 +247,17 @@ class TestV11LeavesV1RulesIntact(unittest.TestCase):
         self.assertNotIn("t.me/relayshield_bot", src)
         self.assertNotIn("CARD_BOT_LINK", src)
         self.assertNotIn("_card_code_span", src)
+
+    def test_webcheck_line_absent_where_bot_link_is_absent(self):
+        # Same scope as the bot link line: the paid checktoken tier
+        # and the WhatsApp file-scan path never carried the bot link,
+        # so they must not carry the web-check line either.
+        src = inspect.getsource(tg._format_token_risk)
+        self.assertNotIn("relayshield.net/check", src)
+        self.assertNotIn("CARD_WEBCHECK_LINK", src)
+        src = inspect.getsource(wa.build_vt_verdict_response)
+        self.assertNotIn("relayshield.net/check", src)
+        self.assertNotIn("WA_CARD_WEBCHECK_LINK", src)
 
     def test_v1_footer_and_forward_lines_unchanged(self):
         self.assertEqual(

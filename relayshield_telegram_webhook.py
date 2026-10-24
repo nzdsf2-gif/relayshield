@@ -3197,6 +3197,9 @@ def _provenance_suffix(target: str) -> str:
 # open an entity or break the send. A backtick inside the target would
 # close the span early, so it is replaced with an apostrophe first. The
 # span is never nested inside a bold run (legacy Markdown does not nest).
+# v1.2 (2026-10-24): footer gains a web-check line (relayshield.net/check)
+# below the bot link line, on the same free-tier cards only, so a forwarded
+# card reaches recipients without Telegram or WhatsApp. Paid tier untouched.
 # ---------------------------------------------------------------------------
 
 CARD_HEADER = "🛡️ RelayShield Verdict"
@@ -3204,6 +3207,7 @@ CARD_FOOTER_CORPUS = "Checked against a growing threat intelligence corpus with 
 CARD_FORWARD_LINK = "↗ Forward this verdict to anyone who received the same link."
 CARD_FORWARD_TOKEN = "↗ Forward this verdict to anyone holding this token."
 CARD_BOT_LINK = "Try it yourself: https://t.me/relayshield_bot"
+CARD_WEBCHECK_LINK = "Try it on the web: https://relayshield.net/check"
 
 
 def _card_code_span(text: str) -> str:
@@ -3282,6 +3286,7 @@ def _format_scan_verdict_card(target: str, verdict: str, detail: str,
     lines.append(CARD_FOOTER_CORPUS)
     lines.append(CARD_FORWARD_LINK)
     lines.append(CARD_BOT_LINK)
+    lines.append(CARD_WEBCHECK_LINK)
     return "\n".join(lines)
 
 
@@ -3313,6 +3318,7 @@ def _format_token_free_card(address: str, danger: str | None,
             CARD_FOOTER_CORPUS,
             CARD_FORWARD_TOKEN,
             CARD_BOT_LINK,
+            CARD_WEBCHECK_LINK,
         ])
     return "\n".join([
         CARD_HEADER,
@@ -3326,6 +3332,7 @@ def _format_token_free_card(address: str, danger: str | None,
         CARD_FOOTER_CORPUS,
         CARD_FORWARD_TOKEN,
         CARD_BOT_LINK,
+        CARD_WEBCHECK_LINK,
     ])
 
 

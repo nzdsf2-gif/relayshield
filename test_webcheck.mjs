@@ -387,6 +387,58 @@ test("GET /check serves the page with jsQR, Turnstile hook, and no em dash", asy
   assert.ok(!/is safe/i.test(html), "page makes no safe claim");
 });
 
+test("GET /check serves the dark matrix theme from the landing page", async () => {
+  const resp = await handler.fetch(
+    new Request("https://relayshield.net/check"),
+    { TURNSTILE_SITE_KEY: "testkey" },
+    ctx,
+  );
+  assert.equal(resp.status, 200);
+  const html = await resp.text();
+  // Head structure unchanged for the separately staged SEO patch.
+  assert.ok(html.includes("<title>RelayShield free check</title>"));
+  assert.ok(html.includes("<h1>RelayShield free check</h1>"));
+  // Landing palette: dark background, light text, matrix green accents.
+  assert.ok(html.includes("background: #141414"));
+  assert.ok(html.includes("color: #eaeaea"));
+  assert.ok(html.includes("color: #00ff41"));
+  // Matrix canvas and scanlines, layered behind the content.
+  assert.ok(html.includes('<canvas id="matrix"></canvas>'));
+  assert.ok(html.includes("#matrix { position: fixed"));
+  assert.ok(html.includes("opacity: 0.13"));
+  assert.ok(html.includes("pointer-events: none"));
+  assert.ok(html.includes('class="scanlines"'));
+  assert.ok(html.includes("body > :not(#matrix):not(.scanlines) { position: relative; z-index: 1; }"));
+  // Muted text brightened for the dark background; cards and buttons dark.
+  assert.ok(html.includes("color: #a6a6a6"));
+  assert.ok(html.includes("background: #1f1f1f"));
+  // Functional content still present on top of the animation.
+  assert.ok(html.includes('id="checkInput"'));
+  assert.ok(html.includes('id="checkBtn"'));
+  assert.ok(html.includes('id="fileInput"'));
+  assert.ok(html.includes('id="result"'));
+  assert.ok(!html.includes("—"), "no em dash in page copy");
+});
+
+test("Matrix animation respects reduced motion and cannot break checks", async () => {
+  const resp = await handler.fetch(
+    new Request("https://relayshield.net/check"),
+    { TURNSTILE_SITE_KEY: "testkey" },
+    ctx,
+  );
+  const html = await resp.text();
+  assert.ok(html.includes("prefers-reduced-motion: reduce"));
+  // Own script block after the functional script, guarded at both steps.
+  assert.ok(html.includes("getElementById('matrix')"));
+  assert.ok(html.includes("if (!canvas) { return; }"));
+  assert.ok(html.includes("if (!ctx) { return; }"));
+  assert.ok(html.includes("setInterval(draw, 66)"));
+  assert.ok(html.indexOf("turnstileWidgetId") < html.indexOf("getElementById('matrix')"));
+  // Functional hooks survive the restyle unchanged.
+  assert.ok(html.includes("jsqr@1.4.0/dist/jsQR.js"));
+  assert.ok(html.includes("/check/api/check"));
+});
+
 test("POST /check/api/check returns a card and counts it", async () => {
   const kv = new FakeKV();
   await withFetch(apiFetch, async () => {

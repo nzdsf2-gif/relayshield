@@ -127,7 +127,8 @@ class PolicyEngine:
     def __init__(self, policy_path: str = ""):
         self.policy_path = policy_path or os.environ.get(
             "MCP_PROXY_POLICY_FILE", "")
-        self._policy = {"agents": {}, "servers": {}, "tools": {}}
+        self._policy = {"agents": {}, "servers": {}, "tools": {},
+                        "sequence_scoring": {}}
         self._limiter = RateLimiter()
         self._loaded_at = 0.0
         if self.policy_path:
@@ -154,6 +155,10 @@ class PolicyEngine:
             "agents": data.get("agents") or {},
             "servers": data.get("servers") or {},
             "tools": data.get("tools") or {},
+            # Retained for proxy.py, which builds the kill-chain
+            # scorer config from it (SequenceScoringConfig.from_dict).
+            # Evaluation here does not consume it.
+            "sequence_scoring": data.get("sequence_scoring") or {},
         }
         self._policy = policy
         self._loaded_at = time.time()
@@ -161,6 +166,18 @@ class PolicyEngine:
                  self.policy_path, len(policy["agents"]),
                  len(policy["servers"]), len(policy["tools"]))
         return True
+
+    def sequence_scoring_section(self) -> dict:
+        """The sequence_scoring policy section ({} when unset).
+
+        reload() historically kept only the agents/servers/tools
+        sections; the kill-chain wiring needs this one retained so
+        the proxy can build a SequenceScoringConfig from the same
+        YAML file. Returns a copy; unknown keys are ignored by
+        SequenceScoringConfig.from_dict.
+        """
+        section = self._policy.get("sequence_scoring") or {}
+        return dict(section) if isinstance(section, dict) else {}
 
     # -- lookup helpers -------------------------------------------------
 

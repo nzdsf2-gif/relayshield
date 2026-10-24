@@ -26,7 +26,10 @@ from .neighbor import NeighborRegistry
 from .policy import PolicyEngine
 from .quarantine import QuarantineManager
 from .reputation import ReputationStore
-from .screener import Screener
+from .kill_chain_store import ChainHistoryStore, PivotRegistry
+from .screener import Screener, extract_indicators
+from .sequence_scoring import (KillChainScorer, SequenceScoringConfig,
+                               _external_endpoints, make_session_key)
 from .telemetry import Telemetry
 from .verdicts import VerdictSigner, content_hash_of
 
@@ -58,6 +61,65 @@ def _error_response(req_id, code: int, message: str, data=None) -> dict:
     if data is not None:
         err["data"] = data
     return {"jsonrpc": "2.0", "id": req_id, "error": err}
+
+
+def resolve_correlation_identity(req: dict, client_ip: str,
+                                 upstream_url: str) -> dict:
+    """Resolve the correlation identity for kill-chain scoring.
+
+    One resolution point for the whole package (Phase 5 decision,
+    2026-10-23). Fallback order:
+
+    1. Authenticated agent ID: when the deployment's auth layer has
+       authenticated the agent, it stamps the request with
+       ``_rs_agent_id`` (the same injection pattern as the
+       pre-existing ``_rs_session_id`` transport field). The agent
+       ID alone is the correlation key, so a chain correlates
+       across connections, transport sessions, and time slices for
+       that agent.
+    2. Transport session ID (``_rs_session_id``): the session key is
+       the transport session, as in v1.
+    3. Client IP + upstream: the v1 default pairing.
+
+    Returns {"identity", "identity_source", "session_id",
+    "session_key"}. The scorer is keyed by session_key; history and
+    pivots are recorded under identity.
+    """
+    agent_id = str(req.get("_rs_agent_id") or "").strip()
+    session_id = str(req.get("_rs_session_id") or "").strip()
+    if agent_id:
+        return {
+            "identity": agent_id,
+            "identity_source": "agent_id",
+            "session_id": session_id,
+            "session_key": f"agent:{agent_id}",
+        }
+    if session_id:
+        return {
+            "identity": session_id,
+            "identity_source": "session_id",
+            "session_id": session_id,
+            "session_key": make_session_key(
+                client_ip, upstream_url, session_id=session_id),
+        }
+    return {
+        "identity": client_ip,
+        "identity_source": "ip_upstream",
+        "session_id": "",
+        "session_key": make_session_key(client_ip, upstream_url),
+    }
+
+
+def _kill_chain_state_dir(cfg: ProxyConfig) -> str:
+    """Directory for the kill-chain history/pivot JSONL stores.
+
+    The configured audit directory when audit persistence is set
+    (beside MCP_PROXY_AUDIT_FILE); otherwise the proxy state
+    directory that holds the telemetry install ID (~/.relayshield).
+    """
+    if cfg.audit_file:
+        return os.path.dirname(os.path.abspath(cfg.audit_file))
+    return os.path.dirname(os.path.abspath(cfg.telemetry_id_file))
 
 
 class ProxyHandler(BaseHTTPRequestHandler):
@@ -297,6 +359,25 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 "enabled": self.server.behavior.enabled,
             })
             return
+        if self.path.startswith("/_rs/killchain"):
+            # Kill-chain score history: scored sessions per
+            # correlation identity over a comparison window
+            # (24h | 7d | 30d), with count/max/mean aggregates over
+            # session peak scores. Same posture as the other
+            # /_rs admin reads: no credential check, operator
+            # surface only.
+            from urllib.parse import urlparse, parse_qs
+            qs = parse_qs(urlparse(self.path).query)
+            identity = (qs.get("identity", [""])[0] or "").strip() \
+                or None
+            window = (qs.get("window", ["24h"])[0] or "24h")
+            result = self.server.kill_chain_history.query(
+                identity=identity, window=window)
+            result["enabled"] = self.server.kill_chain.enabled
+            result["history_path"] = \
+                self.server.kill_chain_history.persist_path
+            self._send_json(result)
+            return
         if self.path == "/_rs/policy":
             self._send_json(self.server.policy.summary())
             return
@@ -448,6 +529,57 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.server.reputation.record_quarantine(
                 upstream_url, "auto-quarantine: poisoned discovery response")
 
+    def _record_kill_chain_outcome(self, corr: dict, upstream_url: str,
+                                   tool_name: str, seq_result: dict,
+                                   indicators: dict = None,
+                                   source: str = "call"):
+        """Persist a scored chain: history record + pivot registration.
+
+        Called for every non-allow sequence verdict (flag or block)
+        from either hook. History is recorded unconditionally (it is
+        the /_rs/killchain data source); a pivot is registered only
+        when the chain actually observed external endpoints or
+        indicators worth pivoting on. Failures are logged, never
+        raised into the request path.
+        """
+        verdict = seq_result.get("verdict")
+        if verdict not in ("flag", "block"):
+            return
+        seq_detail = seq_result.get("sequence", {})
+        try:
+            self.server.kill_chain_history.record(
+                identity=corr["identity"],
+                identity_source=corr["identity_source"],
+                session_key=corr["session_key"],
+                session_id=corr["session_id"],
+                server=upstream_url,
+                tool=tool_name,
+                score=seq_result.get("risk_score", 0.0),
+                stages=seq_detail.get("stages_seen", []),
+                decision=verdict,
+                chain=seq_detail.get("chain", 1),
+                source=source,
+            )
+        except Exception as exc:
+            log.error("kill-chain history record error: %s", exc)
+        indicators = indicators or {}
+        hosts = indicators.get("hosts", [])
+        if hosts or indicators.get("urls") or indicators.get("domains") \
+                or indicators.get("ips"):
+            try:
+                self.server.kill_chain_pivots.register(
+                    identity=corr["identity"],
+                    session_key=corr["session_key"],
+                    server=upstream_url,
+                    tool=tool_name,
+                    source=source,
+                    indicators=indicators,
+                    stages=seq_detail.get("stages_seen", []),
+                    score=seq_result.get("risk_score", 0.0),
+                )
+            except Exception as exc:
+                log.error("kill-chain pivot register error: %s", exc)
+
     def _handle_tools_call(self, req: dict, req_id, cfg: ProxyConfig,
                            screener: Screener):
         params = req.get("params") or {}
@@ -590,6 +722,33 @@ class ProxyHandler(BaseHTTPRequestHandler):
             except Exception as exc:
                 log.error("behavior tracker error: %s", exc)
 
+        # Phase 5: kill-chain sequence scoring runs on every call,
+        # even when TI screening is disabled. It scores the session's
+        # stage progression (recon -> access -> staging -> exfil),
+        # not the call in isolation. Correlation identity resolves
+        # in one place (resolve_correlation_identity): an
+        # authenticated agent ID when the deployment stamps one,
+        # else the transport session ID, else the (agent IP,
+        # upstream) pair as in behavior.py.
+        corr = resolve_correlation_identity(req, agent_id, upstream_url)
+        session_key = corr["session_key"]
+        sequence_result = {"verdict": "allow",
+                           "poison_category": "clean",
+                           "reasons": [], "risk_score": 0.0}
+        if self.server.kill_chain.enabled:
+            try:
+                sequence_result = self.server.kill_chain.observe_call(
+                    session_key, tool_name, arguments,
+                    server_url=upstream_url)
+                if sequence_result.get("verdict") in ("flag", "block"):
+                    indicators = extract_indicators(arguments)
+                    indicators["hosts"] = _external_endpoints(arguments)
+                    self._record_kill_chain_outcome(
+                        corr, upstream_url, tool_name, sequence_result,
+                        indicators=indicators, source="call")
+            except Exception as exc:
+                log.error("kill-chain scorer error: %s", exc)
+
         total_ms = (time.monotonic() - t0) * 1000
         log.info(json.dumps({
             "event": "tools_call",
@@ -603,6 +762,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
             "behavior_category": behavior_result.get("poison_category"),
             "behavior_reasons": behavior_result.get("reasons", []),
             "risk_score": round(behavior_result.get("risk_score", 0.0), 1),
+            "kill_chain_verdict": sequence_result.get("verdict"),
+            "kill_chain_category": sequence_result.get("poison_category"),
+            "kill_chain_reasons": sequence_result.get("reasons", []),
+            "sequence_score": round(
+                sequence_result.get("risk_score", 0.0), 1),
             "screen_ms": round(screen_ms, 1),
             "total_ms": round(total_ms, 1),
             "screening_enabled": cfg.screening_enabled,
@@ -638,6 +802,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         f"behavioral risk {risk:.1f}")
         else:
             reputation.record_clean_call(upstream_url)
+
+        # Phase 5: kill-chain flags feed server reputation as attack
+        # chains, like behavioral attack-chain flags do. Kill-chain
+        # blocks are handled after TI screening below, so a TI block
+        # on the same call keeps its own signed verdict.
+        if sequence_result.get("verdict") == "flag":
+            for reason in sequence_result.get("reasons", []):
+                reputation.record_attack_chain(upstream_url, reason)
 
         if verdict.get("verdict") == "block":
             # Phase 2.5: issue a signed verdict tying the block to TI
@@ -691,6 +863,66 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 },
             )
 
+        if sequence_result.get("verdict") == "block":
+            # Phase 5: the session completed a kill-chain progression.
+            # Block with a signed verdict in the TI block shape, with
+            # the chain explanation as the evidence.
+            signer = self.server.signer
+            seq_detail = sequence_result.get("sequence", {})
+            evidence = [{
+                "type": "kill_chain",
+                "id": f"chain-{seq_detail.get('chain', 1)}",
+                "detail": seq_detail.get("explanation", ""),
+            }]
+            poison_category = sequence_result.get(
+                "poison_category", "kill_chain")
+            signed = signer.issue(
+                decision="block",
+                tool_name=tool_name,
+                content_hash=content_hash_of(arguments),
+                evidence=evidence,
+                score=int(sequence_result.get("risk_score", 0.0)),
+                reasons=sequence_result.get("reasons", []),
+                poison_category=poison_category,
+            )
+            self.server.telemetry.record(poison_category, "call")
+            self.server.audit.record(
+                agent_id, upstream_url, tool_name, arguments,
+                decision="block", poison_category=poison_category,
+                reasons=sequence_result.get("reasons", []),
+                evidence=evidence,
+                risk_score=sequence_result.get("risk_score", 0.0),
+                policy_decision=policy_decision,
+                duration_ms=total_ms,
+            )
+            # Quarantine coupling (Phase 5 decision, 2026-10-23): a
+            # sequence block feeds the quarantine mechanism exactly
+            # the way a threat-intel block does in _screen_result:
+            # flag the neighbor with the verdict evidence, run
+            # quarantine evaluation, and record the quarantine in
+            # the reputation graph when the threshold is reached.
+            neighbors.flag(
+                upstream_url,
+                f"kill-chain sequence block on '{tool_name}'",
+                [e["detail"] for e in evidence])
+            if quarantine.evaluate(upstream_url, evidence=evidence):
+                reputation.record_quarantine(
+                    upstream_url,
+                    "auto-quarantine: kill-chain sequence block")
+            return _error_response(
+                req_id,
+                ERR_BLOCKED_BY_POLICY,
+                f"Blocked by RelayShield: tool '{tool_name}' completed "
+                f"a kill-chain sequence in this session.",
+                {
+                    "tool": tool_name,
+                    "score": sequence_result.get("risk_score", 0),
+                    "poison_category": poison_category,
+                    "reasons": sequence_result.get("reasons", []),
+                    "verdict": signed,
+                },
+            )
+
         # Clean: forward to upstream.
         try:
             upstream_resp = _forward_jsonrpc(cfg.upstream_url, req)
@@ -702,8 +934,53 @@ class ProxyHandler(BaseHTTPRequestHandler):
             upstream_resp["id"] = req_id
 
         # Phase 2: screen the tool *result* for poisoned content.
-        self._screen_result(upstream_url, tool_name, upstream_resp,
-                            cfg, screener, neighbors, quarantine)
+        # A result-side kill-chain completion at block level holds
+        # the response (Phase 5 decision, 2026-10-23): _screen_result
+        # returns a hold dict and the caller gets the block error
+        # shape with the signed kill-chain verdict instead of the
+        # upstream response.
+        hold = self._screen_result(upstream_url, tool_name, upstream_resp,
+                                   cfg, screener, neighbors, quarantine,
+                                   corr=corr)
+        if hold is not None:
+            kc_result = hold["kc_result"]
+            signer = self.server.signer
+            poison_category = kc_result.get(
+                "poison_category", "kill_chain")
+            signed = signer.issue(
+                decision="block",
+                tool_name=tool_name,
+                content_hash=content_hash_of(upstream_resp),
+                evidence=hold["evidence"],
+                score=int(kc_result.get("risk_score", 0.0)),
+                reasons=kc_result.get("reasons", []),
+                poison_category=poison_category,
+            )
+            self.server.telemetry.record(poison_category, "result")
+            self.server.audit.record(
+                agent_id, upstream_url, tool_name, arguments,
+                decision="block", poison_category=poison_category,
+                reasons=kc_result.get("reasons", []),
+                evidence=hold["evidence"],
+                risk_score=kc_result.get("risk_score", 0.0),
+                policy_decision=policy_decision,
+                duration_ms=(time.monotonic() - t0) * 1000,
+            )
+            return _error_response(
+                req_id,
+                ERR_BLOCKED_BY_POLICY,
+                f"Blocked by RelayShield: result of tool '{tool_name}' "
+                f"completed a kill-chain sequence in this session; "
+                f"the response was held.",
+                {
+                    "tool": tool_name,
+                    "score": kc_result.get("risk_score", 0),
+                    "poison_category": poison_category,
+                    "reasons": kc_result.get("reasons", []),
+                    "verdict": signed,
+                    "held_result": True,
+                },
+            )
 
         # Phase 4: audit the allowed call.
         self.server.audit.record(
@@ -721,18 +998,92 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
     def _screen_result(self, upstream_url: str, tool_name: str,
                        upstream_resp: dict, cfg: ProxyConfig,
-                       screener: Screener, neighbors, quarantine):
-        """Screen an upstream tool result; flag/quarantine the neighbor."""
+                       screener: Screener, neighbors, quarantine,
+                       corr: dict = None):
+        """Screen an upstream tool result; flag/quarantine the neighbor.
+
+        Returns a hold dict when a result-side kill-chain completion
+        reaches block level (the caller then replaces the response
+        with the block error); otherwise returns None and the
+        response is delivered as before. Sub-block sequence scores
+        still flag and deliver.
+        """
         if not cfg.result_screening_enabled:
-            return
+            return None
         try:
             result_verdict = screener.screen_tool_result(upstream_resp)
         except Exception as exc:
             # Fail-open for the proxy itself: log and keep the response.
             log.error("result screener error: %s", exc)
-            return
+            return None
+        hold = None
+        # Phase 5: feed external endpoints referenced by the result
+        # to the kill-chain scorer: a result steering the session to
+        # a fresh external endpoint after access/staging progress is
+        # an exfiltration-stage observation. A chain completed here
+        # at block level HOLDS the response (Phase 5 decision,
+        # 2026-10-23): the caller receives the signed kill-chain
+        # block instead of the result. The block also feeds
+        # quarantine, mirroring the threat-intel path below.
+        if self.server.kill_chain.enabled and corr is not None:
+            try:
+                from urllib.parse import urlsplit
+                indicators = extract_indicators(upstream_resp)
+                hosts = sorted({
+                    urlsplit(u).hostname or ""
+                    for u in indicators.get("urls", [])} - {""})
+                if hosts:
+                    kc_result = self.server.kill_chain.observe_result(
+                        corr["session_key"], hosts, tool_name=tool_name)
+                    kc_verdict = kc_result.get("verdict")
+                    if kc_verdict in ("flag", "block"):
+                        indicators["hosts"] = hosts
+                        self._record_kill_chain_outcome(
+                            corr, upstream_url, tool_name, kc_result,
+                            indicators=indicators, source="result")
+                    if kc_verdict == "block":
+                        seq_detail = kc_result.get("sequence", {})
+                        evidence = [{
+                            "type": "kill_chain",
+                            "id": f"chain-{seq_detail.get('chain', 1)}",
+                            "detail": seq_detail.get("explanation", ""),
+                        }]
+                        neighbors.flag(
+                            upstream_url,
+                            f"kill-chain sequence completed by result "
+                            f"of '{tool_name}'",
+                            [e["detail"] for e in evidence])
+                        if quarantine.evaluate(
+                                upstream_url, evidence=evidence):
+                            self.server.reputation.record_quarantine(
+                                upstream_url,
+                                "auto-quarantine: kill-chain sequence "
+                                "in tool result")
+                        log.warning(json.dumps({
+                            "event": "kill_chain_result_block",
+                            "tool": tool_name,
+                            "upstream": upstream_url,
+                            "verdict": kc_verdict,
+                            "reasons": kc_result.get("reasons", []),
+                            "sequence_score": kc_result.get(
+                                "risk_score", 0.0),
+                        }))
+                        hold = {"kc_result": kc_result,
+                                "evidence": evidence}
+                    elif kc_verdict == "flag":
+                        log.warning(json.dumps({
+                            "event": "kill_chain_result_flag",
+                            "tool": tool_name,
+                            "upstream": upstream_url,
+                            "verdict": kc_verdict,
+                            "reasons": kc_result.get("reasons", []),
+                            "sequence_score": kc_result.get(
+                                "risk_score", 0.0),
+                        }))
+            except Exception as exc:
+                log.error("kill-chain result hook error: %s", exc)
         if result_verdict.get("verdict") != "flagged":
-            return
+            return hold
         reasons = result_verdict.get("reasons", [])
         details = result_verdict.get("details", {})
         kit_ids = result_verdict.get("kit_ids", [])
@@ -793,6 +1144,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         if quarantine.evaluate(upstream_url, evidence=evidence):
             reputation.record_quarantine(
                 upstream_url, "auto-quarantine: poisoned neighbor")
+        return hold
 
 
 class ProxyServer(HTTPServer):
@@ -825,6 +1177,25 @@ class ProxyServer(HTTPServer):
         # Phase 4: policy enforcement + signed audit trail. The audit
         # trail shares the verdict signer's identity.
         self.policy = PolicyEngine(cfg.policy_file)
+        # Phase 5: kill-chain sequence scoring. Toggles come from the
+        # policy file's sequence_scoring section when one is present,
+        # else from MCP_PROXY_KILL_CHAIN_* environment variables.
+        kc_section = self.policy.sequence_scoring_section()
+        if kc_section:
+            kc_config = SequenceScoringConfig.from_dict(kc_section)
+        else:
+            kc_config = SequenceScoringConfig.from_env()
+        self.kill_chain = KillChainScorer(kc_config)
+        # Phase 5 stores: scored-chain history (the /_rs/killchain
+        # data source) and corpus-pivot registrations, as JSONL
+        # beside the audit file or in the proxy state directory.
+        kc_dir = _kill_chain_state_dir(cfg)
+        history_path = cfg.kill_chain_history_file or os.path.join(
+            kc_dir, "kill_chain_history.jsonl")
+        pivots_path = cfg.kill_chain_pivots_file or os.path.join(
+            kc_dir, "kill_chain_pivots.jsonl")
+        self.kill_chain_history = ChainHistoryStore(history_path)
+        self.kill_chain_pivots = PivotRegistry(pivots_path)
         self.schema_store = SchemaStore()
         self.audit = AuditTrail(capacity=cfg.audit_capacity,
                                 persist_path=cfg.audit_file)

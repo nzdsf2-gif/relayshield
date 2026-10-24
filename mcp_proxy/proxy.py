@@ -530,34 +530,38 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         f"Blocked by RelayShield: argument validation failed: {blocking[0]['message']}",
                         {"tool": tool_name, "violations": blocking},
                     )
-            log.warning(json.dumps({
-                "event": "tools_call_blocked_policy",
-                "tool": tool_name,
-                "agent": agent_id,
-                "reasons": policy_result.get("reasons", []),
-            }))
-            self.server.audit.record(
-                agent_id, upstream_url, tool_name, arguments,
-                decision="block",
-                poison_category=policy_result.get(
-                    "poison_category", "policy_deny"),
-                reasons=policy_result.get("reasons", []),
-                evidence=signed.get("evidence", []),
-                policy_decision="deny",
-            )
-            return _error_response(
-                req_id,
-                ERR_BLOCKED_BY_POLICY,
-                f"Blocked by RelayShield policy: "
-                f"{'; '.join(policy_result.get('reasons', []))}",
-                {
+            # Policy deny: audit the block and return the signed
+            # verdict issued above. This tail is gated on the deny
+            # decision: `signed` exists only on that path.
+            if policy_result.get("decision") == "deny":
+                log.warning(json.dumps({
+                    "event": "tools_call_blocked_policy",
                     "tool": tool_name,
-                    "poison_category": policy_result.get(
-                        "poison_category", "policy_deny"),
+                    "agent": agent_id,
                     "reasons": policy_result.get("reasons", []),
-                    "verdict": signed,
-                },
-            )
+                }))
+                self.server.audit.record(
+                    agent_id, upstream_url, tool_name, arguments,
+                    decision="block",
+                    poison_category=policy_result.get(
+                        "poison_category", "policy_deny"),
+                    reasons=policy_result.get("reasons", []),
+                    evidence=signed.get("evidence", []),
+                    policy_decision="deny",
+                )
+                return _error_response(
+                    req_id,
+                    ERR_BLOCKED_BY_POLICY,
+                    f"Blocked by RelayShield policy: "
+                    f"{'; '.join(policy_result.get('reasons', []))}",
+                    {
+                        "tool": tool_name,
+                        "poison_category": policy_result.get(
+                            "poison_category", "policy_deny"),
+                        "reasons": policy_result.get("reasons", []),
+                        "verdict": signed,
+                    },
+                )
         policy_decision = policy_result.get("decision", "allow")
 
         verdict = {"verdict": "allow", "level": "unknown",

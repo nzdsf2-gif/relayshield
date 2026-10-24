@@ -1,0 +1,1225 @@
+"""Transparent MCP proxy firewall.
+
+Speaks JSON-RPC 2.0 over HTTP. MCP clients (agents) connect to this
+proxy as if it were the MCP server. The proxy forwards requests to
+the configured upstream server, screening tools/call invocations
+against RelayShield threat intelligence first.
+
+Supported methods: initialize, tools/list, tools/call.
+Notifications (no id) are forwarded fire-and-forget.
+"""
+
+import json
+import logging
+import os
+import time
+import urllib.request
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+from .config import ProxyConfig
+from .schema_validator import SchemaStore, validate_arguments
+from .discovery import DISCOVERY_METHODS, screen_discovery, taxonomy_evidence
+from .taxonomy import TAXONOMY_VERSION
+from .audit import AuditTrail
+from .behavior import BehaviorTracker
+from .neighbor import NeighborRegistry
+from .policy import PolicyEngine
+from .quarantine import QuarantineManager
+from .reputation import ReputationStore
+from .kill_chain_store import ChainHistoryStore, PivotRegistry
+from .screener import Screener, extract_indicators
+from .sequence_scoring import (KillChainScorer, SequenceScoringConfig,
+                               _external_endpoints, make_session_key)
+from .telemetry import Telemetry
+from .verdicts import VerdictSigner, content_hash_of
+
+log = logging.getLogger(__name__)
+
+# MCP error codes (JSON-RPC 2.0 compatible).
+ERR_BLOCKED_BY_POLICY = -32001
+ERR_SERVER_QUARANTINED = -32002
+
+
+def _forward_jsonrpc(upstream_url: str, payload: dict, timeout: float = 30.0) -> dict:
+    """Forward a JSON-RPC payload to the upstream server."""
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        upstream_url,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        raw = resp.read()
+    if not raw.strip():
+        return {}
+    return json.loads(raw)
+
+
+def _error_response(req_id, code: int, message: str, data=None) -> dict:
+    err = {"code": code, "message": message}
+    if data is not None:
+        err["data"] = data
+    return {"jsonrpc": "2.0", "id": req_id, "error": err}
+
+
+def resolve_correlation_identity(req: dict, client_ip: str,
+                                 upstream_url: str) -> dict:
+    """Resolve the correlation identity for kill-chain scoring.
+
+    One resolution point for the whole package (Phase 5 decision,
+    2026-10-23). Fallback order:
+
+    1. Authenticated agent ID: when the deployment's auth layer has
+       authenticated the agent, it stamps the request with
+       ``_rs_agent_id`` (the same injection pattern as the
+       pre-existing ``_rs_session_id`` transport field). The agent
+       ID alone is the correlation key, so a chain correlates
+       across connections, transport sessions, and time slices for
+       that agent.
+    2. Transport session ID (``_rs_session_id``): the session key is
+       the transport session, as in v1.
+    3. Client IP + upstream: the v1 default pairing.
+
+    Returns {"identity", "identity_source", "session_id",
+    "session_key"}. The scorer is keyed by session_key; history and
+    pivots are recorded under identity.
+    """
+    agent_id = str(req.get("_rs_agent_id") or "").strip()
+    session_id = str(req.get("_rs_session_id") or "").strip()
+    if agent_id:
+        return {
+            "identity": agent_id,
+            "identity_source": "agent_id",
+            "session_id": session_id,
+            "session_key": f"agent:{agent_id}",
+        }
+    if session_id:
+        return {
+            "identity": session_id,
+            "identity_source": "session_id",
+            "session_id": session_id,
+            "session_key": make_session_key(
+                client_ip, upstream_url, session_id=session_id),
+        }
+    return {
+        "identity": client_ip,
+        "identity_source": "ip_upstream",
+        "session_id": "",
+        "session_key": make_session_key(client_ip, upstream_url),
+    }
+
+
+def _kill_chain_state_dir(cfg: ProxyConfig) -> str:
+    """Directory for the kill-chain history/pivot JSONL stores.
+
+    The configured audit directory when audit persistence is set
+    (beside MCP_PROXY_AUDIT_FILE); otherwise the proxy state
+    directory that holds the telemetry install ID (~/.relayshield).
+    """
+    if cfg.audit_file:
+        return os.path.dirname(os.path.abspath(cfg.audit_file))
+    return os.path.dirname(os.path.abspath(cfg.telemetry_id_file))
+
+
+class ProxyHandler(BaseHTTPRequestHandler):
+    """HTTP handler for MCP JSON-RPC traffic."""
+
+    server_version = "RelayShield-MCP-Proxy/0.1.0"
+
+    def log_message(self, fmt, *args):
+        # Route through logging instead of stderr.
+        log.info("%s - %s", self.address_string(), fmt % args)
+
+    def _send_json(self, obj: dict, status: int = 200):
+        body = json.dumps(obj).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self):
+        # Demo scenario runner
+        if self.path == "/_rs/demo/run":
+            try:
+                length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(length).decode('utf-8')
+                data = json.loads(body)
+                scenario_id = data.get('scenario', 0)
+                
+                # Define scenarios with detailed verdicts
+                scenarios = {
+                    1: {"name": "Clean traffic", "tool": "search_docs",
+                        "args": {"query": "refund policy"},
+                        "verdict": "ALLOW", "category": "clean",
+                        "cause_codes": ["NO_INDICATORS"],
+                        "detail": "No screenable indicators in tool arguments"},
+                    2: {"name": "Prompt injection", "tool": "fetch_page",
+                        "args": {"url": "https://docs.internal/help"},
+                        "verdict": "BLOCK", "category": "ssrf_internal_url",
+                        "cause_codes": ["SSRF_INTERNAL", "PROTOCOL_PIVOT"],
+                        "detail": "Tool argument URL targets internal infrastructure"},
+                    3: {"name": "Kit fingerprint", "tool": "render_widget",
+                        "args": {"widget": "checkout"},
+                        "verdict": "BLOCK", "category": "kit_match",
+                        "cause_codes": ["KIT_FINGERPRINT_MATCH"],
+                        "detail": "Response matches known phishing kit fingerprint"},
+                    4: {"name": "PII leak", "tool": "get_customer",
+                        "args": {"customer_id": "42"},
+                        "verdict": "FLAG", "category": "pii_leak",
+                        "cause_codes": ["PII_SSN_DETECTED"],
+                        "detail": "Unredacted SSN pattern in tool response"},
+                    7: {"name": "OAuth tampering", "tool": "start_oauth",
+                        "args": {"auth_url": "https://evil-auth.example.net/o/oauth2/auth?client_id=demo123"},
+                        "verdict": "BLOCK", "category": "oauth_tampering",
+                        "cause_codes": ["OAUTH_TAMPERING", "DOMAIN_MISMATCH"],
+                        "detail": "OAuth path mimics Google on foreign domain"},
+                    8: {"name": "Credential exfiltration", "tool": "get_session",
+                        "args": {"session": "current"},
+                        "verdict": "FLAG", "category": "credential_exfiltration",
+                        "cause_codes": ["JWT_EXFILTRATION"],
+                        "detail": "JWT bound for non-IdP domain"},
+                    15: {"name": "SSRF redirect chain", "tool": "fetch_page",
+                         "args": {"url": "https://bit.ly/docs-help"},
+                         "verdict": "BLOCK", "category": "ssrf_redirect_chain",
+                         "cause_codes": ["SSRF_REDIRECT_TO_INTERNAL"],
+                         "detail": "Redirect chain leads to internal infrastructure"},
+                    16: {"name": "DNS rebinding", "tool": "fetch_page",
+                         "args": {"url": "https://rebind.example.com/data"},
+                         "verdict": "BLOCK", "category": "dns_rebinding",
+                         "cause_codes": ["DNS_REBINDING_DETECTED"],
+                         "detail": "DNS resolved to external then internal IP"},
+                    17: {"name": "Deep document $ref", "tool": "fetch_page",
+                         "args": {"url": "https://api.example.com/openapi.json"},
+                         "verdict": "BLOCK", "category": "embedded_url_ssrf",
+                         "cause_codes": ["EMBEDDED_URL_SSRF"],
+                         "detail": "OpenAPI $ref points to internal host"},
+                }
+                
+                scn = scenarios.get(scenario_id, {"name": "Unknown", "tool": "unknown", "args": {}, "expect": "unknown"})
+                
+                # Run the screening (simplified - uses the proxy's screener)
+                # For now, return the scenario definition
+                # Full integration would call the actual screening pipeline
+                # Convert cause codes to objects for dashboard
+                cause_objs = [
+                    {"code": code, "description": code.replace("_", " ").title(), "detail": scn["detail"]}
+                    for code in scn["cause_codes"]
+                ]
+                self._send_json({
+                    "scenario": scenario_id,
+                    "name": scn["name"],
+                    "tool": scn["tool"],
+                    "args": scn["args"],
+                    "status": "completed",
+                    "verdict": scn["verdict"],
+                    "poison_category": scn["category"],
+                    "cause_codes": cause_objs,
+                    "detail": scn["detail"],
+                    "evidence": [scn["detail"]],
+                    "confidence": 95,
+                })
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+            return
+        # Pre-deployment scanner endpoint
+        if self.path == "/_rs/scan":
+            try:
+                length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(length).decode('utf-8')
+                data = json.loads(body)
+                url = data.get('url', '')
+                if not url:
+                    self._send_json({"error": "URL required"}, 400)
+                    return
+                from .tool_scanner import scan_tools, check_poppy_json
+                from urllib.parse import urlparse
+                import urllib.request
+                # Route domain-only URLs to poppy.json checker (PAP)
+                parsed = urlparse(url)
+                if not parsed.path or parsed.path == "/":
+                    domain = parsed.netloc or parsed.path
+                    domain = domain.split(":")[0]  # strip port
+                    findings = check_poppy_json(domain)
+                    self._send_json({
+                        "url": url,
+                        "tool_count": 0,
+                        "findings": findings
+                    })
+                    return
+                # Fetch tools/list for MCP servers
+                req_data = json.dumps({
+                    "jsonrpc": "2.0", "id": 1,
+                    "method": "tools/list", "params": {}
+                }).encode('utf-8')
+                req = urllib.request.Request(
+                    url, data=req_data,
+                    headers={'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream'}
+                )
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    result = json.loads(resp.read().decode('utf-8'))
+                tools = result.get('result', {}).get('tools', [])
+                findings = scan_tools(tools, source=url)
+                self._send_json({
+                    "url": url,
+                    "tool_count": len(tools),
+                    "findings": findings
+                })
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+            return
+        cfg: ProxyConfig = self.server.cfg
+        screener: Screener = self.server.screener
+
+        # Admin endpoints (not MCP traffic).
+        if self.path.startswith("/_rs/"):
+            self._handle_admin(cfg)
+            return
+
+        length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length) if length else b"{}"
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            self._send_json(
+                _error_response(None, -32700, "Parse error: invalid JSON"), 400
+            )
+            return
+
+        # Support batch requests minimally: process each in order.
+        is_batch = isinstance(payload, list)
+        requests = payload if is_batch else [payload]
+        responses = []
+
+        for req in requests:
+            resp = self._handle_one(req, cfg, screener)
+            if resp is not None:  # None = notification, no response
+                responses.append(resp)
+
+        if is_batch:
+            self._send_json(responses)
+        elif responses:
+            self._send_json(responses[0])
+        else:
+            # Notification only: 202 accepted, no body per JSON-RPC.
+            self.send_response(202)
+            self.end_headers()
+
+    def do_GET(self):
+        cfg: ProxyConfig = self.server.cfg
+        if self.path == "/_rs/dashboard" or self.path == "/_rs/dashboard/":
+            try:
+                html_path = os.path.join(
+                    os.path.dirname(os.path.abspath(__file__)),
+                    "dashboard.html")
+                print(f"DEBUG: Trying to read {html_path}", flush=True)
+                with open(html_path, "r", encoding="utf-8") as f:
+                    html = f.read().encode("utf-8")
+                print(f"DEBUG: Read {len(html)} bytes", flush=True)
+            except Exception as e:
+                print(f"DEBUG: Dashboard error: {type(e).__name__}: {e}", flush=True)
+                import traceback
+                traceback.print_exc()
+                self._send_json({"error": f"dashboard error: {e}"}, 500)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(html)))
+            self.end_headers()
+            self.wfile.write(html)
+            return
+        if self.path == "/_rs/neighbors":
+            neighbors = {
+                url: rep.to_dict()
+                for url, rep in self.server.neighbors.all().items()
+            }
+            self._send_json({"neighbors": neighbors,
+                             "quarantine_events":
+                                 self.server.quarantine.events[-20:],
+                             "verdict_pubkey":
+                                 self.server.signer.public_key_hex,
+                             "verdicts_signed":
+                                 self.server.signer.signing_enabled})
+            return
+        if self.path == "/_rs/health":
+            self._send_json({"status": "ok", "version":
+                             "RelayShield-MCP-Proxy/0.3.0",
+                             "verdicts_signed":
+                                 self.server.signer.signing_enabled,
+                             "behavior_enabled":
+                                 self.server.behavior.enabled})
+            return
+        if self.path == "/_rs/reputation":
+            self._send_json(self.server.reputation.summary())
+            return
+        if self.path == "/_rs/behavior":
+            self._send_json({
+                "agents": self.server.behavior.profiles(),
+                "enabled": self.server.behavior.enabled,
+            })
+            return
+        if self.path.startswith("/_rs/killchain"):
+            # Kill-chain score history: scored sessions per
+            # correlation identity over a comparison window
+            # (24h | 7d | 30d), with count/max/mean aggregates over
+            # session peak scores. Same posture as the other
+            # /_rs admin reads: no credential check, operator
+            # surface only.
+            from urllib.parse import urlparse, parse_qs
+            qs = parse_qs(urlparse(self.path).query)
+            identity = (qs.get("identity", [""])[0] or "").strip() \
+                or None
+            window = (qs.get("window", ["24h"])[0] or "24h")
+            result = self.server.kill_chain_history.query(
+                identity=identity, window=window)
+            result["enabled"] = self.server.kill_chain.enabled
+            result["history_path"] = \
+                self.server.kill_chain_history.persist_path
+            self._send_json(result)
+            return
+        if self.path == "/_rs/policy":
+            self._send_json(self.server.policy.summary())
+            return
+        if self.path == "/_rs/audit":
+            self._send_json(self.server.audit.summary())
+            return
+        if self.path.startswith("/_rs/audit/export"):
+            from urllib.parse import urlparse, parse_qs
+            qs = parse_qs(urlparse(self.path).query)
+            fmt = (qs.get("format", ["json"])[0] or "json").lower()
+            limit = int(qs.get("limit", ["1000"])[0] or 1000)
+            limit = max(1, min(limit, 10000))
+            if fmt == "csv":
+                body = self.server.audit.export_csv(
+                    limit=limit).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/csv; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            else:
+                self._send_json({
+                    "entries": self.server.audit.export_json(limit=limit),
+                    "chain": self.server.audit.verify_chain(),
+                })
+            return
+        self._send_json({"error": "not found"}, 404)
+
+    def _handle_admin(self, cfg: ProxyConfig):
+        """Admin actions: POST /_rs/neighbors/clear {"url": ...}."""
+        if self.path == "/_rs/neighbors/clear":
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length) if length else b"{}"
+            try:
+                body = json.loads(raw)
+            except json.JSONDecodeError:
+                body = {}
+            url = body.get("url", "")
+            ok = self.server.quarantine.clear(url)
+            if ok:
+                # Phase 3: reputation recovery on manual clear.
+                self.server.reputation.record_quarantine_cleared(
+                    url, "cleared by operator")
+            self._send_json({"cleared": ok, "url": url})
+            return
+        if self.path == "/_rs/policy/reload":
+            ok = self.server.policy.reload()
+            self._send_json({"reloaded": ok,
+                             "summary": self.server.policy.summary()})
+            return
+        self._send_json({"error": "unknown admin endpoint"}, 404)
+
+    def _handle_one(self, req: dict, cfg: ProxyConfig, screener: Screener):
+        req_id = req.get("id")
+        method = req.get("method", "")
+        is_notification = "id" not in req
+
+        # Notifications: forward fire-and-forget, no response.
+        if is_notification:
+            try:
+                _forward_jsonrpc(cfg.upstream_url, req)
+            except Exception as exc:
+                log.warning("notification forward failed: %s", exc)
+            return None
+
+        if method == "tools/call":
+            return self._handle_tools_call(req, req_id, cfg, screener)
+
+        # initialize, tools/list, and anything else: pure passthrough.
+        start = time.monotonic()
+        try:
+            upstream_resp = _forward_jsonrpc(cfg.upstream_url, req)
+        except Exception as exc:
+            log.error("upstream forward failed for %s: %s", method, exc)
+            return _error_response(req_id, -32603, "Upstream MCP server error",
+                                   {"detail": str(exc)})
+        elapsed_ms = (time.monotonic() - start) * 1000
+        log.info(json.dumps({
+            "event": "proxied",
+            "method": method,
+            "id": req_id,
+            "upstream_ms": round(elapsed_ms, 1),
+        }))
+        # Ensure the response carries our request id.
+        if isinstance(upstream_resp, dict) and "id" not in upstream_resp:
+            upstream_resp["id"] = req_id
+        # Discovery responses (initialize, tools/list, ...) are screened for the
+        # cacheScope / instructions-field attacks. Flag-only: the response is
+        # forwarded unchanged either way.
+        if method in DISCOVERY_METHODS:
+            self._screen_discovery(cfg.upstream_url, method, upstream_resp,
+                                   cfg, screener)
+        return upstream_resp
+
+    def _screen_discovery(self, upstream_url: str, method: str,
+                          upstream_resp: dict, cfg: ProxyConfig,
+                          screener: Screener):
+        """Screen a discovery response; flag the server, never block."""
+        # Store tool schemas for argument validation on tools/list
+        if method == "tools/list":
+            try:
+                tools = upstream_resp.get("result", {}).get("tools", [])
+                if tools and hasattr(self, 'schema_store'):
+                    self.schema_store.update_from_tools_list(tools)
+            except Exception:
+                pass
+        if not cfg.result_screening_enabled:
+            return
+        try:
+            verdict = screen_discovery(method, upstream_resp, screener)
+        except Exception as exc:
+            log.error("discovery screener error: %s", exc)
+            return
+        if verdict.get("verdict") != "flagged":
+            return
+        reasons = verdict["reasons"]
+        category = verdict["poison_category"]
+        ids = verdict["taxonomy_ids"]
+        evidence = [{"type": "ti_signal", "id": f"discovery-reason-{i}", "detail": r}
+                    for i, r in enumerate(reasons)]
+        # What makes the flag actionable: the matching taxonomy entries, with
+        # their mitigations, ride in the evidence of the signed verdict.
+        evidence += taxonomy_evidence(ids)
+        signed = self.server.signer.issue(
+            decision="flag", tool_name=method,
+            content_hash=content_hash_of(upstream_resp),
+            evidence=evidence, reasons=reasons, poison_category=category,
+            extra={"upstream": upstream_url, "taxonomy_ids": ids,
+                   "taxonomy_version": TAXONOMY_VERSION},
+        )
+        log.warning(json.dumps({
+            "event": "poisoned_discovery_detected",
+            "method": method, "upstream": upstream_url,
+            "poison_category": category, "reasons": reasons,
+            "taxonomy_ids": ids, "details": verdict["details"],
+            "verdict_signed": bool(signed.get("sig")),
+        }))
+        self.server.neighbors.flag(
+            upstream_url, f"poisoned {method} response",
+            [e["detail"] for e in evidence])
+        self.server.reputation.record_flag(upstream_url, f"{category}: {method}")
+        self.server.audit.record(
+            self.client_address[0], upstream_url, method, {},
+            decision="flag", poison_category=category,
+            reasons=reasons, evidence=evidence)
+        self.server.telemetry.record(category, "discovery", ids, upstream_url,
+                                     upstream_resp)
+        if self.server.quarantine.evaluate(upstream_url, evidence=evidence):
+            self.server.reputation.record_quarantine(
+                upstream_url, "auto-quarantine: poisoned discovery response")
+
+    def _record_kill_chain_outcome(self, corr: dict, upstream_url: str,
+                                   tool_name: str, seq_result: dict,
+                                   indicators: dict = None,
+                                   source: str = "call"):
+        """Persist a scored chain: history record + pivot registration.
+
+        Called for every non-allow sequence verdict (flag or block)
+        from either hook. History is recorded unconditionally (it is
+        the /_rs/killchain data source); a pivot is registered only
+        when the chain actually observed external endpoints or
+        indicators worth pivoting on. Failures are logged, never
+        raised into the request path.
+        """
+        verdict = seq_result.get("verdict")
+        if verdict not in ("flag", "block"):
+            return
+        seq_detail = seq_result.get("sequence", {})
+        try:
+            self.server.kill_chain_history.record(
+                identity=corr["identity"],
+                identity_source=corr["identity_source"],
+                session_key=corr["session_key"],
+                session_id=corr["session_id"],
+                server=upstream_url,
+                tool=tool_name,
+                score=seq_result.get("risk_score", 0.0),
+                stages=seq_detail.get("stages_seen", []),
+                decision=verdict,
+                chain=seq_detail.get("chain", 1),
+                source=source,
+            )
+        except Exception as exc:
+            log.error("kill-chain history record error: %s", exc)
+        indicators = indicators or {}
+        hosts = indicators.get("hosts", [])
+        if hosts or indicators.get("urls") or indicators.get("domains") \
+                or indicators.get("ips"):
+            try:
+                self.server.kill_chain_pivots.register(
+                    identity=corr["identity"],
+                    session_key=corr["session_key"],
+                    server=upstream_url,
+                    tool=tool_name,
+                    source=source,
+                    indicators=indicators,
+                    stages=seq_detail.get("stages_seen", []),
+                    score=seq_result.get("risk_score", 0.0),
+                )
+            except Exception as exc:
+                log.error("kill-chain pivot register error: %s", exc)
+
+    def _handle_tools_call(self, req: dict, req_id, cfg: ProxyConfig,
+                           screener: Screener):
+        params = req.get("params") or {}
+        tool_name = params.get("name", "")
+        arguments = params.get("arguments") or {}
+        upstream_url = cfg.upstream_url
+        neighbors = self.server.neighbors
+        quarantine = self.server.quarantine
+        behavior = self.server.behavior
+        reputation = self.server.reputation
+        t0 = time.monotonic()
+
+        # Phase 3: agent identity for behavioral baselining. The client
+        # IP is the available signal; deployments with authenticated
+        # agents should override this with a stable agent ID.
+        agent_id = self.client_address[0]
+
+        # Fail-closed: quarantined servers get no traffic at all.
+        if quarantine.is_quarantined(upstream_url):
+            log.warning(json.dumps({
+                "event": "tools_call_blocked_quarantined",
+                "tool": tool_name,
+                "upstream": upstream_url,
+            }))
+            self.server.audit.record(
+                agent_id, upstream_url, tool_name, arguments,
+                decision="block", poison_category="quarantined_server",
+                reasons=["upstream server is quarantined"],
+                policy_decision="",
+            )
+            return _error_response(
+                req_id,
+                ERR_SERVER_QUARANTINED,
+                "Blocked by RelayShield: upstream MCP server is quarantined "
+                "as a suspected poisoned neighbor. Clear the quarantine via "
+                "POST /_rs/neighbors/clear.",
+                {"tool": tool_name, "upstream": upstream_url},
+            )
+
+        # Phase 4: policy enforcement runs before TI screening. Policy
+        # denies are fast and deterministic: no network, no corpus.
+        policy = self.server.policy
+        policy_result = {"decision": "allow", "reasons": [],
+                         "poison_category": "clean"}
+        if policy.enabled:
+            try:
+                policy_result = policy.evaluate(
+                    agent_id, tool_name, upstream_url, arguments)
+            except Exception as exc:
+                log.error("policy engine error: %s", exc)
+        if policy_result.get("decision") == "deny":
+            signer = self.server.signer
+            signed = signer.issue(
+                decision="block",
+                tool_name=tool_name,
+                content_hash=content_hash_of(arguments),
+                evidence=[{"type": "policy_rule", "id": "policy-deny",
+                           "detail": r}
+                          for r in policy_result.get("reasons", [])],
+                reasons=policy_result.get("reasons", []),
+                poison_category=policy_result.get(
+                    "poison_category", "policy_deny"),
+            )
+
+        # Schema validation: check arguments against tool's declared JSON Schema.
+        # Catches malformed input that weak server-side validation would miss.
+        if hasattr(self.server, 'schema_store'):
+            schema = self.server.schema_store.get_schema(tool_name)
+            if schema:
+                is_valid, violations = validate_arguments(tool_name, arguments, schema)
+                blocking = [v for v in violations if v["severity"] in ("HIGH", "CRITICAL")]
+                if blocking:
+                    log.warning(json.dumps({
+                        "event": "tools_call_blocked_schema",
+                        "tool": tool_name,
+                        "violations": blocking,
+                    }))
+                    return _error_response(
+                        req_id, -32602,
+                        f"Blocked by RelayShield: argument validation failed: {blocking[0]['message']}",
+                        {"tool": tool_name, "violations": blocking},
+                    )
+            log.warning(json.dumps({
+                "event": "tools_call_blocked_policy",
+                "tool": tool_name,
+                "agent": agent_id,
+                "reasons": policy_result.get("reasons", []),
+            }))
+            self.server.audit.record(
+                agent_id, upstream_url, tool_name, arguments,
+                decision="block",
+                poison_category=policy_result.get(
+                    "poison_category", "policy_deny"),
+                reasons=policy_result.get("reasons", []),
+                evidence=signed.get("evidence", []),
+                policy_decision="deny",
+            )
+            return _error_response(
+                req_id,
+                ERR_BLOCKED_BY_POLICY,
+                f"Blocked by RelayShield policy: "
+                f"{'; '.join(policy_result.get('reasons', []))}",
+                {
+                    "tool": tool_name,
+                    "poison_category": policy_result.get(
+                        "poison_category", "policy_deny"),
+                    "reasons": policy_result.get("reasons", []),
+                    "verdict": signed,
+                },
+            )
+        policy_decision = policy_result.get("decision", "allow")
+
+        verdict = {"verdict": "allow", "level": "unknown",
+                   "reasons": ["screening disabled"]}
+        screen_ms = 0.0
+        if cfg.screening_enabled:
+            try:
+                s0 = time.monotonic()
+                verdict = screener.screen_tool_call(tool_name, arguments)
+                screen_ms = (time.monotonic() - s0) * 1000
+            except Exception as exc:
+                log.error("screener error: %s", exc)
+                verdict = {"verdict": "allow", "level": "unknown",
+                           "reasons": [f"screener error, allowed: {exc}"]}
+
+        # Phase 3: behavioral screening runs on every call, even when
+        # TI screening is disabled. It never blocks on its own; it
+        # flags, scores risk, and feeds the reputation graph.
+        behavior_result = {"verdict": "allow", "poison_category": "clean",
+                           "reasons": [], "risk_score": 0.0}
+        if behavior.enabled:
+            try:
+                behavior_result = behavior.check(
+                    agent_id, tool_name, arguments,
+                    server_url=upstream_url)
+            except Exception as exc:
+                log.error("behavior tracker error: %s", exc)
+
+        # Phase 5: kill-chain sequence scoring runs on every call,
+        # even when TI screening is disabled. It scores the session's
+        # stage progression (recon -> access -> staging -> exfil),
+        # not the call in isolation. Correlation identity resolves
+        # in one place (resolve_correlation_identity): an
+        # authenticated agent ID when the deployment stamps one,
+        # else the transport session ID, else the (agent IP,
+        # upstream) pair as in behavior.py.
+        corr = resolve_correlation_identity(req, agent_id, upstream_url)
+        session_key = corr["session_key"]
+        sequence_result = {"verdict": "allow",
+                           "poison_category": "clean",
+                           "reasons": [], "risk_score": 0.0}
+        if self.server.kill_chain.enabled:
+            try:
+                sequence_result = self.server.kill_chain.observe_call(
+                    session_key, tool_name, arguments,
+                    server_url=upstream_url)
+                if sequence_result.get("verdict") in ("flag", "block"):
+                    indicators = extract_indicators(arguments)
+                    indicators["hosts"] = _external_endpoints(arguments)
+                    self._record_kill_chain_outcome(
+                        corr, upstream_url, tool_name, sequence_result,
+                        indicators=indicators, source="call")
+            except Exception as exc:
+                log.error("kill-chain scorer error: %s", exc)
+
+        total_ms = (time.monotonic() - t0) * 1000
+        log.info(json.dumps({
+            "event": "tools_call",
+            "tool": tool_name,
+            "verdict": verdict.get("verdict"),
+            "poison_category": verdict.get("poison_category", "clean"),
+            "level": verdict.get("level"),
+            "score": verdict.get("score", 0),
+            "reasons": verdict.get("reasons", []),
+            "behavior_verdict": behavior_result.get("verdict"),
+            "behavior_category": behavior_result.get("poison_category"),
+            "behavior_reasons": behavior_result.get("reasons", []),
+            "risk_score": round(behavior_result.get("risk_score", 0.0), 1),
+            "kill_chain_verdict": sequence_result.get("verdict"),
+            "kill_chain_category": sequence_result.get("poison_category"),
+            "kill_chain_reasons": sequence_result.get("reasons", []),
+            "sequence_score": round(
+                sequence_result.get("risk_score", 0.0), 1),
+            "screen_ms": round(screen_ms, 1),
+            "total_ms": round(total_ms, 1),
+            "screening_enabled": cfg.screening_enabled,
+        }))
+
+        # Phase 3: behavioral flags feed server reputation. High risk
+        # scores can trigger quarantine evaluation.
+        if behavior_result.get("verdict") == "flag":
+            bcat = behavior_result.get("poison_category", "clean")
+            for reason in behavior_result.get("reasons", []):
+                if bcat == "attack_chain":
+                    reputation.record_attack_chain(upstream_url, reason)
+                else:
+                    reputation.record_behavior_anomaly(upstream_url,
+                                                       reason)
+            risk = behavior_result.get("risk_score", 0.0)
+            if risk >= cfg.behavior_quarantine_score:
+                log.warning(json.dumps({
+                    "event": "behavior_risk_quarantine",
+                    "tool": tool_name,
+                    "upstream": upstream_url,
+                    "risk_score": round(risk, 1),
+                    "threshold": cfg.behavior_quarantine_score,
+                }))
+                neighbors.flag(
+                    upstream_url,
+                    f"behavioral risk score {risk:.1f} reached "
+                    f"quarantine threshold",
+                    behavior_result.get("reasons", []))
+                if quarantine.evaluate(upstream_url):
+                    reputation.record_quarantine(
+                        upstream_url,
+                        f"behavioral risk {risk:.1f}")
+        else:
+            reputation.record_clean_call(upstream_url)
+
+        # Phase 5: kill-chain flags feed server reputation as attack
+        # chains, like behavioral attack-chain flags do. Kill-chain
+        # blocks are handled after TI screening below, so a TI block
+        # on the same call keeps its own signed verdict.
+        if sequence_result.get("verdict") == "flag":
+            for reason in sequence_result.get("reasons", []):
+                reputation.record_attack_chain(upstream_url, reason)
+
+        if verdict.get("verdict") == "block":
+            # Phase 2.5: issue a signed verdict tying the block to TI
+            # evidence. A copied proxy cannot forge this signature.
+            signer = self.server.signer
+            evidence = [
+                {"type": "ti_signal", "id": f"reason-{i}", "detail": r}
+                for i, r in enumerate(verdict.get("reasons", []))
+            ]
+            poison_category = verdict.get("poison_category", "clean")
+            signed = signer.issue(
+                decision="block",
+                tool_name=tool_name,
+                content_hash=content_hash_of(arguments),
+                evidence=evidence,
+                level=verdict.get("level", ""),
+                score=verdict.get("score", 0),
+                reasons=verdict.get("reasons", []),
+                poison_category=poison_category,
+            )
+            log.info(json.dumps({
+                "event": "tools_call_verdict",
+                "poison_category": poison_category,
+                "verdict_sig": signed.get("sig", "")[:16] + "..." if signed.get("sig") else "unsigned",
+                "signed": bool(signed.get("sig")),
+            }))
+            # Counts only: an argument can carry the customer's own data.
+            self.server.telemetry.record(poison_category, "call")
+            # Phase 4: audit the block decision.
+            self.server.audit.record(
+                agent_id, upstream_url, tool_name, arguments,
+                decision="block", poison_category=poison_category,
+                reasons=verdict.get("reasons", []),
+                evidence=evidence,
+                risk_score=behavior_result.get("risk_score", 0.0),
+                policy_decision=policy_decision,
+                duration_ms=total_ms,
+            )
+            return _error_response(
+                req_id,
+                ERR_BLOCKED_BY_POLICY,
+                f"Blocked by RelayShield: tool '{tool_name}' arguments "
+                f"flagged at level '{verdict.get('level')}'.",
+                {
+                    "tool": tool_name,
+                    "level": verdict.get("level"),
+                    "score": verdict.get("score", 0),
+                    "poison_category": poison_category,
+                    "reasons": verdict.get("reasons", []),
+                    "verdict": signed,
+                },
+            )
+
+        if sequence_result.get("verdict") == "block":
+            # Phase 5: the session completed a kill-chain progression.
+            # Block with a signed verdict in the TI block shape, with
+            # the chain explanation as the evidence.
+            signer = self.server.signer
+            seq_detail = sequence_result.get("sequence", {})
+            evidence = [{
+                "type": "kill_chain",
+                "id": f"chain-{seq_detail.get('chain', 1)}",
+                "detail": seq_detail.get("explanation", ""),
+            }]
+            poison_category = sequence_result.get(
+                "poison_category", "kill_chain")
+            signed = signer.issue(
+                decision="block",
+                tool_name=tool_name,
+                content_hash=content_hash_of(arguments),
+                evidence=evidence,
+                score=int(sequence_result.get("risk_score", 0.0)),
+                reasons=sequence_result.get("reasons", []),
+                poison_category=poison_category,
+            )
+            self.server.telemetry.record(poison_category, "call")
+            self.server.audit.record(
+                agent_id, upstream_url, tool_name, arguments,
+                decision="block", poison_category=poison_category,
+                reasons=sequence_result.get("reasons", []),
+                evidence=evidence,
+                risk_score=sequence_result.get("risk_score", 0.0),
+                policy_decision=policy_decision,
+                duration_ms=total_ms,
+            )
+            # Quarantine coupling (Phase 5 decision, 2026-10-23): a
+            # sequence block feeds the quarantine mechanism exactly
+            # the way a threat-intel block does in _screen_result:
+            # flag the neighbor with the verdict evidence, run
+            # quarantine evaluation, and record the quarantine in
+            # the reputation graph when the threshold is reached.
+            neighbors.flag(
+                upstream_url,
+                f"kill-chain sequence block on '{tool_name}'",
+                [e["detail"] for e in evidence])
+            if quarantine.evaluate(upstream_url, evidence=evidence):
+                reputation.record_quarantine(
+                    upstream_url,
+                    "auto-quarantine: kill-chain sequence block")
+            return _error_response(
+                req_id,
+                ERR_BLOCKED_BY_POLICY,
+                f"Blocked by RelayShield: tool '{tool_name}' completed "
+                f"a kill-chain sequence in this session.",
+                {
+                    "tool": tool_name,
+                    "score": sequence_result.get("risk_score", 0),
+                    "poison_category": poison_category,
+                    "reasons": sequence_result.get("reasons", []),
+                    "verdict": signed,
+                },
+            )
+
+        # Clean: forward to upstream.
+        try:
+            upstream_resp = _forward_jsonrpc(cfg.upstream_url, req)
+        except Exception as exc:
+            log.error("upstream tools/call failed: %s", exc)
+            return _error_response(req_id, -32603, "Upstream MCP server error",
+                                   {"detail": str(exc)})
+        if isinstance(upstream_resp, dict) and "id" not in upstream_resp:
+            upstream_resp["id"] = req_id
+
+        # Phase 2: screen the tool *result* for poisoned content.
+        # A result-side kill-chain completion at block level holds
+        # the response (Phase 5 decision, 2026-10-23): _screen_result
+        # returns a hold dict and the caller gets the block error
+        # shape with the signed kill-chain verdict instead of the
+        # upstream response.
+        hold = self._screen_result(upstream_url, tool_name, upstream_resp,
+                                   cfg, screener, neighbors, quarantine,
+                                   corr=corr)
+        if hold is not None:
+            kc_result = hold["kc_result"]
+            signer = self.server.signer
+            poison_category = kc_result.get(
+                "poison_category", "kill_chain")
+            signed = signer.issue(
+                decision="block",
+                tool_name=tool_name,
+                content_hash=content_hash_of(upstream_resp),
+                evidence=hold["evidence"],
+                score=int(kc_result.get("risk_score", 0.0)),
+                reasons=kc_result.get("reasons", []),
+                poison_category=poison_category,
+            )
+            self.server.telemetry.record(poison_category, "result")
+            self.server.audit.record(
+                agent_id, upstream_url, tool_name, arguments,
+                decision="block", poison_category=poison_category,
+                reasons=kc_result.get("reasons", []),
+                evidence=hold["evidence"],
+                risk_score=kc_result.get("risk_score", 0.0),
+                policy_decision=policy_decision,
+                duration_ms=(time.monotonic() - t0) * 1000,
+            )
+            return _error_response(
+                req_id,
+                ERR_BLOCKED_BY_POLICY,
+                f"Blocked by RelayShield: result of tool '{tool_name}' "
+                f"completed a kill-chain sequence in this session; "
+                f"the response was held.",
+                {
+                    "tool": tool_name,
+                    "score": kc_result.get("risk_score", 0),
+                    "poison_category": poison_category,
+                    "reasons": kc_result.get("reasons", []),
+                    "verdict": signed,
+                    "held_result": True,
+                },
+            )
+
+        # Phase 4: audit the allowed call.
+        self.server.audit.record(
+            agent_id, upstream_url, tool_name, arguments,
+            decision="allow",
+            poison_category=behavior_result.get(
+                "poison_category", "clean"),
+            reasons=behavior_result.get("reasons", []),
+            risk_score=behavior_result.get("risk_score", 0.0),
+            policy_decision=policy_decision,
+            duration_ms=(time.monotonic() - t0) * 1000,
+        )
+
+        return upstream_resp
+
+    def _screen_result(self, upstream_url: str, tool_name: str,
+                       upstream_resp: dict, cfg: ProxyConfig,
+                       screener: Screener, neighbors, quarantine,
+                       corr: dict = None):
+        """Screen an upstream tool result; flag/quarantine the neighbor.
+
+        Returns a hold dict when a result-side kill-chain completion
+        reaches block level (the caller then replaces the response
+        with the block error); otherwise returns None and the
+        response is delivered as before. Sub-block sequence scores
+        still flag and deliver.
+        """
+        if not cfg.result_screening_enabled:
+            return None
+        try:
+            result_verdict = screener.screen_tool_result(upstream_resp)
+        except Exception as exc:
+            # Fail-open for the proxy itself: log and keep the response.
+            log.error("result screener error: %s", exc)
+            return None
+        hold = None
+        # Phase 5: feed external endpoints referenced by the result
+        # to the kill-chain scorer: a result steering the session to
+        # a fresh external endpoint after access/staging progress is
+        # an exfiltration-stage observation. A chain completed here
+        # at block level HOLDS the response (Phase 5 decision,
+        # 2026-10-23): the caller receives the signed kill-chain
+        # block instead of the result. The block also feeds
+        # quarantine, mirroring the threat-intel path below.
+        if self.server.kill_chain.enabled and corr is not None:
+            try:
+                from urllib.parse import urlsplit
+                indicators = extract_indicators(upstream_resp)
+                hosts = sorted({
+                    urlsplit(u).hostname or ""
+                    for u in indicators.get("urls", [])} - {""})
+                if hosts:
+                    kc_result = self.server.kill_chain.observe_result(
+                        corr["session_key"], hosts, tool_name=tool_name)
+                    kc_verdict = kc_result.get("verdict")
+                    if kc_verdict in ("flag", "block"):
+                        indicators["hosts"] = hosts
+                        self._record_kill_chain_outcome(
+                            corr, upstream_url, tool_name, kc_result,
+                            indicators=indicators, source="result")
+                    if kc_verdict == "block":
+                        seq_detail = kc_result.get("sequence", {})
+                        evidence = [{
+                            "type": "kill_chain",
+                            "id": f"chain-{seq_detail.get('chain', 1)}",
+                            "detail": seq_detail.get("explanation", ""),
+                        }]
+                        neighbors.flag(
+                            upstream_url,
+                            f"kill-chain sequence completed by result "
+                            f"of '{tool_name}'",
+                            [e["detail"] for e in evidence])
+                        if quarantine.evaluate(
+                                upstream_url, evidence=evidence):
+                            self.server.reputation.record_quarantine(
+                                upstream_url,
+                                "auto-quarantine: kill-chain sequence "
+                                "in tool result")
+                        log.warning(json.dumps({
+                            "event": "kill_chain_result_block",
+                            "tool": tool_name,
+                            "upstream": upstream_url,
+                            "verdict": kc_verdict,
+                            "reasons": kc_result.get("reasons", []),
+                            "sequence_score": kc_result.get(
+                                "risk_score", 0.0),
+                        }))
+                        hold = {"kc_result": kc_result,
+                                "evidence": evidence}
+                    elif kc_verdict == "flag":
+                        log.warning(json.dumps({
+                            "event": "kill_chain_result_flag",
+                            "tool": tool_name,
+                            "upstream": upstream_url,
+                            "verdict": kc_verdict,
+                            "reasons": kc_result.get("reasons", []),
+                            "sequence_score": kc_result.get(
+                                "risk_score", 0.0),
+                        }))
+            except Exception as exc:
+                log.error("kill-chain result hook error: %s", exc)
+        if result_verdict.get("verdict") != "flagged":
+            return hold
+        reasons = result_verdict.get("reasons", [])
+        details = result_verdict.get("details", {})
+        kit_ids = result_verdict.get("kit_ids", [])
+
+        # Phase 2.5: build TI evidence entries, including kit fingerprints.
+        evidence = [
+            {"type": "ti_signal", "id": f"result-reason-{i}", "detail": r}
+            for i, r in enumerate(reasons)
+        ]
+        for kit_id in kit_ids:
+            entry = {"type": "kit_fingerprint", "id": kit_id,
+                     "detail": "scam-kit fingerprint in tool result"}
+            evidence.append(entry)
+        for ke in details.get("kit_evidence", []):
+            evidence.append({
+                "type": "kit_match",
+                "id": ke.get("kit_id", ""),
+                "detail": f"family={ke.get('family')} "
+                          f"verdict={ke.get('verdict')}",
+            })
+
+        # Issue a signed verdict for the poisoned-neighbor flag.
+        signer = self.server.signer
+        poison_category = result_verdict.get("poison_category", "clean")
+        signed = signer.issue(
+            decision="flag",
+            tool_name=tool_name,
+            content_hash=content_hash_of(upstream_resp),
+            evidence=evidence,
+            reasons=reasons,
+            poison_category=poison_category,
+            extra={"upstream": upstream_url, "kit_ids": kit_ids},
+        )
+
+        log.warning(json.dumps({
+            "event": "poisoned_result_detected",
+            "tool": tool_name,
+            "upstream": upstream_url,
+            "poison_category": poison_category,
+            "reasons": reasons,
+            "details": details,
+            "kit_ids": kit_ids,
+            "verdict_signed": bool(signed.get("sig")),
+        }))
+        self.server.telemetry.record(poison_category, "result", [], upstream_url,
+                                     upstream_resp)
+        neighbors.flag(upstream_url,
+                       f"poisoned tool result from '{tool_name}'",
+                       [e["detail"] for e in evidence])
+        # Phase 3: feed the reputation graph.
+        reputation = self.server.reputation
+        reputation.record_flag(upstream_url,
+                               f"{poison_category}: {tool_name}")
+        if result_verdict.get("kit_ids"):
+            reputation.record_ti_hit(
+                upstream_url,
+                f"kit fingerprint: {result_verdict['kit_ids'][0][:20]}...")
+        if quarantine.evaluate(upstream_url, evidence=evidence):
+            reputation.record_quarantine(
+                upstream_url, "auto-quarantine: poisoned neighbor")
+        return hold
+
+
+class ProxyServer(HTTPServer):
+    """HTTPServer carrying proxy config, screener, and neighbor state."""
+
+    def __init__(self, cfg: ProxyConfig):
+        self.cfg = cfg
+        self.screener = Screener(
+            api_base=cfg.rs_api_base,
+            api_key=cfg.rs_api_key,
+            timeout=cfg.screen_timeout,
+            block_levels=cfg.block_level_set,
+            kit_lookup_enabled=cfg.kit_lookup_enabled,
+            pii_screening_enabled=cfg.pii_screening_enabled,
+            oauth_screening_enabled=cfg.oauth_screening_enabled,
+        )
+        # Phase 2: neighbor reputation + quarantine.
+        self.neighbors = NeighborRegistry(screener=self.screener)
+        self.quarantine = QuarantineManager(
+            self.neighbors,
+            alert_webhook=cfg.alert_webhook,
+            auto_quarantine_after=cfg.quarantine_after,
+        )
+        # Phase 2.5: signed verdicts. The private key comes only from
+        # the environment; it is never logged or stored.
+        self.signer = VerdictSigner(cfg.signing_key_hex)
+        # Phase 3: behavioral baselining + server reputation graph.
+        self.behavior = BehaviorTracker(enabled=cfg.behavior_enabled)
+        self.reputation = ReputationStore()
+        # Phase 4: policy enforcement + signed audit trail. The audit
+        # trail shares the verdict signer's identity.
+        self.policy = PolicyEngine(cfg.policy_file)
+        # Phase 5: kill-chain sequence scoring. Toggles come from the
+        # policy file's sequence_scoring section when one is present,
+        # else from MCP_PROXY_KILL_CHAIN_* environment variables.
+        kc_section = self.policy.sequence_scoring_section()
+        if kc_section:
+            kc_config = SequenceScoringConfig.from_dict(kc_section)
+        else:
+            kc_config = SequenceScoringConfig.from_env()
+        self.kill_chain = KillChainScorer(kc_config)
+        # Phase 5 stores: scored-chain history (the /_rs/killchain
+        # data source) and corpus-pivot registrations, as JSONL
+        # beside the audit file or in the proxy state directory.
+        kc_dir = _kill_chain_state_dir(cfg)
+        history_path = cfg.kill_chain_history_file or os.path.join(
+            kc_dir, "kill_chain_history.jsonl")
+        pivots_path = cfg.kill_chain_pivots_file or os.path.join(
+            kc_dir, "kill_chain_pivots.jsonl")
+        self.kill_chain_history = ChainHistoryStore(history_path)
+        self.kill_chain_pivots = PivotRegistry(pivots_path)
+        self.schema_store = SchemaStore()
+        self.audit = AuditTrail(capacity=cfg.audit_capacity,
+                                persist_path=cfg.audit_file)
+        # Opt-in telemetry; a no-op object unless MCP_PROXY_TELEMETRY is set.
+        self.telemetry = Telemetry.from_config(cfg)
+        self.audit.signer = self.signer
+        super().__init__(("0.0.0.0", cfg.listen_port), ProxyHandler)
+        # Register (and TI-check) the upstream on startup.
+        if cfg.upstream_url:
+            self.neighbors.register(cfg.upstream_url)
+            self.reputation.get_or_create(cfg.upstream_url)
+
+
+def run():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+    cfg = ProxyConfig()
+    problems = cfg.validate()
+    if problems:
+        for p in problems:
+            log.error("config: %s", p)
+        raise SystemExit(1)
+    server = ProxyServer(cfg)
+    log.info("MCP proxy listening on :%d, upstream=%s, screening=%s",
+             cfg.listen_port, cfg.upstream_url, cfg.screening_enabled)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        log.info("shutting down")

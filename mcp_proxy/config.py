@@ -103,6 +103,15 @@ class ProxyConfig:
             os.environ.get("MCP_PROXY_AUDIT_CAPACITY", "10000")
         )
 
+        # Phase 5: kill-chain history and corpus-pivot stores. When
+        # unset, both default to files beside the audit file (or in
+        # the proxy state directory when no audit file is
+        # configured); see ProxyServer for the resolution.
+        self.kill_chain_history_file = os.environ.get(
+            "MCP_PROXY_KILL_CHAIN_HISTORY_FILE", "")
+        self.kill_chain_pivots_file = os.environ.get(
+            "MCP_PROXY_KILL_CHAIN_PIVOTS_FILE", "")
+
         # OPT-IN telemetry back to RelayShield. OFF BY DEFAULT: nothing is ever
         # sent unless this is set deliberately.
         #   off         nothing leaves the proxy (default)

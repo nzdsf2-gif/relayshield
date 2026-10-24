@@ -48,6 +48,12 @@ CAUSE_CODES = {
         "kind": "threat",
         "description": "Multi-stage attack pattern matched (read, network, email or lateral movement)",
     },
+    "KILL_CHAIN": {
+        "weight": 88,
+        "kind": "threat",
+        "risk_scaled": True,
+        "description": "Kill-chain sequence scored in session (recon, access, staging, exfiltration progression)",
+    },
     "KIT_MATCH": {
         "weight": 85,
         "kind": "threat",
@@ -136,8 +142,14 @@ _THREAT_CAP = 97
 def _signal_weight(code, risk=None):
     """Resolve the effective weight for a cause code.
 
-    BEHAVIOR_ANOMALY scales with the behavioral risk score:
-    weight = 60 + risk/100 * 25, capped at 85.
+    Risk-scaled codes resolve from the signal's own risk value:
+    BEHAVIOR_ANOMALY scales with the behavioral risk score
+    (weight = 60 + risk/100 * 25, capped at 85); KILL_CHAIN scales
+    with the session sequence score, so confidence grows with chain
+    completeness (weight = 55 + risk * 0.4, capped at 92: a
+    just-flagged partial chain at 40 yields 71, a completed chain
+    at 95 yields 92). With no risk supplied, the table weight
+    stands.
     """
     spec = CAUSE_CODES.get(code)
     if spec is None:
@@ -145,7 +157,10 @@ def _signal_weight(code, risk=None):
     w = spec["weight"]
     if spec.get("risk_scaled") and risk is not None:
         try:
-            w = min(85, 60 + float(risk) / 100.0 * 25)
+            if code == "KILL_CHAIN":
+                w = min(92, 55 + float(risk) * 0.4)
+            else:
+                w = min(85, 60 + float(risk) / 100.0 * 25)
         except (TypeError, ValueError):
             pass
     return w
@@ -258,6 +273,7 @@ CATEGORY_CAUSE_CODES = {
     "pii_leak": ["PII_LEAK"],
     "behavioral_anomaly": ["BEHAVIOR_ANOMALY"],
     "attack_chain": ["ATTACK_CHAIN"],
+    "kill_chain": ["KILL_CHAIN"],
     "policy_deny": ["POLICY_DENY"],
     "policy_approval": ["POLICY_APPROVAL"],
     "unknown_synthetic": ["SYNTHETIC_INSTRUCTION"],

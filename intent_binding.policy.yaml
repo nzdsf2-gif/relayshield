@@ -1,0 +1,65 @@
+# RelayShield intent binding: production policy file.
+#
+# Ships in the API Lambda deployment package next to
+# relayshield_api.py; relayshield_api._binding_policy() loads it at
+# cold start (INTENT_BINDING_POLICY_PATH overrides the location).
+# TTL, amount tolerance, the invoice-OCR posture, and step-up rules
+# live here, not in code (Andrew's decision, 2026-10-23). Loading is
+# strict: unknown keys, wrong types, and out-of-range values raise
+# instead of silently falling back to defaults.
+#
+# These are the library defaults, unchanged. Adjust per deployment;
+# per-tenant policy overrides are an open decision (INTEGRATION.md).
+
+binding:
+  # How long a binding stays settleable, in seconds. 900 suits a
+  # checkout-shaped flow (intent declared at checkout, settlement
+  # immediately after). Marketplace flows with human-in-the-loop
+  # steps need hours; expiry exists so a stale intent is re-screened,
+  # because the corpus and the cart may both have moved.
+  ttl_seconds: 900
+
+  # Settlement amount may drift from the bound amount by at most
+  # this much; the larger of minor / bps governs. Zero is the honest
+  # default (exact amount). Rails that add variable fees should set
+  # this deliberately and expect amount-drift blocks to become a
+  # support topic if set carelessly.
+  amount_tolerance:
+    minor: 0
+    bps: 0
+
+  screening:
+    # When true, an invoice image the image screener does not
+    # evaluate refuses the binding. When false, the not-evaluated
+    # state is recorded on the binding as a caveat (and can still
+    # trigger step-up, below).
+    require_image_verdict: false
+    # When false (default), a counterparty or artifact screen that
+    # does not evaluate refuses the binding: an unscreened binding
+    # is worse than no binding.
+    allow_unevaluated: false
+
+  image_ocr:
+    # OCR mismatch verdicts are advisory by default: they flag the
+    # binding and bake a step-up requirement into the record, but
+    # they do not refuse the binding. OCR gets totals wrong on real
+    # invoices (scans, stamps, handwriting) often enough that a hard
+    # block on extraction output alone would burn legitimate
+    # payments. Set true only where the false-positive cost is
+    # acceptable.
+    hard_block: false
+
+  step_up:
+    # What satisfies a step-up requirement baked into a binding.
+    # Read from the signed record by the rail at settlement; the
+    # library records the requirement, the rail enforces
+    # satisfaction before settling.
+    satisfied_by: [human_approval]
+    # Bindings at or above this amount (minor units) require
+    # step-up regardless of screening outcome. Null disables the
+    # amount trigger.
+    amount_minor_at_or_above: null
+    # When true, an invoice image that could not be evaluated (no
+    # OCR engine, no bytes) triggers step-up instead of passing
+    # silently with a caveat.
+    on_image_unevaluated: false

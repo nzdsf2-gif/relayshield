@@ -106,6 +106,11 @@ import relayshield_scamkit_fetch as _scamkit_fetch  # v1b: TLS/redirect/header t
 # the deploy import walk only follows modules with that prefix.
 import relayshield_passport as _passport
 
+# Intent binding (staged 2026-10-23). Pure stdlib plus optional PyYAML
+# (the policy file); the relayshield_* name is load-bearing for the
+# deploy import walk, same as the passport module above.
+import relayshield_intent_binding as _intent_binding
+
 # Corpus cross-correlation for verdicts ("seen in N criminal marketplaces,
 # linked to M wallets, kit family X"). Lazy boto3 inside; packaged into the
 # deployment zip via the same transitive relayshield_* import resolution.
@@ -286,6 +291,9 @@ X402_V2_ENABLED_PATHS: set[str] = {
     "/v1/payg/scamkit-fingerprint",
     "/v1/payg/scamkit-match",
     "/v1/payg/campaign-scan",
+    # Intent binding (staged 2026-10-23) -- v2 from launch.
+    "/v1/payg/intent-bind",
+    "/v1/payg/intent-settle-check",
     # Agent passport issuance (added 2026-10-22): v2 from launch. The path
     # lives outside /v1/payg/ but is settled by the same PAYG dispatcher.
     "/v1/passport/issue",
@@ -298,6 +306,18 @@ X402_V2_ENABLED_PATHS: set[str] = {
     # its spec x402_version flipped to 2 in the same change.
     "/v1/payg/phone-reputation",
 }
+
+# Intent binding (staged 2026-10-23, finished 2026-10-24 -- NOT
+# YET LIVE). APPROVED 2026-10-24: $0.10 per call / 10 credits for
+# the standalone intent-bind / intent-settle-check endpoints,
+# scamkit-match parity. The PLACEHOLDER constant names are kept so
+# the staged tests and spec references do not churn; the comments
+# are now the approval record. The TAP/PAP pair carries no per-call
+# price at all: binding ships inside the verifiers bundle.
+INTENT_BIND_PRICE_UNITS_PLACEHOLDER = 100000          # == scamkit-match, APPROVED
+INTENT_SETTLE_CHECK_PRICE_UNITS_PLACEHOLDER = 100000  # == scamkit-match, APPROVED
+INTENT_BIND_CREDIT_COST_PLACEHOLDER = 10              # == scamkit-match, APPROVED
+INTENT_SETTLE_CHECK_CREDIT_COST_PLACEHOLDER = 10      # == scamkit-match, APPROVED
 
 # PAYG pricing in USDC base units (6 decimals): $0.10 = 100000
 PAYG_PRICE_UNITS: dict[str, int] = {
@@ -339,6 +359,10 @@ PAYG_PRICE_UNITS: dict[str, int] = {
     "/v1/payg/scamkit-fingerprint":  500000,   # $0.50 — kit fingerprint from URL or HTML
     "/v1/payg/scamkit-match":        100000,   # $0.10 — match a kit_<sha256> against the corpus
     "/v1/payg/campaign-scan":       5500000,   # $5.50 flat — composite over the TI endpoints
+    # Intent binding (staged 2026-10-23, price APPROVED 2026-10-24
+    # at $0.10/call, scamkit-match parity).
+    "/v1/payg/intent-bind":          INTENT_BIND_PRICE_UNITS_PLACEHOLDER,
+    "/v1/payg/intent-settle-check":  INTENT_SETTLE_CHECK_PRICE_UNITS_PLACEHOLDER,
     "/v1/passport/issue":           500000,   # $0.50 — signed agent reputation passport issuance (KMS-signed, registered for status/revocation)
 }
 
@@ -492,6 +516,11 @@ STRIPE_METER_EVENTS: dict[str, str] = {
     # above. CREATE METERS IN DASHBOARD.
     "/v1/metered/scamkit-fingerprint": "relayshield_scamkit_fingerprint_calls",
     "/v1/metered/scamkit-match":       "relayshield_scamkit_match_calls",
+    # Intent binding (staged 2026-10-23). The Stripe meters behind
+    # these names do not exist yet -- create them before the metered
+    # twins bill (see INTEGRATION.md).
+    "/v1/metered/intent-bind":         "relayshield_intent_bind_calls",
+    "/v1/metered/intent-settle-check": "relayshield_intent_settle_check_calls",
     "/v1/metered/scamkit-campaign-scan": "relayshield_scamkit_campaign_scan_calls",
     "/v1/metered/campaign-scan":       "relayshield_campaign_scan_calls",
 }
@@ -550,6 +579,10 @@ METERED_CREDIT_COSTS: dict[str, int] = {
     # 1:1 (credits: 1 = $0.01), per the fiat/x402 parity convention.
     "/v1/metered/scamkit-fingerprint": 50,   # $0.50/call
     "/v1/metered/scamkit-match":       10,   # $0.10/call
+    # Intent binding (staged 2026-10-23, price APPROVED 2026-10-24
+    # at 10 credits/call, scamkit-match parity).
+    "/v1/metered/intent-bind":         INTENT_BIND_CREDIT_COST_PLACEHOLDER,
+    "/v1/metered/intent-settle-check": INTENT_SETTLE_CHECK_CREDIT_COST_PLACEHOLDER,
     "/v1/metered/scamkit-campaign-scan": 550,  # $5.50/call
     "/v1/metered/campaign-scan":      550,   # $5.50/call flat composite
 }
@@ -1489,6 +1522,10 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
         # x402 rail — API-key auth and credit billing happen above.
         "/v1/metered/scamkit-fingerprint": handle_scamkit_fingerprint,
         "/v1/metered/scamkit-match":       handle_scamkit_match,
+        # Intent binding (staged 2026-10-23): metered twins of the
+        # PAYG pair for API-key callers; registry tenant is the key.
+        "/v1/metered/intent-bind":         handle_metered_intent_bind,
+        "/v1/metered/intent-settle-check": handle_metered_intent_settle_check,
         "/v1/metered/scamkit-campaign-scan": handle_campaign_scan,
         "/v1/metered/campaign-scan":       handle_campaign_scan,
         "/v1/webhook/configure":       lambda p: handle_webhook_configure(p, api_key_str),
@@ -13790,6 +13827,11 @@ def handle_payg_request(path: str, method: str, event: dict) -> dict:
         # Scam-kit fingerprinting (added 2026-09-24).
         "/v1/payg/scamkit-fingerprint":  handle_scamkit_fingerprint,
         "/v1/payg/scamkit-match":        handle_scamkit_match,
+        # Intent binding (staged 2026-10-23): the x402 standalone
+        # pair. Settlement/payer handling is the dispatcher's; the
+        # handlers below only see the screened request body.
+        "/v1/payg/intent-bind":          handle_payg_intent_bind,
+        "/v1/payg/intent-settle-check":  handle_payg_intent_settle_check,
         "/v1/payg/campaign-scan":        handle_campaign_scan,
         # Agent passport issuance (added 2026-10-22): admitted to this
         # dispatcher by the passport branch in lambda_handler.
@@ -17148,6 +17190,610 @@ def handle_app_event(params: dict) -> dict:
     return _ok({"received": True})
 
 
+
+# ---------------------------------------------------------------------------
+# Intent binding (staged 2026-10-23 -- NOT YET DEPLOYED)
+#
+# Wires the intent-binding library (relayshield_intent_binding.py;
+# DESIGN.md v2) into this Lambda:
+#
+#   POST /v1/tap/intent-bind            TAP/PAP bundle pair, admitted in
+#   POST /v1/tap/settle-check           lambda_handler behind the API
+#                                       key's verifiers entitlement (the
+#                                       in-Lambda mirror of the REQUEST
+#                                       authorizer that gates
+#                                       /v1/tap/verify and /v1/pap/verify
+#                                       on the hosted-verifier surface)
+#   POST /v1/payg/intent-bind           x402 standalone pair, plus their
+#   POST /v1/payg/intent-settle-check   metered twins for API-key callers
+#
+# One DynamoDB registry (relayshield_intent_bindings) serves both
+# rails; single-use consumption is a conditional write, independent of
+# billing. Signing is KMS-only, mirroring the passport pattern: the env
+# var RELAYSHIELD_INTENT_BINDING_KMS_KEY_ID names the bindings key and
+# there is deliberately no local-key fallback (unset -> the endpoints
+# answer 503). Deploy touchpoints and open decisions: INTEGRATION.md.
+# ---------------------------------------------------------------------------
+
+INTENT_BINDINGS_TABLE = "relayshield_intent_bindings"
+INTENT_BINDING_KMS_KEY_ID_ENV = "RELAYSHIELD_INTENT_BINDING_KMS_KEY_ID"
+
+# Rail name -> identifier canonicalization policy, registered on every
+# binder. TAP/PAP/x402 identifiers are case-insensitive (domains,
+# emails, EVM wallets); Skyfire seller ids are opaque and case-sensitive.
+_INTENT_RAIL_CANONICALIZERS = {
+    "tap": _intent_binding.canonical_identifier,
+    "pap": _intent_binding.canonical_identifier,
+    "x402": _intent_binding.canonical_identifier,
+    "skyfire": _intent_binding.canonical_identifier_opaque,
+}
+
+
+class _KmsBindingSigner:
+    """KMS-backed Ed25519 signer for intent bindings.
+
+    Mirrors relayshield_passport.KmsPassportSigner (lazy client,
+    GetPublicKey cached, injectable client for tests) with one
+    deliberate difference: the passport signer uses ED25519_PH_SHA_512
+    over a SHA-512 digest (Ed25519ph) because passport payloads can
+    exceed the KMS RAW message limit, while the binding library
+    verifies PLAIN Ed25519 (RFC 8032) signatures over the canonical
+    record bytes. So this adapter signs the raw record with
+    ED25519_SHA_512 / MessageType=RAW. Binding records are small
+    canonical JSON, well under the 4096-byte KMS RAW limit; the guard
+    below fails loudly rather than truncating if that ever changes.
+    """
+
+    MAX_RAW_MESSAGE_BYTES = 4096
+
+    def __init__(self, key_id: str = "", client=None):
+        self._key_id = key_id or os.environ.get(INTENT_BINDING_KMS_KEY_ID_ENV, "")
+        self._client = client
+        self._public_key = None
+        self._resolved_key_id = ""
+
+    @property
+    def key_id(self) -> str:
+        return self._resolved_key_id or self._key_id
+
+    @property
+    def public_key_hex(self) -> str:
+        return self._public_key_bytes().hex()
+
+    def _kms(self):
+        if self._client is None:
+            self._client = kms_client
+        return self._client
+
+    def _public_key_bytes(self) -> bytes:
+        if self._public_key is None:
+            resp = self._kms().get_public_key(KeyId=self._key_id)
+            self._resolved_key_id = resp.get("KeyId", self._key_id)
+            self._public_key = _passport.raw_public_key_from_spki(resp["PublicKey"])
+        return self._public_key
+
+    def sign(self, message: bytes) -> bytes:
+        if len(message) > self.MAX_RAW_MESSAGE_BYTES:
+            raise ValueError(
+                "binding record exceeds the KMS RAW signing limit "
+                f"({len(message)} > {self.MAX_RAW_MESSAGE_BYTES} bytes)")
+        resp = self._kms().sign(
+            KeyId=self._key_id,
+            Message=message,
+            MessageType="RAW",
+            SigningAlgorithm="ED25519_SHA_512",
+        )
+        return resp["Signature"]
+
+
+_BINDING_SIGNER = None
+
+
+def _binding_signer():
+    """The process-wide KMS binding signer, or None when unconfigured.
+
+    Cached because the signer caches the issuer public key after a
+    single GetPublicKey call; settlement verification then needs no
+    KMS round trip (the public key travels in the binding envelope).
+    """
+    global _BINDING_SIGNER
+    if _BINDING_SIGNER is None and os.environ.get(INTENT_BINDING_KMS_KEY_ID_ENV):
+        _BINDING_SIGNER = _KmsBindingSigner()
+    return _BINDING_SIGNER
+
+
+class _DynamoBindingStore:
+    """The intent-binding consumption registry (DESIGN.md v2).
+
+    One item per binding in relayshield_intent_bindings: the signed
+    envelope (record as a JSON string, signature, public_key, key_id),
+    tenant_id (the API key on the TAP rail, the canonical payer on the
+    x402 rail), rail, consumed BOOL, consumed_at, created_at, and
+    expires_at, which doubles as the DynamoDB TTL attribute. A GSI on
+    (tenant_id, created_at) supports operator lookups.
+
+    Tenant isolation is enforced here: get() returns None for a
+    binding owned by another tenant, so a settle-check can only ever
+    resolve its own tenant's bindings. Like the passport registry,
+    reads and writes do NOT swallow DynamoDB errors: consumption state
+    is a trust decision, so a failed read surfaces at the call site,
+    never as "not consumed".
+    """
+
+    def __init__(self, tenant_id: str, rail: str):
+        self._tenant_id = tenant_id
+        self._rail = rail
+        self._table = dynamodb.Table(INTENT_BINDINGS_TABLE)
+
+    def save(self, binding) -> None:
+        record = binding.record
+        try:
+            self._table.put_item(
+                Item={
+                    "binding_id": binding.binding_id,
+                    "record": json.dumps(record, sort_keys=True),
+                    "signature": binding.signature,
+                    "public_key": binding.public_key,
+                    "key_id": binding.key_id,
+                    "tenant_id": self._tenant_id,
+                    "rail": self._rail,
+                    "consumed": False,
+                    "created_at": int(record["issued_at"]),
+                    "expires_at": int(record["expires_at"]),
+                },
+                ConditionExpression="attribute_not_exists(binding_id)",
+            )
+        except Exception as exc:
+            if _fx_cond_code(exc) == "ConditionalCheckFailedException":
+                raise ValueError(
+                    f"binding_id already registered: {binding.binding_id}")
+            raise
+
+    def get(self, binding_id: str):
+        item = self._table.get_item(
+            Key={"binding_id": binding_id}).get("Item")
+        if not item or item.get("tenant_id") != self._tenant_id:
+            return None
+        return _intent_binding.Binding.from_dict({
+            "record": json.loads(item["record"]),
+            "signature": item.get("signature", ""),
+            "public_key": item.get("public_key", ""),
+            "key_id": item.get("key_id", ""),
+        })
+
+    def is_consumed(self, binding_id: str) -> bool:
+        item = self._table.get_item(
+            Key={"binding_id": binding_id},
+            ProjectionExpression="consumed").get("Item")
+        return bool(item and item.get("consumed"))
+
+    def consume(self, binding_id: str) -> bool:
+        """Atomically mark consumed. ConditionalCheckFailed means a
+        racing settlement won (or the row vanished); either way this
+        settle does not own the consumption."""
+        try:
+            self._table.update_item(
+                Key={"binding_id": binding_id},
+                UpdateExpression="SET consumed = :true, consumed_at = :now",
+                ConditionExpression=(
+                    "attribute_exists(binding_id) AND "
+                    "(attribute_not_exists(consumed) OR consumed = :false)"),
+                ExpressionAttributeValues={
+                    ":true": True,
+                    ":false": False,
+                    ":now": int(time.time()),
+                },
+            )
+            return True
+        except Exception as exc:
+            if _fx_cond_code(exc) == "ConditionalCheckFailedException":
+                return False
+            raise
+
+
+def _corpus_screen_result(**kwargs):
+    """Map relayshield_tap_ti.screen onto a library ScreenResult.
+
+    tap_ti speaks the verifier's level vocabulary (high / medium /
+    unknown) and RAISES when it cannot answer; the library speaks
+    flagged / no flags found / not evaluated. A raise becomes
+    not_evaluated here so the binder fails closed (an unscreened
+    binding is refused) instead of the exception escaping as a 500.
+    tap_ti never returns a "clean" level: unknown means "no known
+    finding", which the library records as no flags found WITH its
+    standing caveat (see ScreenResult.no_flags).
+    """
+    try:
+        import relayshield_tap_ti
+        result = relayshield_tap_ti.screen(**kwargs)
+    except Exception as exc:
+        return _intent_binding.ScreenResult.not_evaluated(
+            f"threat-intel screen unavailable: {exc}")
+    level = (result or {}).get("level")
+    reasons = [r for r in (result or {}).get("reasons") or []]
+    if level in ("high", "medium"):
+        return _intent_binding.ScreenResult.flagged_result(
+            reasons or [f"threat-intel screen flagged this indicator ({level})"],
+            evidence=[{"source": "relayshield_tap_ti", "level": level}])
+    if level == "unknown":
+        return _intent_binding.ScreenResult.no_flags(
+            evidence=[{"source": "relayshield_tap_ti", "level": "unknown"}])
+    return _intent_binding.ScreenResult.not_evaluated(
+        f"threat-intel screen returned an unrecognised level: {level!r}")
+
+
+class _CorpusCounterpartyScreener:
+    """Counterparty screen against the RelayShield TI corpus, via the
+    same in-process screen the TAP verifier uses (never the HTTP API:
+    a Lambda calling our public API would arrive from one NAT address
+    and be throttled by the per-IP cap against itself)."""
+
+    def screen_counterparty(self, counterparty: str, context: dict):
+        value = (counterparty or "").strip()
+        if not value:
+            return _intent_binding.ScreenResult.not_evaluated(
+                "empty counterparty")
+        if re.fullmatch(r"0x[0-9a-fA-F]{40}", value):
+            return _corpus_screen_result(wallet=value)
+        if "@" in value:
+            return _corpus_screen_result(domain=value.rsplit("@", 1)[-1])
+        try:
+            import relayshield_tap_ti
+            host = relayshield_tap_ti.normalise_domain(value)
+        except Exception:
+            host = ""
+        if host and "." in host:
+            return _corpus_screen_result(domain=host)
+        return _intent_binding.ScreenResult.not_evaluated(
+            "counterparty is an opaque identifier with no corpus "
+            "screen; binding requires a screenable domain, email, "
+            "or wallet")
+
+
+class _CorpusArtifactScreener:
+    """Artifact screen: harvest the payee identifiers the artifact
+    itself names (wallets, emails, domains) and screen each one. An
+    artifact naming no screenable identifier has an empty identifier
+    surface: the screen evaluated and found nothing to flag. An
+    artifact whose identifiers cannot be screened (corpus error) is
+    not_evaluated, and the binder refuses it."""
+
+    def screen_artifact(self, artifact, context: dict):
+        blob = json.dumps(artifact.descriptor or {}, sort_keys=True,
+                          default=str)
+        identifiers = sorted(_intent_binding.extract_payee_identifiers(blob))
+        if not identifiers:
+            return _intent_binding.ScreenResult.no_flags(evidence=[
+                {"source": "relayshield_tap_ti", "identifiers_screened": 0}])
+        unevaluated = None
+        for ident in identifiers:
+            if re.fullmatch(r"0x[0-9a-fA-F]{40}", ident):
+                result = _corpus_screen_result(wallet=ident)
+            elif "@" in ident:
+                result = _corpus_screen_result(domain=ident.rsplit("@", 1)[-1])
+            else:
+                result = _corpus_screen_result(domain=ident)
+            if result.flagged:
+                return _intent_binding.ScreenResult.flagged_result(
+                    [f"artifact names flagged identifier {ident}: {r}"
+                     for r in result.reasons],
+                    evidence=[{"source": "relayshield_tap_ti",
+                               "identifier": ident}])
+            if not result.evaluated:
+                unevaluated = result
+        if unevaluated is not None:
+            return unevaluated
+        return _intent_binding.ScreenResult.no_flags(evidence=[
+            {"source": "relayshield_tap_ti",
+             "identifiers_screened": len(identifiers)}])
+
+
+class _UnavailableTextExtractor:
+    """Explicit no-engine extractor: extraction always raises
+    OCRUnavailableError, so the image screen honestly reports
+    not_evaluated (recorded on the binding as a caveat; policy keeps
+    OCR verdicts advisory). No longer the Lambda default (the
+    MSGSCAN pipeline below is, since 2026-10-24); kept as the
+    explicit fallback for tests and for deployments that must run
+    without Rekognition access.
+    """
+
+    def extract_text(self, image_bytes: bytes) -> str:
+        raise _intent_binding.OCRUnavailableError(
+            "no OCR engine is configured in the API Lambda")
+
+
+class _RekognitionTextExtractor:
+    """Invoice-image text extractor via the MSGSCAN screenshot-OCR
+    pipeline (decided 2026-10-24).
+
+    MSGSCAN is AWS Rekognition DetectText, not Textract: both bots'
+    run_textract_ocr call boto3 rekognition DetectText and join the
+    LINE detections with spaces, and this adapter makes exactly that
+    call (same service, same detection filter, same join), so bound
+    invoice images are read with the engine already proven on
+    real user screenshots. The boto3 client is lazy (and
+    injectable for tests) so importing this module never touches
+    AWS. DetectText takes image bytes inline only up to 5 MiB;
+    larger images raise OCRUnavailableError (the screener reports
+    not_evaluated) rather than failing the bind. Empty detections
+    return "" and the screener reports its advisory no-readable-text
+    verdict; engine failures raise OCRUnavailableError and the
+    screener reports not_evaluated. Requires rekognition:DetectText
+    on the API Lambda's role (see INTEGRATION.md touchpoints).
+    """
+
+    _MAX_INLINE_BYTES = 5 * 1024 * 1024
+
+    def __init__(self, client=None):
+        self._client = client
+
+    def _get_client(self):
+        if self._client is None:
+            import boto3
+            self._client = boto3.client("rekognition")
+        return self._client
+
+    def extract_text(self, image_bytes: bytes) -> str:
+        if not image_bytes:
+            raise _intent_binding.OCRUnavailableError(
+                "no image bytes supplied")
+        if len(image_bytes) > self._MAX_INLINE_BYTES:
+            raise _intent_binding.OCRUnavailableError(
+                "image exceeds the Rekognition DetectText 5 MiB "
+                "inline limit")
+        try:
+            response = self._get_client().detect_text(
+                Image={"Bytes": image_bytes})
+        except Exception as exc:
+            raise _intent_binding.OCRUnavailableError(
+                f"Rekognition DetectText failed: {exc}")
+        lines = [
+            d.get("DetectedText", "")
+            for d in (response or {}).get("TextDetections", [])
+            if d.get("Type") == "LINE" and d.get("DetectedText")
+        ]
+        return " ".join(lines)
+
+
+# Test/config seam: assign a TextExtractor to override the default.
+_BINDING_OCR_EXTRACTOR = None
+
+
+def _binding_image_screener():
+    return _intent_binding.OcrInvoiceImageScreener(
+        extractor=_BINDING_OCR_EXTRACTOR or _RekognitionTextExtractor())
+
+
+_BINDING_POLICY = None
+_BINDING_CLOCK = None  # test seam: callable returning epoch seconds
+
+
+def _binding_policy():
+    """Binding policy from the deployment package.
+
+    INTENT_BINDING_POLICY_PATH wins; otherwise the
+    intent_binding.policy.yaml packaged next to this module;
+    otherwise the library defaults (the packaged YAML ships the same
+    values, so the fallback changes nothing today). A malformed YAML
+    policy raises (strict load): a typo must never silently loosen
+    screening. PyYAML missing from the package is the one tolerated
+    gap: it logs loudly and uses the defaults, which are the same
+    values the YAML ships; see INTEGRATION.md.
+    """
+    global _BINDING_POLICY
+    if _BINDING_POLICY is None:
+        path = os.environ.get("INTENT_BINDING_POLICY_PATH") or os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "intent_binding.policy.yaml")
+        if os.path.exists(path):
+            try:
+                import yaml  # noqa: F401
+            except ImportError:
+                logger.error(
+                    "intent_binding policy file present at %s but PyYAML "
+                    "is not in the Lambda package; using library defaults "
+                    "(identical values today)", path)
+                _BINDING_POLICY = _intent_binding.BindingPolicy()
+            else:
+                _BINDING_POLICY = _intent_binding.BindingPolicy.load_yaml_file(path)
+        else:
+            _BINDING_POLICY = _intent_binding.BindingPolicy()
+    return _BINDING_POLICY
+
+
+def _intent_binder(tenant_id: str, rail: str):
+    """A binder for one request, or None when signing is unconfigured."""
+    signer = _binding_signer()
+    if signer is None:
+        return None
+    return _intent_binding.IntentBinder(
+        signer=signer,
+        store=_DynamoBindingStore(tenant_id=tenant_id, rail=rail),
+        policy=_binding_policy(),
+        counterparty_screener=_CorpusCounterpartyScreener(),
+        artifact_screener=_CorpusArtifactScreener(),
+        image_screener=_binding_image_screener(),
+        canonicalizers=dict(_INTENT_RAIL_CANONICALIZERS),
+        now_fn=_BINDING_CLOCK or time.time,
+    )
+
+
+def _intent_artifacts(raw) -> list:
+    """JSON artifact list -> library Artifact objects.
+
+    content_b64 carries image bytes (the OCR input) on any rail;
+    without it an invoice_image binds by descriptor hash only and its
+    image verdict is not_evaluated, as designed.
+    """
+    artifacts = []
+    for entry in raw or []:
+        if not isinstance(entry, dict):
+            continue
+        content = entry.get("content_b64")
+        artifacts.append(_intent_binding.Artifact(
+            artifact_id=str(entry.get("artifact_id", "")),
+            kind=str(entry.get("kind", "other")),
+            descriptor=entry.get("descriptor") or {},
+            content_bytes=(base64.b64decode(content) if content else None),
+        ))
+    return artifacts
+
+
+def _binding_refused_response(refusal) -> dict:
+    """422 in the DESIGN wire shape, carried on the house envelope keys."""
+    return {
+        "statusCode": 422,
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps({
+            "ok": False,
+            "error": "binding_refused",
+            "reason_codes": list(refusal.reason_codes),
+            "reasons": list(refusal.reasons),
+            "verdicts": refusal.verdicts,
+        }),
+    }
+
+
+def _bind_core(params: dict, tenant_id: str, rail_default: str) -> dict:
+    rail = str(params.get("rail") or rail_default)
+    binder = _intent_binder(tenant_id=tenant_id, rail=rail)
+    if binder is None:
+        return _err("Intent binding is not configured on this deployment.", 503)
+    intent = _intent_binding.PaymentIntent(
+        payer=str(params.get("payer") or ""),
+        counterparty=str(params.get("counterparty") or ""),
+        amount=str(params.get("amount") or ""),
+        currency=str(params.get("currency") or ""),
+        artifacts=_intent_artifacts(params.get("artifacts")),
+        tap_intent_ref=str(params.get("tap_intent_ref") or ""),
+        metadata=params.get("metadata") or {},
+        rail=rail,
+    )
+    try:
+        binding = binder.create_binding(intent)
+    except _intent_binding.BindingRefused as refusal:
+        return _binding_refused_response(refusal)
+    except Exception as exc:
+        # Registry write failure fails the issuance outright (the
+        # passport registry precedent): a binding missing from the
+        # registry could never be consumed exactly once.
+        logger.exception("intent binding issuance failed: %s", exc)
+        return _err("The binding could not be registered, so it was not issued.", 500)
+    return _ok({"binding": binding.to_dict()}, 201)
+
+
+def _settle_core(params: dict, tenant_id: str) -> dict:
+    # Step-up attestations ride the settle request body (decided
+    # 2026-10-24): a list of {method, evidence_ref, attested_at,
+    # attestor} objects, validated inside verify_at_settlement
+    # before any consumption, so a block on missing or malformed
+    # attestations never burns the binding.
+    attestations = params.get("attestations")
+    executed_raw = params.get("executed") or {}
+    binding_id = str(params.get("binding_id") or "")
+    envelope = params.get("binding")
+    if not binding_id and isinstance(envelope, dict):
+        # The binding itself may be presented instead of its id; the
+        # registry is still consulted for consumption either way.
+        binding_id = str((envelope.get("record") or {}).get("binding_id") or "")
+    if not binding_id:
+        return _err("binding_id (or a binding envelope) is required.", 400)
+    binder = _intent_binder(tenant_id=tenant_id, rail="")
+    if binder is None:
+        return _err("Intent binding is not configured on this deployment.", 503)
+    executed = _intent_binding.ExecutedPayment(
+        payer=str(executed_raw.get("payer") or ""),
+        counterparty=str(executed_raw.get("counterparty") or ""),
+        amount=str(executed_raw.get("amount") or ""),
+        currency=str(executed_raw.get("currency") or ""),
+        artifacts=_intent_artifacts(executed_raw.get("artifacts")),
+        rail_reference=str(executed_raw.get("rail_reference") or ""),
+        rail=str(executed_raw.get("rail") or ""),
+    )
+    try:
+        binding = binder.get_binding(binding_id)
+        decision = binder.verify_at_settlement(
+            binding_id, executed, attestations=attestations)
+    except Exception as exc:
+        # Registry read failure surfaces (trust decision), never a
+        # silent "not consumed".
+        logger.exception("intent settle-check failed: %s", exc)
+        return _err("The binding registry could not be read.", 500)
+    data = {
+        "decision": decision.decision,
+        "reason_codes": list(decision.reason_codes),
+        "reasons": list(decision.reasons),
+        "binding_id": decision.binding_id or binding_id,
+    }
+    if binding is not None:
+        # The step-up requirement baked into the signed record at
+        # issuance; the rail reads it here and enforces satisfaction
+        # before settling.
+        data["step_up"] = binding.record.get("step_up") or {}
+    return _ok(data)
+
+
+def handle_tap_intent_bind(params: dict, key_record: dict) -> dict:
+    """POST /v1/tap/intent-bind: create a binding for a TAP intent.
+
+    Part of the verifiers bundle: admitted by lambda_handler only for
+    API keys carrying the verifiers entitlement. No per-call charge
+    on this rail."""
+    params = params or {}
+    return _bind_core(params, tenant_id=key_record["api_key"],
+                      rail_default="tap")
+
+
+def handle_tap_settle_check(params: dict, key_record: dict) -> dict:
+    """POST /v1/tap/settle-check: verify an executed payment against
+    its binding before release (same entitlement as intent-bind)."""
+    params = params or {}
+    return _settle_core(params, tenant_id=key_record["api_key"])
+
+
+def _payg_tenant(params: dict, rail: str) -> str:
+    canon = _INTENT_RAIL_CANONICALIZERS.get(
+        rail, _intent_binding.canonical_identifier)
+    return canon(str(params.get("payer") or ""))
+
+
+def handle_payg_intent_bind(params: dict) -> dict:
+    """POST /v1/payg/intent-bind: create and screen a binding.
+
+    Runs inside the PAYG dispatcher, so the x402 payment has already
+    settled when this is called. The registry tenant is the payer,
+    canonicalized under the rail's identifier policy."""
+    params = params or {}
+    rail = str(params.get("rail") or "x402")
+    return _bind_core(params, tenant_id=_payg_tenant(params, rail),
+                      rail_default="x402")
+
+
+def handle_payg_intent_settle_check(params: dict) -> dict:
+    """POST /v1/payg/intent-settle-check: verify before settle."""
+    params = params or {}
+    executed_raw = params.get("executed") or {}
+    rail = str(params.get("rail") or executed_raw.get("rail") or "x402")
+    canon = _INTENT_RAIL_CANONICALIZERS.get(
+        rail, _intent_binding.canonical_identifier)
+    tenant_id = canon(str(executed_raw.get("payer") or ""))
+    return _settle_core(params, tenant_id=tenant_id)
+
+
+def handle_metered_intent_bind(params: dict, key_record: dict) -> dict:
+    """Metered twin of /v1/payg/intent-bind for API-key callers."""
+    params = params or {}
+    return _bind_core(params, tenant_id=key_record["api_key"],
+                      rail_default="tap")
+
+
+def handle_metered_intent_settle_check(params: dict, key_record: dict) -> dict:
+    """Metered twin of /v1/payg/intent-settle-check."""
+    params = params or {}
+    return _settle_core(params, tenant_id=key_record["api_key"])
+
+
 def lambda_handler(event: dict, context) -> dict:
     path   = event.get("path", "")
     method = event.get("httpMethod", "")
@@ -17548,6 +18194,24 @@ def lambda_handler(event: dict, context) -> dict:
         if not _vr:
             return _err("Active RS API key required. Pass it as X-RS-API-KEY.", 401)
         return handle_verifier_config(method, _body(event), _vr)
+
+    # Intent binding, TAP/PAP bundle pair (staged 2026-10-23). Binding
+    # is part of the verifiers bundle, so admission is the API key's
+    # verifiers entitlement: the in-Lambda mirror of the REQUEST
+    # authorizer that gates /v1/tap/verify and /v1/pap/verify on the
+    # hosted-verifier surface. No per-call charge on this rail.
+    if method == "POST" and path in ("/v1/tap/intent-bind", "/v1/tap/settle-check"):
+        _vh = event.get("headers") or {}
+        _vk = _header(_vh, "X-RS-API-KEY") or _header(_vh, "X-API-Key")
+        _vr = _verify_rs_api_key(_vk) if _vk else None
+        if not _vr:
+            return _err("Active RS API key required. Pass it as X-RS-API-KEY.", 401)
+        if not _vr.get("verifiers_access"):
+            return _err("This API key does not carry the verifiers entitlement. "
+                        "Intent binding is part of the TAP/PAP verifiers bundle.", 403)
+        if path == "/v1/tap/intent-bind":
+            return handle_tap_intent_bind(_body(event), _vr)
+        return handle_tap_settle_check(_body(event), _vr)
 
     # Shareable report links (INTEL-8) — public view, no auth
     if method == "GET" and path.startswith("/v1/r/"):

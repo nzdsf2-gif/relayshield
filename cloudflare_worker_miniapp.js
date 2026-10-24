@@ -444,6 +444,7 @@ const PAGE = `<!doctype html>
     <button class="ghost hidden" id="pin">Add to home screen</button>
     <a id="botlink" href="__BOT__">Monitor my email, phone and wallets</a>
     <a id="more" href="__DEVELOPERS__" target="_blank" rel="noopener">Run this check from your own bot or agent</a>
+    <a id="webcheck" href="https://relayshield.net/check" target="_blank" rel="noopener">Check a link in your browser, no signup</a>
 
     <!-- INLINE MODE, NAMED ON EVERY TAB, AND IT IS STATIC MARKUP ON PURPOSE.
 

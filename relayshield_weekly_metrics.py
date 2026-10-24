@@ -1146,9 +1146,114 @@ def _feedback_sentiment_stats() -> dict:
         return {"total": 0, "up": 0, "down": 0, "pct_positive": None, "testimonial_candidates": []}
 
 
+def _webcheck_stats() -> dict:
+    """Fetch the free-webcheck Worker metrics (relayshield.net/check/metrics).
+
+    Returns a sanitised dict, or {"available": False} on ANY failure, so a
+    missing page, an unreachable endpoint, or a changed schema can never
+    break the weekly email. The Worker cannot write DynamoDB (no AWS creds),
+    so this HTTP fetch is the only bridge from Worker KV counts to the report.
+    """
+    url = "https://relayshield.net/check/metrics"
+    try:
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "RelayShield-Weekly-Metrics/1.0"}
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            raw = json.loads(resp.read().decode("utf-8"))
+        if not isinstance(raw, dict) or not raw.get("available"):
+            return {"available": False}
+
+        def _int(value, default=0):
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return default
+
+        by_type = raw.get("checks_by_type") or {}
+        conv_total = raw.get("conversions_total") or {}
+        last7 = raw.get("last_7_days") or {}
+        conv_7d = last7.get("conversions_by_dest") or {}
+        try:
+            rate = float(last7.get("conversion_rate", 0))
+        except (TypeError, ValueError):
+            rate = 0
+        return {
+            "available": True,
+            "checks_total": _int(raw.get("checks_total")),
+            "checks_by_type": {
+                "link": _int(by_type.get("link")),
+                "wallet": _int(by_type.get("wallet")),
+                "email": _int(by_type.get("email")),
+                "upload": _int(by_type.get("upload")),
+            },
+            "checks_7d": _int(last7.get("checks")),
+            "conversions_total": {
+                "tg": _int(conv_total.get("tg")),
+                "wa": _int(conv_total.get("wa")),
+                "miniapp": _int(conv_total.get("miniapp")),
+            },
+            "conversions_7d": {
+                "tg": _int(conv_7d.get("tg")),
+                "wa": _int(conv_7d.get("wa")),
+                "miniapp": _int(conv_7d.get("miniapp")),
+            },
+            "conversion_rate_7d": rate,
+        }
+    except Exception as exc:
+        logger.warning("Webcheck metrics fetch failed: %s", exc)
+        return {"available": False}
+
+
+def _webcheck_section_html(w: dict) -> str:
+    """Free Webcheck section for the weekly email. Never raises on bad input:
+    every access uses .get with a default, so a schema change degrades to
+    zeros or to the unreachable row instead of breaking the whole email."""
+    if not isinstance(w, dict) or not w.get("available"):
+        return (
+            '<h3 style="color: #e94560;">Free Webcheck (relayshield.net/check)</h3>\n'
+            '<table border="0" cellpadding="4">\n'
+            "  <tr><td colspan=\"2\">Webcheck metrics endpoint unreachable "
+            "(page may not be deployed yet, or KV not yet enabled).</td></tr>\n"
+            "</table>\n"
+        )
+    by_type = w.get("checks_by_type") or {}
+    conv_total = w.get("conversions_total") or {}
+    conv_7d = w.get("conversions_7d") or {}
+
+    def _n(value, default=0):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    try:
+        rate = float(w.get("conversion_rate_7d", 0))
+    except (TypeError, ValueError):
+        rate = 0
+    return (
+        '<h3 style="color: #e94560;">Free Webcheck (relayshield.net/check)</h3>\n'
+        '<table border="0" cellpadding="4">\n'
+        f"  <tr><td>Checks (last 7 days)</td><td><b>{_n(w.get('checks_7d'))}</b></td></tr>\n"
+        f"  <tr><td>Checks (all time)</td><td><b>{_n(w.get('checks_total'))}</b></td></tr>\n"
+        '  <tr><td colspan="2" style="padding-top:6px;color:#888;font-size:12px">By type (all time)</td></tr>\n'
+        f"  <tr><td>&nbsp;&nbsp;Link</td><td><b>{_n(by_type.get('link'))}</b></td></tr>\n"
+        f"  <tr><td>&nbsp;&nbsp;Wallet</td><td><b>{_n(by_type.get('wallet'))}</b></td></tr>\n"
+        f"  <tr><td>&nbsp;&nbsp;Email</td><td><b>{_n(by_type.get('email'))}</b></td></tr>\n"
+        f"  <tr><td>&nbsp;&nbsp;Upload</td><td><b>{_n(by_type.get('upload'))}</b></td></tr>\n"
+        '  <tr><td colspan="2" style="padding-top:6px;color:#888;font-size:12px">Conversions (last 7 days / all time)</td></tr>\n'
+        f"  <tr><td>&nbsp;&nbsp;Telegram bot</td><td><b>{_n(conv_7d.get('tg'))} / {_n(conv_total.get('tg'))}</b></td></tr>\n"
+        f"  <tr><td>&nbsp;&nbsp;WhatsApp bot</td><td><b>{_n(conv_7d.get('wa'))} / {_n(conv_total.get('wa'))}</b></td></tr>\n"
+        f"  <tr><td>&nbsp;&nbsp;Telegram miniApp</td><td><b>{_n(conv_7d.get('miniapp'))} / {_n(conv_total.get('miniapp'))}</b></td></tr>\n"
+        f"  <tr><td>Conversion rate (last 7 days)</td><td><b>{rate:g}%</b></td></tr>\n"
+        "</table>\n"
+    )
+
+
 def _build_email(metrics: dict) -> str:
     week_end = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     s = metrics
+    webcheck_section = _webcheck_section_html(s.get("webcheck") or {})
     return f"""
 <html><body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
 <h2 style="color: #1a1a2e;">RelayShield Weekly Metrics — {week_end}</h2>
@@ -1165,6 +1270,7 @@ def _build_email(metrics: dict) -> str:
   <tr><td>New monitored emails (week)</td><td><b>{s['monitored_emails_new']}</b></td></tr>
 </table>
 
+{webcheck_section}
 <h3 style="color: #e94560;">Self-Reported Telemetry</h3>
 <table border="0" cellpadding="4">
   <tr><td>Chrome installs (unique)</td><td><b>{s['telemetry']['chrome_installs_unique']}</b></td></tr>
@@ -1640,6 +1746,9 @@ and includes this same section.</p>
         "x402":                 _x402_stats(),
         "hf_mcp":               _hf_mcp_stats(),
         "cs_mobile_feedback":   _feedback_sentiment_stats(),
+        # Webcheck fetch is time-bounded (10s) and never raises, so it is
+        # safe ahead of the corpus scan; it sits second-to-last on purpose.
+        "webcheck":               _webcheck_stats(),
         # LAST on purpose: it spends whatever Lambda time is left, so every
         # other figure must already exist by the time it starts.
         "corpus":               _corpus_distinct(context),

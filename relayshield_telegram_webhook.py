@@ -3182,55 +3182,177 @@ def _provenance_suffix(target: str) -> str:
     return ("\n\n📊 Corpus cross-check: " + summary) if summary else ""
 
 
+# ---------------------------------------------------------------------------
+# Shareable verdict card (approved 2026-10-24, text v1 only, no image card).
+# One compact, forwardable verdict: header, badge, target, Why (existing
+# reasons only, max 2 segments), one action line, footer. No change to
+# verdict logic, pricing, tiers, or the free/paid gate. No em dashes in
+# card text: upstream detail strings are sanitized on render (the VT clean
+# detail carries one). No cumulative corpus counts in the footer: a count
+# goes stale weekly, so the footer cites the growing corpus + marketplace
+# figure only.
+# v1.1 (2026-10-24): footer gains a per-bot link line (t.me/relayshield_bot),
+# and the target line is backticked, closing the v1 Markdown residual: in
+# legacy Markdown a code span is literal, so _ * ~ [ ] inside a URL cannot
+# open an entity or break the send. A backtick inside the target would
+# close the span early, so it is replaced with an apostrophe first. The
+# span is never nested inside a bold run (legacy Markdown does not nest).
+# ---------------------------------------------------------------------------
+
+CARD_HEADER = "🛡️ RelayShield Verdict"
+CARD_FOOTER_CORPUS = "Checked against a growing threat intelligence corpus with over 129 monitored marketplaces."
+CARD_FORWARD_LINK = "↗ Forward this verdict to anyone who received the same link."
+CARD_FORWARD_TOKEN = "↗ Forward this verdict to anyone holding this token."
+CARD_BOT_LINK = "Try it yourself: https://t.me/relayshield_bot"
+
+
+def _card_code_span(text: str) -> str:
+    """Single-backtick code span for legacy Markdown: the span content is
+    literal, so Markdown metacharacters in a URL cannot open entities.
+    An embedded backtick would close the span early, so it becomes an
+    apostrophe first."""
+    return "`" + (text or "").replace("`", "'") + "`"
+
+_SCAN_BADGES = {
+    "malicious": "⛔ THREAT DETECTED",
+    "suspicious": "⚠️ SUSPICIOUS",
+    "clean": "✅ NO FLAGS FOUND",
+}
+
+_SCAN_ACTIONS = {
+    "malicious": "Do not click this link. Report it and delete the message if it was sent to you.",
+    "suspicious": "Do not click this link. Report it and delete the message if it was sent to you.",
+    "clean": "No suspicious scam signals detected in this check. That is not a guarantee: new scam pages appear daily.",
+}
+_SCAN_UNKNOWN_ACTION = "Treat this link as potentially unsafe until verified."
+
+# Manual checklists on clean/unknown, KEPT under the card (approved
+# 2026-10-24, overruling the spec draft's replace-them plan). Wording is
+# the old messages' verbatim, except the em dash in the still-unsure line
+# is gone per the card's no-em-dash rule.
+SCAN_CHECKLIST_CLEAN = (
+    "Still worth a second look if something feels off:\n"
+    "→ Check the domain's registration date (whois)\n"
+    "→ Watch for URL shorteners hiding the real destination\n"
+    "→ Look for mismatched domains (paypa1.com, g00gle.com)"
+)
+
+SCAN_CHECKLIST_UNKNOWN = (
+    "Here's what to check manually in the meantime:\n\n"
+    "→ Check the domain's registration date (whois)\n"
+    "→ Watch for URL shorteners hiding the real destination\n"
+    "→ Look for mismatched domains (paypa1.com, g00gle.com)\n"
+    "→ Confirm HTTPS, not HTTP\n"
+    "→ Be wary of urgent language pushing you to act immediately"
+)
+
+SCAN_STILL_UNSURE = "Still unsure? Don't click. Ask us."
+
+
+def _card_why(detail: str) -> str:
+    """Why line from an existing verdict detail only: em dashes sanitized,
+    capped at the first two '; '-separated reasons so the card stays
+    compact. Never invents a reason."""
+    text = (detail or "").replace(" — ", ": ").replace("—", ":").strip()
+    segments = [s.strip() for s in text.split("; ") if s.strip()]
+    if len(segments) > 2:
+        segments = segments[:2]
+    return "; ".join(segments) or "No further detail"
+
+
+def _format_scan_verdict_card(target: str, verdict: str, detail: str,
+                              prefix: str = "Scan result") -> str:
+    """Card text for a /scan URL verdict. Checklist and report extras are
+    appended by the caller, not built here, so the card itself is identical
+    for immediate and deferred follow-up sends. The target link is shown in
+    full (the spec example does the same); only addresses are truncated,
+    and those go through _format_token_free_card."""
+    badge = _SCAN_BADGES.get(verdict, "❓ UNCHECKED")
+    action = _SCAN_ACTIONS.get(verdict, _SCAN_UNKNOWN_ACTION)
+    lines = [CARD_HEADER]
+    if prefix != "Scan result":
+        lines.append(prefix)
+    lines.append(badge)
+    lines.append("")
+    lines.append(f"Link: {_card_code_span(target)}")
+    lines.append(f"Why: {_card_why(detail)}.")
+    lines.append("")
+    lines.append(action)
+    lines.append("")
+    lines.append(CARD_FOOTER_CORPUS)
+    lines.append(CARD_FORWARD_LINK)
+    lines.append(CARD_BOT_LINK)
+    return "\n".join(lines)
+
+
+def _format_token_free_card(address: str, danger: str | None,
+                            sell_tax: float) -> str:
+    """Card for the checktoken FREE tier only. danger is one of
+    "honeypot" | "scam" | "tax" | None, computed by handle_checktoken from
+    the same GoPlus fields as before. The paid tier (_format_token_risk)
+    is untouched. The Crypto Shield upsell is appended by the caller, never
+    built here, so it stays exactly where it is today (free tier only)."""
+    short = f"{address[:6]}...{address[-4:]}"
+    if danger == "honeypot":
+        badge, why = "🚨 HIGH RISK: HONEYPOT", "you cannot sell this token."
+    elif danger == "scam":
+        badge, why = ("🚨 HIGH RISK: AIRDROP SCAM / FAKE TOKEN",
+                      "flagged as an airdrop scam or fake token.")
+    elif danger == "tax":
+        badge = f"🚨 HIGH RISK: SELL TAX {sell_tax:.0f}%"
+        why = f"sell tax of {sell_tax:.0f}% makes it effectively unsellable."
+    else:
+        return "\n".join([
+            CARD_HEADER,
+            "✅ NO FLAGS FOUND",
+            "",
+            f"Contract: {_card_code_span(short)}",
+            "No critical flags detected for this contract. That is not a "
+            "guarantee: a token's risk profile can change.",
+            "",
+            CARD_FOOTER_CORPUS,
+            CARD_FORWARD_TOKEN,
+            CARD_BOT_LINK,
+        ])
+    return "\n".join([
+        CARD_HEADER,
+        badge,
+        "",
+        f"Contract: {_card_code_span(short)}",
+        f"Why: {why}",
+        "",
+        "⛔ Do NOT swap, approve, or interact with this token.",
+        "",
+        CARD_FOOTER_CORPUS,
+        CARD_FORWARD_TOKEN,
+        CARD_BOT_LINK,
+    ])
+
+
 def _send_scan_verdict(chat_id: int, target: str, verdict: str, detail: str, prefix: str = "Scan result") -> None:
     """Shared formatting for a scan verdict — used by both the immediate
     handle_scan reply and handle_deferred_url_scan's follow-up, so the two
-    messages read consistently."""
+    messages read consistently. The card replaces the old header/detail
+    layout; the manual checklist on clean/unknown is KEPT under the card,
+    the corpus provenance line rides between the checklist and the report
+    extras, and the Report-this button rides exactly as before (flag-gated
+    via _report_extras)."""
     _remember_scan_for_report(chat_id, target, "url", verdict)
     extra_text, extra_markup = _report_extras(target, "url")
     prov_suffix = _provenance_suffix(target)
-    if verdict in ("malicious", "suspicious"):
-        send_message(
-            chat_id,
-            f"⚠️ *{prefix} for* `{target}`\n\n"
-            f"{detail}.\n\n"
-            "Do not click this link. Report it and delete the message if it was sent to you."
-            f"{prov_suffix}"
-            f"{extra_text}",
-            parse_mode="Markdown",
-            reply_markup=extra_markup,
-        )
-    elif verdict == "clean":
-        send_message(
-            chat_id,
-            f"🔍 *{prefix} for* `{target}`\n\n"
-            f"{detail}. No suspicious scam signals detected.\n\n"
-            "Still worth a second look if something feels off:\n"
-            "→ Check the domain's registration date (whois)\n"
-            "→ Watch for URL shorteners hiding the real destination\n"
-            "→ Look for mismatched domains (paypa1.com, g00gle.com)\n\n"
-            "Still unsure? Don't click — ask us."
-            f"{prov_suffix}"
-            f"{extra_text}",
-            parse_mode="Markdown",
-            reply_markup=extra_markup,
-        )
-    else:
-        send_message(
-            chat_id,
-            f"🔍 *{prefix}:* `{target}`\n\n"
-            f"{detail}. Here's what to check manually in the meantime:\n\n"
-            "→ Check the domain's registration date (whois)\n"
-            "→ Watch for URL shorteners hiding the real destination\n"
-            "→ Look for mismatched domains (paypa1.com, g00gle.com)\n"
-            "→ Confirm HTTPS, not HTTP\n"
-            "→ Be wary of urgent language pushing you to act immediately\n\n"
-            "Still unsure? Don't click — ask us."
-            f"{prov_suffix}"
-            f"{extra_text}",
-            parse_mode="Markdown",
-            reply_markup=extra_markup,
-        )
+    text = _format_scan_verdict_card(target, verdict, detail, prefix)
+    if verdict == "clean":
+        text += "\n\n" + SCAN_CHECKLIST_CLEAN + "\n\n" + SCAN_STILL_UNSURE
+    elif verdict not in ("malicious", "suspicious"):
+        text += "\n\n" + SCAN_CHECKLIST_UNKNOWN + "\n\n" + SCAN_STILL_UNSURE
+    text += prov_suffix
+    text += extra_text
+    send_message(
+        chat_id,
+        text,
+        parse_mode="Markdown",
+        reply_markup=extra_markup,
+    )
 
 
 def handle_scan_dispatch(chat_id: int, content: str | None = None, user: dict | None = None) -> None:
@@ -6094,29 +6216,24 @@ def handle_checktoken(chat_id: int, address_raw: str | None, user: dict) -> None
         is_high_risk  = is_honeypot or is_scam or is_high_tax
 
         if is_high_risk:
-            danger_label = (
-                "HONEYPOT — you cannot sell this token" if is_honeypot else
-                "AIRDROP SCAM / FAKE TOKEN" if is_scam else
-                f"SELL TAX {sell_tax:.0f}% — effectively unsellable"
-            )
+            danger = "honeypot" if is_honeypot else "scam" if is_scam else "tax"
+            card = _format_token_free_card(address, danger, sell_tax)
             send_message(
                 chat_id,
-                f"🚨 *HIGH RISK TOKEN DETECTED*\n\n"
-                f"*Contract:* `{address[:6]}...{address[-4:]}`\n"
-                f"*Verdict:* {danger_label}\n\n"
-                f"⛔ Do NOT swap, approve, or interact with this token.\n\n"
-                f"_Crypto Shield subscribers get full risk detail — buy/sell tax breakdown, "
+                card + "\n\n"
+                f"_Crypto Shield subscribers get full risk detail, buy/sell tax breakdown, "
                 f"owner privileges, hidden mint functions, and step-by-step safe disposal "
-                f"instructions — plus automatic detection when risky tokens land in your wallet "
+                f"instructions, plus automatic detection when risky tokens land in your wallet "
                 f"before you even know they're there._\n\n"
                 + CRYPTO_SHIELD_CTA,
                 parse_mode="Markdown",
             )
         else:
+            card = _format_token_free_card(address, None, sell_tax)
             send_message(
                 chat_id,
-                f"✅ *No critical flags detected* for `{address[:6]}...{address[-4:]}`.\n\n"
-                f"_Full risk detail — owner privileges, tax rates, hidden mint, contract audit — "
+                card + "\n\n"
+                f"_Full risk detail, owner privileges, tax rates, hidden mint, contract audit, "
                 f"is available on Crypto Shield. Continuous monitoring alerts you the moment "
                 f"a token's risk profile changes after you hold it._\n\n"
                 + CRYPTO_SHIELD_CTA,

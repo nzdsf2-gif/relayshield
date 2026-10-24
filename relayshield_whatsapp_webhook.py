@@ -479,26 +479,95 @@ def _heuristic_url_check(url: str) -> dict:
     return {"flagged": bool(reasons), "reasons": reasons}
 
 
-def build_verdict_response(stats: dict | None, heuristics: dict, target_label: str) -> str:
-    """Combines VT's own verdict with the heuristic layer — added 2026-07-16
-    to unify WhatsApp's scanning with Telegram's. VT malicious/suspicious
-    always wins (strongest signal). A VT clean or unavailable/timed-out
-    result never overrides a real heuristic hit (e.g. a domain actually on
-    Google's blocklist shouldn't get called clean just because VT hasn't
-    caught up, or timed out)."""
-    vt_flagged = bool(stats and (stats.get("malicious", 0) > 0 or stats.get("suspicious", 0) > 0))
-    if vt_flagged or not heuristics.get("flagged"):
-        return build_vt_verdict_response(stats, target_label)
+# ---------------------------------------------------------------------------
+# Shareable verdict card (approved 2026-10-24, text v1 only). Same header,
+# footer, and badge set as Telegram. Classification mirrors the old branches
+# exactly, so no verdict change: VT malicious/suspicious wins (strongest
+# signal); a VT clean or unavailable/timed-out result never overrides a
+# real heuristic hit (e.g. a domain actually on Google's blocklist
+# shouldn't get called clean just because VT hasn't caught up, or timed
+# out). No em dashes in card text; no cumulative corpus counts in the
+# footer. The old "— RelayShield" sign-off is gone, replaced by the footer.
+# The Reply REPORT line is NOT built here: it rides in _wa_report_extras,
+# appended by the SCAN call site exactly as before, so it appears only
+# when the reports flag is on and the scan was remembered (i.e. only when
+# REPORT actually routes). The ATTACH call site never had extras, and
+# still doesn't.
+# v1.1 (2026-10-24): footer gains a per-bot link line (wa.me/17407373961),
+# and the target line is wrapped in a triple-backtick monospace span, the
+# WhatsApp-native code span: monospace content is not parsed for * _ ~
+# formatting, so metacharacters in a URL cannot misrender. (WhatsApp has
+# no parse-failure mode, unlike Telegram's 400, so the WA risk was always
+# cosmetic only; the span removes even that.) An embedded backtick would
+# break the span, so it becomes an apostrophe first.
+# ---------------------------------------------------------------------------
 
-    reasons = "; ".join(heuristics["reasons"])
-    return (
-        f"⚠️ *SUSPICIOUS — quick checks flagged {target_label}*\n\n"
-        f"{reasons.capitalize()}.\n\n"
-        "→ Do not open the file or enter any information on the page\n"
-        "→ If this arrived in an unexpected email, report the email as phishing\n"
-        "→ Reply *SWEEP* if you already interacted with it\n\n"
-        "— RelayShield"
-    )
+WA_CARD_HEADER = "🛡️ RelayShield Verdict"
+WA_CARD_FOOTER_CORPUS = "Checked against a growing threat intelligence corpus with over 129 monitored marketplaces."
+WA_CARD_FORWARD_LINK = "↗ Forward this verdict to anyone who received the same link."
+WA_CARD_BOT_LINK = "Try it yourself: https://wa.me/17407373961"
+
+
+def _wa_code_span(text: str) -> str:
+    """Triple-backtick monospace span for WhatsApp: the span content is
+    not parsed for inline formatting. An embedded backtick would break
+    the span, so it becomes an apostrophe first."""
+    return "```" + (text or "").replace("`", "'") + "```"
+
+
+def build_verdict_response(stats: dict | None, heuristics: dict, target_label: str, target: str | None = None) -> str:
+    """URL verdict as a shareable card. target is the scanned URL when the
+    caller has it (shown in full, per the spec example); target_label is
+    the fallback ("that URL"). Callers: the SCAN and ATTACH URL paths
+    only. The file-scan path still uses build_vt_verdict_response
+    directly and is unchanged."""
+    shown = target if target else target_label
+    if stats is not None and stats.get("malicious", 0) > 0:
+        malicious = stats.get("malicious", 0)
+        total = (stats.get("malicious", 0) + stats.get("suspicious", 0)
+                 + stats.get("harmless", 0) + stats.get("undetected", 0))
+        badge = "⛔ THREAT DETECTED"
+        why = f"{malicious} of {total} security engines confirmed a threat."
+        action = "Do not click this link. Delete the message if it was sent to you."
+    elif stats is not None and stats.get("suspicious", 0) > 0:
+        suspicious = stats.get("suspicious", 0)
+        total = (stats.get("malicious", 0) + stats.get("suspicious", 0)
+                 + stats.get("harmless", 0) + stats.get("undetected", 0))
+        badge = "⚠️ SUSPICIOUS"
+        why = f"{suspicious} of {total} engines flagged as suspicious."
+        action = ("Do not click this link or enter any information on the page. "
+                  "Reply SWEEP if you already interacted with it.")
+    elif heuristics.get("flagged"):
+        reasons = "; ".join(heuristics["reasons"][:2])
+        badge = "⚠️ SUSPICIOUS"
+        why = f"{reasons.capitalize()}."
+        action = ("Do not click this link or enter any information on the page. "
+                  "Reply SWEEP if you already interacted with it.")
+    elif stats is None:
+        badge = "❓ UNCHECKED"
+        why = "Analysis took longer than expected or could not complete."
+        action = "Treat it as potentially unsafe until verified."
+    else:
+        total = (stats.get("malicious", 0) + stats.get("suspicious", 0)
+                 + stats.get("harmless", 0) + stats.get("undetected", 0))
+        clean = stats.get("harmless", 0) + stats.get("undetected", 0)
+        badge = "✅ NO FLAGS FOUND"
+        why = f"{clean} of {total} engines found no threats."
+        action = ("No suspicious scam signals detected in this check. That is not "
+                  "a guarantee: new scam pages appear daily.")
+    return "\n".join([
+        WA_CARD_HEADER,
+        badge,
+        "",
+        f"Link: {_wa_code_span(shown)}",
+        f"Why: {why}",
+        "",
+        action,
+        "",
+        WA_CARD_FOOTER_CORPUS,
+        WA_CARD_FORWARD_LINK,
+        WA_CARD_BOT_LINK,
+    ])
 
 
 def _analyze_sms_text(text: str) -> dict:
@@ -4509,7 +4578,7 @@ def handle_active_message(
             stats = None
         heuristics = _heuristic_url_check(scan_url)
 
-        verdict = build_verdict_response(stats, heuristics, "that URL")
+        verdict = build_verdict_response(stats, heuristics, "that URL", scan_url)
         verdict += _wa_provenance_suffix(scan_url)
         verdict += _wa_report_extras(scan_url, "url")
         _wa_remember_scan_for_report(user_id, scan_url, "url", "unknown")
@@ -4560,7 +4629,7 @@ def handle_active_message(
             stats = None
         heuristics = _heuristic_url_check(attach_url)
 
-        verdict = build_verdict_response(stats, heuristics, "that URL")
+        verdict = build_verdict_response(stats, heuristics, "that URL", attach_url)
         send_whatsapp(to_number, verdict, account_sid, auth_token, from_number)
         logger.info(
             "VT URL scan complete — url=%s stats=%s",

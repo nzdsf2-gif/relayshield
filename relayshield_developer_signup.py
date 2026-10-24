@@ -2724,6 +2724,29 @@ print(f<span class="str">"Breaches: {breach.get('breach_count', 0)}"</span>)
   <p style="color:var(--muted);font-size:.85rem;margin:0">Used in SOAR playbooks, SIEM enrichment pipelines, MSP onboarding/offboarding automations, and incident response triage workflows. <a href="https://n8n.io/creators/relayshieldadmin" target="_blank" rel="noopener" style="color:var(--accent)">All our n8n templates</a> &middot; <a href="mailto:support@relayshield.net" style="color:var(--accent)">Tell us what you&apos;re building.</a></p>
 </div>
 
+<div class="code-section">
+  <!--
+    Grab the widget, added 2026-10-24. DIY embed snippets for visitors who
+    want a RelayShield check on their own site. Both snippets are plain
+    anchors linking to the free check: no script, no signup, no API key.
+    Deliberately NOT the badge.js monitoring widget, which renders a live
+    domain risk score and implies enrollment. Kept separate from the signup
+    box, the API sections, and the footer badges.
+  -->
+  <h2 class="section-title" id="grab-widget">Grab the widget</h2>
+  <p class="section-sub">Put a RelayShield check on your own site. Copy a snippet, paste it into your page. No script, no signup, no API key.</p>
+  <h3 style="font-size:1.05rem;margin:0 0 .4rem">Check with RelayShield button</h3>
+  <p style="color:var(--muted);font-size:.9rem;margin:0 0 .6rem">A button that sends your visitors to the free check.</p>
+  <p style="margin:0 0 .8rem"><a href="https://relayshield.net/check" target="_blank" rel="noopener" style="display:inline-block;background:#6c63ff;color:#ffffff;font-family:Arial,sans-serif;font-size:14px;font-weight:600;text-decoration:none;padding:10px 18px;border-radius:8px;">Check with RelayShield</a></p>
+  <pre><code id="snippet-button">&lt;a href="https://relayshield.net/check" target="_blank" rel="noopener" style="display:inline-block;background:#6c63ff;color:#ffffff;font-family:Arial,sans-serif;font-size:14px;font-weight:600;text-decoration:none;padding:10px 18px;border-radius:8px;"&gt;Check with RelayShield&lt;/a&gt;</code></pre>
+  <p style="margin:.5rem 0 2rem"><button type="button" onclick="copySnippet('snippet-button', this)" style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:.45rem 1rem;font-size:.85rem;cursor:pointer">Copy</button></p>
+  <h3 style="font-size:1.05rem;margin:0 0 .4rem">Scanned by RelayShield badge</h3>
+  <p style="color:var(--muted);font-size:.9rem;margin:0 0 .6rem">A badge that links your visitors to the free check. The badge is a link to the free check, not a monitoring claim.</p>
+  <p style="margin:0 0 .8rem"><a href="https://relayshield.net/check" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;background:#161a23;color:#e8eaf0;font-family:Arial,sans-serif;font-size:13px;font-weight:600;text-decoration:none;padding:6px 12px;border:1px solid #6c63ff;border-radius:999px;">Scanned by RelayShield</a></p>
+  <pre><code id="snippet-badge">&lt;a href="https://relayshield.net/check" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;background:#161a23;color:#e8eaf0;font-family:Arial,sans-serif;font-size:13px;font-weight:600;text-decoration:none;padding:6px 12px;border:1px solid #6c63ff;border-radius:999px;"&gt;Scanned by RelayShield&lt;/a&gt;</code></pre>
+  <p style="margin:.5rem 0 0"><button type="button" onclick="copySnippet('snippet-badge', this)" style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:.45rem 1rem;font-size:.85rem;cursor:pointer">Copy</button></p>
+</div>
+
 <footer>
   <!--
     Blog link added 2026-07-30. The blog was reachable only from two inline
@@ -2800,6 +2823,27 @@ document.getElementById('signup-form').addEventListener('submit', async function
     btn.textContent = 'Get API key →';
   }
 });
+function copySnippet(id, btn) {
+  var text = document.getElementById(id).textContent;
+  function done() {
+    var old = btn.textContent;
+    btn.textContent = 'Copied';
+    setTimeout(function() { btn.textContent = old; }, 1500);
+  }
+  function fallback() {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); done(); } catch (e) {}
+    document.body.removeChild(ta);
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(function() { fallback(); });
+  } else {
+    fallback();
+  }
+}
 </script>
 </body>
 </html>"""

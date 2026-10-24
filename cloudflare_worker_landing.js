@@ -534,6 +534,7 @@ const HTML = `<!DOCTYPE html>
     <div>RelayShield LLC</div>
     <div class="foot-links">
       <a href="https://blog.relayshield.net">Blog</a>
+      <a href="https://relayshield.net/check">Free scam check</a>
       <a href="https://infosec.exchange/@relayshieldadmin">Mastodon</a>
       <a href="https://www.linkedin.com/company/112663616/admin/dashboard/">LinkedIn</a>
       <a href="https://www.facebook.com/profile.php?id=61590625257695">Facebook</a>

@@ -181,6 +181,15 @@ ${body}
      Chrome extension</a> checks a link, a wallet address or an email with no
      signup and no key. It reports what is known, and never says a thing is
      safe.</p>
+  <!-- The free web check, on every page. ADDED 2026-10-24.
+       Same situation as the email-check line: a finished free door with no
+       route to it from the blog. A reader who arrived worried about a link
+       they just read about should be one click from checking it, with no
+       signup and no bot install. Phrased as a thing you can do. -->
+  <p>Got a link, wallet address, or email you are unsure about? Check it in
+     your browser at <a href="https://relayshield.net/check">relayshield.net/check</a>.
+     No signup, no account. It reports what is known, and never says a thing is
+     safe.</p>
   ${WA_NUMBER ? `<p>On WhatsApp instead? <a href="https://wa.me/${WA_NUMBER}?text=SRC_${WA_SOURCE}">Message
      RelayShield there</a> and we will monitor your email, phone and wallets
      for breaches, infostealer logs and SIM-swap attempts, and alert you in

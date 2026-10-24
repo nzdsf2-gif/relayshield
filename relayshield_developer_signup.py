@@ -2740,10 +2740,10 @@ print(f<span class="str">"Breaches: {breach.get('breach_count', 0)}"</span>)
   <p style="margin:0 0 .8rem"><a href="https://relayshield.net/check" target="_blank" rel="noopener" style="display:inline-block;background:#6c63ff;color:#ffffff;font-family:Arial,sans-serif;font-size:14px;font-weight:600;text-decoration:none;padding:10px 18px;border-radius:8px;">Check with RelayShield</a></p>
   <pre><code id="snippet-button">&lt;a href="https://relayshield.net/check" target="_blank" rel="noopener" style="display:inline-block;background:#6c63ff;color:#ffffff;font-family:Arial,sans-serif;font-size:14px;font-weight:600;text-decoration:none;padding:10px 18px;border-radius:8px;"&gt;Check with RelayShield&lt;/a&gt;</code></pre>
   <p style="margin:.5rem 0 2rem"><button type="button" onclick="copySnippet('snippet-button', this)" style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:.45rem 1rem;font-size:.85rem;cursor:pointer">Copy</button></p>
-  <h3 style="font-size:1.05rem;margin:0 0 .4rem">Scanned by RelayShield badge</h3>
+  <h3 style="font-size:1.05rem;margin:0 0 .4rem">Scanned by RS badge</h3>
   <p style="color:var(--muted);font-size:.9rem;margin:0 0 .6rem">A badge that links your visitors to the free check. The badge is a link to the free check, not a monitoring claim.</p>
-  <p style="margin:0 0 .8rem"><a href="https://relayshield.net/check" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;background:#161a23;color:#e8eaf0;font-family:Arial,sans-serif;font-size:13px;font-weight:600;text-decoration:none;padding:6px 12px;border:1px solid #6c63ff;border-radius:999px;">Scanned by RelayShield</a></p>
-  <pre><code id="snippet-badge">&lt;a href="https://relayshield.net/check" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;background:#161a23;color:#e8eaf0;font-family:Arial,sans-serif;font-size:13px;font-weight:600;text-decoration:none;padding:6px 12px;border:1px solid #6c63ff;border-radius:999px;"&gt;Scanned by RelayShield&lt;/a&gt;</code></pre>
+  <p style="margin:0 0 .8rem"><a href="https://relayshield.net/check" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;background:#161a23;color:#e8eaf0;font-family:Arial,sans-serif;font-size:13px;font-weight:600;text-decoration:none;padding:6px 12px;border:1px solid #6c63ff;border-radius:999px;">Scanned by RS</a></p>
+  <pre><code id="snippet-badge">&lt;a href="https://relayshield.net/check" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;background:#161a23;color:#e8eaf0;font-family:Arial,sans-serif;font-size:13px;font-weight:600;text-decoration:none;padding:6px 12px;border:1px solid #6c63ff;border-radius:999px;"&gt;Scanned by RS&lt;/a&gt;</code></pre>
   <p style="margin:.5rem 0 0"><button type="button" onclick="copySnippet('snippet-badge', this)" style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:.45rem 1rem;font-size:.85rem;cursor:pointer">Copy</button></p>
 </div>
 
@@ -2768,6 +2768,8 @@ print(f<span class="str">"Breaches: {breach.get('breach_count', 0)}"</span>)
     <a href="https://blog.relayshield.net/rss.xml" style="color:var(--accent)">RSS</a>
     <span style="color:var(--muted)">&nbsp;·&nbsp;</span>
     <a href="https://verify.relayshield.net" style="color:var(--accent);font-weight:600">Verify a verdict receipt</a>
+    <span style="color:var(--muted)">&nbsp;·&nbsp;</span>
+    <a href="https://relayshield.net/check" style="color:var(--accent);font-weight:600">Free scam check, no signup</a>
   </p>
   <p>RelayShield LLC · <a href="https://relayshield.net">relayshield.net</a> · <a href="mailto:support@relayshield.net">support@relayshield.net</a></p>
   <!--WA_FRONT_DOOR-->

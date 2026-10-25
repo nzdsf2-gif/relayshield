@@ -1743,6 +1743,14 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
             return _phone_rep_429(PHONE_REP_KEY_HOURLY_CAP, "API key")
 
     params = _body(event)
+    # First-party-only data path for AWS-licensed keys (see _FIRST_PARTY_DOMAIN_MAX).
+    # The flag is set HERE from the key record and never from the request: any value
+    # the caller sends is removed first, so it cannot be used to switch a direct
+    # customer's enrichment off or to spoof the marker.
+    if isinstance(params, dict):
+        params.pop("_aws_data_path", None)
+        if key_record.get("aws_customer_id"):
+            params["_aws_data_path"] = True
     try:
         result = handler(params)
     except Exception as exc:
@@ -14642,8 +14650,29 @@ def handle_brand_monitor(params: dict) -> dict:
 # Stripe meter: relayshield_bulk_identity_risk_calls
 # ---------------------------------------------------------------------------
 
-def _domain_risk_fast(domain: str) -> dict:
-    """Run all 6 identity risk dimensions for one domain. Returns score dict."""
+# AWS-licensed callers get a FIRST-PARTY-ONLY score. Added 2026-10-25.
+#
+# WHY. The AWS Foundational Technical Review needs the listed product to be
+# "deployed on AWS", which AWS defines as every plane AND every third-party service
+# that handles customer data running on AWS. D1 (breach history) and D2 (infostealer
+# density) below send the queried domain to two outside services, so an AWS-licensed
+# key does not get those two calls. Stripe-direct and x402 callers are untouched.
+#
+# THE TRAP THIS CONSTANT EXISTS FOR. Dropping D1 and D2 and summing what is left
+# caps the score at 75 of 100 (D3 15 + D4 20 + D5 15 + D6 25), so a domain that is
+# genuinely CRITICAL could never read as one. And a lookup that fails today already
+# scores 0, which reads as clean. So the remaining dimensions are rescaled to the full
+# 0-100 range and the response NAMES what was not run, so a missing signal is never
+# mistaken for a clean one.
+_FIRST_PARTY_DOMAIN_MAX = 75    # D3 + D4 + D5 + D6
+_FIRST_PARTY_AGENT_MAX = 40     # stolen-session / credential evidence only
+_FIRST_PARTY_NOT_RUN = ["external_breach_history", "external_infostealer_lookup"]
+
+
+def _domain_risk_fast(domain: str, first_party_only: bool = False) -> dict:
+    """Run all 6 identity risk dimensions for one domain. Returns score dict.
+
+    first_party_only runs D3-D6 only (see _FIRST_PARTY_DOMAIN_MAX)."""
     ioc_table      = dynamodb.Table(INTEL_IOCS_TABLE)
     sessions_tbl   = dynamodb.Table("relayshield_stolen_sessions")
     cve_table      = dynamodb.Table(INTEL_CVE_TABLE)
@@ -14652,32 +14681,34 @@ def _domain_risk_fast(domain: str) -> dict:
     dim            = {}
     factors        = []
 
-    # D1: Breach exposure (0-20)
-    try:
-        hibp_key = _hibp_api_key()
-        req = urllib.request.Request(
-            f"https://haveibeenpwned.com/api/v3/breacheddomain/{domain}",
-            headers={"hibp-api-key": hibp_key, "User-Agent": "RelayShield/1.0"},
-        )
-        with urllib.request.urlopen(req, timeout=8) as r:
-            breaches = json.loads(r.read())
-            n = len(breaches) if isinstance(breaches, list) else 0
-            dim["breach_exposure"] = min(20, n * 2)
-            if n: factors.append(f"{n} domain breaches")
-    except Exception:
-        dim["breach_exposure"] = 0
+    # D1: Breach exposure (0-20). Skipped, not zeroed, on the first-party path.
+    if not first_party_only:
+        try:
+            hibp_key = _hibp_api_key()
+            req = urllib.request.Request(
+                f"https://haveibeenpwned.com/api/v3/breacheddomain/{domain}",
+                headers={"hibp-api-key": hibp_key, "User-Agent": "RelayShield/1.0"},
+            )
+            with urllib.request.urlopen(req, timeout=8) as r:
+                breaches = json.loads(r.read())
+                n = len(breaches) if isinstance(breaches, list) else 0
+                dim["breach_exposure"] = min(20, n * 2)
+                if n: factors.append(f"{n} domain breaches")
+        except Exception:
+            dim["breach_exposure"] = 0
 
-    # D2: Infostealer density (0-20)
-    try:
-        r = urllib.request.urlopen(urllib.request.Request(
-            f"{CAVALIER_DOMAIN_URL}?domain={domain}",
-            headers={"User-Agent": "RelayShield/1.0"}), timeout=8)
-        d = json.loads(r.read())
-        n = d.get("total", 0) or len(d.get("stealers", []))
-        dim["infostealer_density"] = min(20, n * 5)
-        if n: factors.append(f"{n} stealer log hits")
-    except Exception:
-        dim["infostealer_density"] = 0
+    # D2: Infostealer density (0-20). Skipped, not zeroed, on the first-party path.
+    if not first_party_only:
+        try:
+            r = urllib.request.urlopen(urllib.request.Request(
+                f"{CAVALIER_DOMAIN_URL}?domain={domain}",
+                headers={"User-Agent": "RelayShield/1.0"}), timeout=8)
+            d = json.loads(r.read())
+            n = d.get("total", 0) or len(d.get("stealers", []))
+            dim["infostealer_density"] = min(20, n * 5)
+            if n: factors.append(f"{n} stealer log hits")
+        except Exception:
+            dim["infostealer_density"] = 0
 
     # D3: IOC presence (0-15)
     try:
@@ -14717,51 +14748,62 @@ def _domain_risk_fast(domain: str) -> dict:
     except Exception:
         dim["cve_exposure"] = 0
 
-    total = min(100, sum(dim.values()))
-    return {
+    if first_party_only:
+        total = min(100, int(round(sum(dim.values()) * 100 / _FIRST_PARTY_DOMAIN_MAX)))
+    else:
+        total = min(100, sum(dim.values()))
+    out = {
         "risk_score":       total,
         "grade":            "F" if total >= 75 else "D" if total >= 50 else "C" if total >= 35 else "B" if total >= 15 else "A",
         "risk_level":       "CRITICAL" if total >= 75 else "HIGH" if total >= 50 else "MEDIUM" if total >= 25 else "LOW",
         "dimension_scores": dim,
         "risk_factors":     factors,
     }
+    if first_party_only:
+        out["signals_not_run"] = list(_FIRST_PARTY_NOT_RUN)
+    return out
 
 
-def _agent_risk(email: str) -> dict:
-    """Score an individual agent identity (email) across breach, stealer, and session signals."""
+def _agent_risk(email: str, first_party_only: bool = False) -> dict:
+    """Score an individual agent identity (email) across breach, stealer, and session signals.
+
+    first_party_only keeps only the stolen-session evidence and rescales it to 0-100
+    (see _FIRST_PARTY_DOMAIN_MAX for why)."""
     email   = email.strip().lower()
     factors = []
     score   = 0
 
     # Breach: HIBP individual account (5s timeout to avoid overall timeout)
-    try:
-        hibp_key = _hibp_api_key()
-        req = urllib.request.Request(
-            f"{HIBP_BASE_URL}{urllib.parse.quote(email)}?truncateResponse=true",
-            headers={"hibp-api-key": hibp_key, "User-Agent": "RelayShield/1.0"},
-        )
-        with urllib.request.urlopen(req, timeout=5) as r:
-            breaches = json.loads(r.read())
-            n = len(breaches) if isinstance(breaches, list) else 0
-            score += min(35, n * 5)
-            if n: factors.append(f"{n} account breaches")
-    except urllib.error.HTTPError as e:
-        if e.code != 404:
+    if not first_party_only:
+        try:
+            hibp_key = _hibp_api_key()
+            req = urllib.request.Request(
+                f"{HIBP_BASE_URL}{urllib.parse.quote(email)}?truncateResponse=true",
+                headers={"hibp-api-key": hibp_key, "User-Agent": "RelayShield/1.0"},
+            )
+            with urllib.request.urlopen(req, timeout=5) as r:
+                breaches = json.loads(r.read())
+                n = len(breaches) if isinstance(breaches, list) else 0
+                score += min(35, n * 5)
+                if n: factors.append(f"{n} account breaches")
+        except urllib.error.HTTPError as e:
+            if e.code != 404:
+                pass
+        except Exception:
             pass
-    except Exception:
-        pass
 
     # Infostealer: Hudson Rock by email
-    try:
-        r = urllib.request.urlopen(urllib.request.Request(
-            f"{CAVALIER_URL}?email={urllib.parse.quote(email)}",
-            headers={"User-Agent": "RelayShield/1.0"}), timeout=8)
-        d = json.loads(r.read())
-        n = d.get("total", 0) or len(d.get("stealers", []))
-        score += min(40, n * 20)
-        if n: factors.append(f"{n} infostealer log hits")
-    except Exception:
-        pass
+    if not first_party_only:
+        try:
+            r = urllib.request.urlopen(urllib.request.Request(
+                f"{CAVALIER_URL}?email={urllib.parse.quote(email)}",
+                headers={"User-Agent": "RelayShield/1.0"}), timeout=8)
+            d = json.loads(r.read())
+            n = d.get("total", 0) or len(d.get("stealers", []))
+            score += min(40, n * 20)
+            if n: factors.append(f"{n} infostealer log hits")
+        except Exception:
+            pass
 
     # Session/credential exposure: check by matched_email
     try:
@@ -14780,14 +14822,19 @@ def _agent_risk(email: str) -> dict:
     except Exception:
         pass
 
+    if first_party_only:
+        score = int(round(score * 100 / _FIRST_PARTY_AGENT_MAX))
     score = min(100, score)
-    return {
+    out = {
         "identity":     email,
         "risk_score":   score,
         "grade":        "F" if score >= 75 else "D" if score >= 50 else "C" if score >= 35 else "B" if score >= 15 else "A",
         "risk_level":   "CRITICAL" if score >= 75 else "HIGH" if score >= 50 else "MEDIUM" if score >= 25 else "LOW",
         "risk_factors": factors,
     }
+    if first_party_only:
+        out["signals_not_run"] = list(_FIRST_PARTY_NOT_RUN)
+    return out
 
 
 def handle_bulk_identity_risk(params: dict) -> dict:
@@ -14796,6 +14843,10 @@ def handle_bulk_identity_risk(params: dict) -> dict:
         return _err("targets must be a non-empty list of {domain, agents?} objects")
     if len(targets) > 10:
         return _err("maximum 10 domains per request")
+
+    # Set by the metered dispatcher ONLY for an AWS-licensed key; never read from
+    # the caller (the dispatcher strips any value the caller sends).
+    first_party = bool(params.get("_aws_data_path"))
 
     results = []
     for t in targets:
@@ -14806,8 +14857,8 @@ def handle_bulk_identity_risk(params: dict) -> dict:
 
         agents_in = (t.get("agents") or [])[:5]  # cap at 5 per domain
 
-        domain_result = _domain_risk_fast(domain)
-        agent_results = [_agent_risk(e) for e in agents_in if e]
+        domain_result = _domain_risk_fast(domain, first_party_only=first_party)
+        agent_results = [_agent_risk(e, first_party_only=first_party) for e in agents_in if e]
 
         # Composite flag: any agent CRITICAL elevates domain to at least HIGH
         if any(a["risk_level"] == "CRITICAL" for a in agent_results):
@@ -14832,7 +14883,7 @@ def handle_bulk_identity_risk(params: dict) -> dict:
     critical = sum(1 for r in results if r.get("domain_risk") == "CRITICAL" or r.get("highest_agent_risk") == "CRITICAL")
     high     = sum(1 for r in results if r.get("domain_risk") == "HIGH"     or r.get("highest_agent_risk") == "HIGH")
 
-    return _ok({
+    data = {
         "queried":         len(results),
         "critical_count":  critical,
         "high_count":      high,
@@ -14842,7 +14893,15 @@ def handle_bulk_identity_risk(params: dict) -> dict:
             if (critical + high) else
             f"No high-risk signals detected across {len(results)} domains."
         ),
-    })
+    }
+    if first_party:
+        # Said out loud so a missing signal is never read as a clean one.
+        data["data_path"] = "first_party"
+        data["signals_not_run"] = list(_FIRST_PARTY_NOT_RUN)
+        data["note"] = ("Scored from RelayShield's own corpus only. The external breach-history "
+                        "and external infostealer lookups were not run, and scores are rescaled "
+                        "to the remaining signals. Absence of a finding is not proof of safety.")
+    return _ok(data)
 
 
 # ---------------------------------------------------------------------------
@@ -14926,11 +14985,19 @@ def handle_tech_stack_cve(params: dict) -> dict:
     # a CVE hasn't reached KEV yet but is already publicly exploitable,
     # which changes its real urgency. Bounded to keep this endpoint fast
     # and within GitHub's rate limit, not an unbounded per-CVE loop.
-    poc_candidates = [m for m in matched if not m["in_kev"]][:3]
-    for m in poc_candidates:
-        m["poc_available"] = _check_github_poc_exists(m["cve_id"])
+    #
+    # Skipped for an AWS-licensed key (params["_aws_data_path"], set by the
+    # dispatcher): the lookup is an outbound call to a third party. poc_available
+    # is then ABSENT rather than False, because "no PoC found" is a claim the
+    # lookup did not make.
+    first_party = bool(params.get("_aws_data_path"))
+    if not first_party:
+        poc_candidates = [m for m in matched if not m["in_kev"]][:3]
+        for m in poc_candidates:
+            m["poc_available"] = _check_github_poc_exists(m["cve_id"])
 
     return _ok({
+        **({"data_path": "first_party", "signals_not_run": ["public_exploit_lookup"]} if first_party else {}),
         "tech_stack_queried": tech_stack,
         "total_matches":      len(matched),
         "critical_count":     len(critical),

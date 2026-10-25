@@ -13,7 +13,7 @@
   Every box is read from code, not recalled:
     fulfillment      relayshield_bundle_fulfillment.py (ResolveCustomer, GetEntitlements, SES)
     metering         relayshield_api.py and relayshield_agentic_api.py (BatchMeterUsage at the point of use)
-    MCP endpoint     hf-space-mcp-server/app.py (forwards to api.relayshield.net)
+    MCP endpoint     relayshield_mcp_http.py, AWS Lambda behind API Gateway at /mcp (forwards each call to /v1/metered/)
     edge             wrangler.commerce.toml: api.relayshield.net points directly to API Gateway
 
   DELIBERATELY ABSENT, because they could not be verified:
@@ -51,7 +51,7 @@
   .box b{display:block;font-size:14px;font-weight:700} .box span{display:block;font-size:12.5px;color:var(--mut);margin-top:2px}
   .arrow{font-size:12px;color:var(--mut);text-align:center;line-height:1}
   .outside{margin-top:22px;border:2px dashed var(--ext);border-radius:14px;padding:16px 18px 14px;position:relative;
-           display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px}
+           display:grid;grid-template-columns:1fr 1fr;gap:20px}
   .box.ext{border-left:4px solid var(--ext);background:#fafbfc}
   .foot{margin-top:10px;font-size:12.5px;color:var(--mut)}
   code{font:600 11.5px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink)}
@@ -77,15 +77,15 @@
 
   <div class="col">
     <div class="lane">2 &middot; Serve a call</div>
-    <div class="box aws"><b>Customer application or AI agent</b><span>HTTPS with the issued API key, directly or through the MCP endpoint (below)</span></div>
+    <div class="box aws"><b>Customer application or AI agent</b><span>HTTPS with the issued API key, directly, or through the MCP endpoint at <code>/mcp</code></span></div>
     <div class="arrow">&#8595; HTTPS</div>
-    <div class="box rs"><b>Amazon API Gateway</b><span>Metered endpoints under <code>/v1/metered/</code>: MCP and agent screening, identity risk, tech-stack CVE, LLM credential exposure</span></div>
+    <div class="box rs"><b>Amazon API Gateway</b><span><code>/mcp</code>: an AWS Lambda MCP server that forwards each tool call. <code>/v1/metered/</code>: MCP and agent screening, identity risk, tech-stack CVE, LLM credential exposure</span></div>
     <div class="arrow">&#8595;</div>
     <div class="box rs"><b>AWS Lambda, API functions</b><span>Authenticate the key, confirm the entitlement, run the check</span></div>
     <div class="arrow">&#8595; &#8593;</div>
     <div class="box rs"><b>Amazon DynamoDB</b><span>Indicator corpus, key records, usage counters</span></div>
     <div class="arrow">&#8595;</div>
-    <div class="box rs"><b>AWS Secrets Manager</b><span>Upstream data-source credentials, read at runtime</span></div>
+    <div class="box rs"><b>AWS Secrets Manager</b><span>Service credentials, read at runtime</span></div>
   </div>
 
   <div class="col">
@@ -102,8 +102,7 @@
 </div></div>
 
 <div class="outside"><span class="tag">Outside AWS &nbsp;&middot;&nbsp; shown so the boundary is explicit</span>
-  <div class="box ext"><b>Hugging Face Space, optional MCP endpoint</b><span>A thin proxy: forwards each MCP tool call to <code>api.relayshield.net</code>. The checks, the data and the billing are in AWS</span></div>
   <div class="box ext"><b>Cloudflare Workers, public web pages</b><span>Marketing, documentation and pricing pages. API traffic does not pass through them</span></div>
-  <div class="box ext"><b>Third-party data providers</b><span>Queried over HTTPS by some endpoints for enrichment. Their credentials are held in AWS Secrets Manager</span></div>
+  <div class="box ext"><b>Public data sources</b><span>Read by the scheduled collectors to build the indicator corpus. No customer query data is sent to them, and no customer call reaches them</span></div>
 </div>
 <div class="foot">Compute is AWS Lambda. DynamoDB tables use on-demand capacity. Metered calls are authenticated by API key.</div>

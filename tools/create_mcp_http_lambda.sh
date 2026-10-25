@@ -11,7 +11,7 @@
 # ----------------------------
 # The AWS Foundational Technical Review is Blocked on "AWS Marketplace product is
 # deployed on AWS" for prod-kkvurtspreofy, whose registered MCP endpoint is a
-# Hugging Face Space. relayshield_mcp_http.py serves the same 13 tools from AWS,
+# Hugging Face Space. relayshield_mcp_http.py serves the tools this listing sells from AWS,
 # at https://api.relayshield.net/mcp. Creating it changes NOTHING live: the
 # Hugging Face Spaces keep running and the listing still points at the Space until
 # a separate, deliberate listing change set moves it.
@@ -51,6 +51,12 @@ FUNC=relayshield-mcp-http
 ROLE=relayshield-mcp-http-role
 RUNTIME=python3.12
 BRANDED=https://api.relayshield.net
+
+# The tools this listing sells (prod-kkvurtspreofy, Bundle D) plus introspection. The
+# other seven reach third-party services, and the AWS Foundational Technical Review
+# needs the listed product to run entirely on AWS. test_relayshield_mcp_http.py checks
+# this line against the list it expects.
+TOOLSET="check_mcp_server_risk,check_prompt_injection_breach,check_tech_stack_cve,check_bulk_identity_risk,check_llm_credential_exposure,check_server_status"
 
 export AWS_PAGER=""
 
@@ -114,9 +120,15 @@ echo
 
 echo "== 5. The function"
 if aws lambda get-function --function-name "$FUNC" >/dev/null 2>&1; then
-  echo "   $FUNC exists -- updating code only, leaving configuration alone"
+  echo "   $FUNC exists -- updating code, then re-sending its two environment variables"
   aws lambda update-function-code --function-name "$FUNC" \
     --zip-file fileb:///tmp/mcp_http_deploy.zip --query 'FunctionName' --output text
+  aws lambda wait function-updated --function-name "$FUNC"
+  # update-function-configuration REPLACES the environment block, so both variables
+  # are sent every time. The function holds nothing else in its environment.
+  aws lambda update-function-configuration --function-name "$FUNC" \
+    --environment "Variables={RS_DEMO_API_KEY=$DEMO_KEY,RS_MCP_TOOLS=$TOOLSET}" \
+    --query 'FunctionName' --output text
   aws lambda wait function-updated --function-name "$FUNC"
 else
   # A role created seconds ago is routinely not yet assumable; retry rather than
@@ -129,7 +141,7 @@ else
     --zip-file fileb:///tmp/mcp_http_deploy.zip \
     --timeout 60 --memory-size 256 \
     --description "MCP server (Streamable HTTP) for the Consumption Security bundles, hosted on AWS" \
-    --environment "Variables={RS_DEMO_API_KEY=$DEMO_KEY}" \
+    --environment "Variables={RS_DEMO_API_KEY=$DEMO_KEY,RS_MCP_TOOLS=$TOOLSET}" \
     --query 'FunctionName' --output text
   do
     if [ "$ATTEMPT" -ge 6 ]; then
@@ -233,14 +245,14 @@ for BASE in "https://$API_ID.execute-api.$REGION.amazonaws.com/$STAGE" "$BRANDED
   COUNT=$(curl -sS -X POST "$BASE/mcp" -H 'Content-Type: application/json' -d "$PROBE_LIST" \
             | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["result"]["tools"]))' 2>/dev/null || echo 0)
   echo "   tools/list -> $COUNT tools"
-  if [ "$COUNT" != "13" ]; then
-    echo "STOP: expected 13 tools from $BASE/mcp, got $COUNT." >&2
+  if [ "$COUNT" != "6" ]; then
+    echo "STOP: expected 6 tools (the 5 the listing sells plus status) from $BASE/mcp, got $COUNT." >&2
     exit 1
   fi
 done
 echo
 
-echo "LIVE at $BRANDED/mcp (13 tools). The listing still points at the Hugging Face Space."
+echo "LIVE at $BRANDED/mcp (6 tools: the 5 the listing sells plus status). The listing still points at the Hugging Face Space."
 echo
 echo "NEXT, in this order:"
 echo "  1. Map it for CI, now that the function exists:"

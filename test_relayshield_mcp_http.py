@@ -328,6 +328,72 @@ def _rpc(method, params=None, id_=1, **kw):
     return LAMBDA.lambda_handler(_event(body=msg, **kw), None)
 
 
+# What the AWS listing advertises, plus introspection. tools/create_mcp_http_lambda.sh
+# must set RS_MCP_TOOLS to exactly this; a test below reads the script and checks.
+AWS_LISTING_TOOLS = {
+    "check_mcp_server_risk", "check_prompt_injection_breach", "check_tech_stack_cve",
+    "check_bulk_identity_risk", "check_llm_credential_exposure", "check_server_status",
+}
+
+
+def _load_copy(env):
+    """A second, independent copy of the module, so the shared one's patched seam survives."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("relayshield_mcp_http_restricted", MODULE)
+    mod = importlib.util.module_from_spec(spec)
+    with mock.patch.dict(os.environ, env):
+        spec.loader.exec_module(mod)
+    return mod
+
+
+class ToolsetRestriction(unittest.TestCase):
+    def setUp(self):
+        self.mod = _load_copy({"RS_MCP_TOOLS": ",".join(sorted(AWS_LISTING_TOOLS))})
+
+    def test_unset_means_all_thirteen(self):
+        self.assertEqual(len(LAMBDA.TOOLS), 13)
+
+    def test_restricted_endpoint_lists_exactly_the_listing_tools(self):
+        self.assertEqual({t["name"] for t in self.mod.TOOLS}, AWS_LISTING_TOOLS)
+        msg = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+        out = self.mod.lambda_handler(_event(body=msg), None)
+        self.assertEqual({t["name"] for t in json.loads(out["body"])["result"]["tools"]}, AWS_LISTING_TOOLS)
+
+    def test_an_excluded_tool_cannot_be_called_by_name(self):
+        msg = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+               "params": {"name": "check_supply_chain", "arguments": {"vendor_domains": "a.com", "api_key": "k"}}}
+        out = json.loads(self.mod.lambda_handler(_event(body=msg), None)["body"])
+        self.assertEqual(out["error"]["code"], -32602)
+
+    def test_server_status_reports_the_restricted_count(self):
+        saved = self.mod._http_request
+        self.mod._http_request = lambda *a, **k: (200, "<html>")
+        try:
+            ev = json.loads(self.mod.check_server_status())["evidence"][0]
+        finally:
+            self.mod._http_request = saved
+        self.assertEqual(ev["tool_count"], len(AWS_LISTING_TOOLS))
+
+    def test_a_typo_fails_at_import_not_silently(self):
+        with self.assertRaises(RuntimeError):
+            _load_copy({"RS_MCP_TOOLS": "check_mcp_server_risk,check_mcp_server_rsik"})
+
+    def test_the_setup_script_sets_exactly_this_list(self):
+        script = (ROOT / "tools" / "create_mcp_http_lambda.sh").read_text(encoding="utf-8")
+        import re
+        m = re.search(r'^TOOLSET="([^"]+)"', script, re.M)
+        self.assertIsNotNone(m, "tools/create_mcp_http_lambda.sh must define TOOLSET")
+        self.assertEqual(set(m.group(1).split(",")), AWS_LISTING_TOOLS)
+        self.assertIn("RS_MCP_TOOLS=$TOOLSET", script)
+
+    def test_no_excluded_tool_is_one_that_the_listing_sells(self):
+        excluded = {t["name"] for t in LAMBDA.TOOLS} - AWS_LISTING_TOOLS
+        self.assertEqual(len(excluded), 7)
+        self.assertTrue(excluded.isdisjoint({"check_mcp_server_risk", "check_prompt_injection_breach",
+                                             "check_tech_stack_cve", "check_bulk_identity_risk",
+                                             "check_llm_credential_exposure"}))
+
+
 class RealHttpSeam(unittest.TestCase):
     """_http_request is the one place this module touches the network, and every
     other test replaces it. So run the REAL function against a real local server:

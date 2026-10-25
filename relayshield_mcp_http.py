@@ -827,6 +827,22 @@ _DISPATCH = {
 }
 
 
+# THE AWS LISTING SELLS FIVE OF THESE THIRTEEN. RS_MCP_TOOLS narrows this endpoint to
+# the ones the listing advertises (plus the introspection tool). It matters for more
+# than tidiness: the other tools reach third-party services (breach history, public
+# code hosts, package registries), and the AWS Foundational Technical Review requires
+# the listed product to run entirely on AWS. Unset means all 13, which is what the
+# parity tests compare against hf-space-mcp-server/app.py. An unknown name raises at
+# import so a typo fails the deploy's import probe instead of silently hiding a tool.
+_ONLY = [t.strip() for t in os.environ.get("RS_MCP_TOOLS", "").split(",") if t.strip()]
+if _ONLY:
+    _unknown = set(_ONLY) - set(_DISPATCH)
+    if _unknown:
+        raise RuntimeError(f"RS_MCP_TOOLS names unknown tools: {sorted(_unknown)}")
+    TOOLS = [t for t in TOOLS if t["name"] in _ONLY]
+    _DISPATCH = {k: v for k, v in _DISPATCH.items() if k in _ONLY}
+
+
 def _run_tool(name, arguments):
     fn, arg_names = _DISPATCH[name]
     args = []

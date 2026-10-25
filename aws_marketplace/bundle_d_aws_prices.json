@@ -1,0 +1,41 @@
+{
+  "_why": [
+    "THE PRICES THE AWS EDITION OF BUNDLE D CHARGES, and nothing else.",
+    "",
+    "tools/marketplace_update_offer_prices.py reads the LIVE offer, checks it against this",
+    "file, and builds ONE change set that replaces the offer's two pricing terms. It does not",
+    "touch the legal, support, renewal or targeting terms.",
+    "",
+    "DECIDED 2026-10-25 by Andrew: the AWS edition scores from RelayShield's own corpus and",
+    "carries fewer tools than the Stripe-direct bundle, so it is sold at 5 to 10 percent BELOW",
+    "the Stripe-direct price. There were no AWS subscribers when this was decided, so nobody's",
+    "price moved. The bundle is the same one sold on the developers site; only the data path",
+    "and the price differ. See CLAUDE.md, the AWS-licensed first-party path section.",
+    "",
+    "'reference' is the Stripe-direct price. Per-call references are read out of",
+    "relayshield_api.py's METERED_CREDIT_COSTS by test_bundle_d_aws_prices.py, so this file",
+    "cannot quietly disagree with what the code charges. 'aws' is the new AWS price.",
+    "",
+    "THE BAND IS ENFORCED, NOT REMEMBERED. The tool and the test both refuse a price that is",
+    "less than 5 or more than 10 percent below its reference. $269 would be 10.03 percent, which",
+    "is why the monthly minimum is $270.",
+    "",
+    "A CHANGE SET REPLACES THE WHOLE RATE CARD. On 2026-07-27 a malformed one rolled Bundle D's",
+    "prices back to placeholders. So the tool also refuses unless the live offer carries exactly",
+    "the dimensions named here, at exactly the 'reference' prices: a live card that has already",
+    "changed means this file is stale, and applying it would overwrite someone's change."
+  ],
+  "offer_id": "offer-3d5w6tbuis4wu",
+  "product_id": "prod-kkvurtspreofy",
+  "discount_band_percent": [5, 10],
+  "monthly": {
+    "agentic_bundle_access": {"reference": "299", "aws": "270"}
+  },
+  "per_call": {
+    "bulk_identity_risk":      {"reference": "2.000", "aws": "1.800"},
+    "tech_stack_cve":          {"reference": "0.200", "aws": "0.180"},
+    "mcp_registry_risk":       {"reference": "0.350", "aws": "0.320"},
+    "prompt_injection_breach": {"reference": "0.350", "aws": "0.320"},
+    "llm_credential_exposure": {"reference": "0.400", "aws": "0.360"}
+  }
+}

@@ -1191,6 +1191,10 @@ never zeroed: a lookup that scores 0 reads as clean. The AWS MCP server is limit
 
 **Never "dilute, get validated, switch it back on".** The declaration has to stay true after approval.
 
+**PRICE, decided the same day:** the AWS edition is sold 5 to 10 percent BELOW Stripe-direct (`aws_marketplace/bundle_d_aws_prices.json`, applied by
+`tools/marketplace_update_offer_prices.py`). Code comments that say Bundle D is "same product, same price, two doors" predate that and are wrong. Never change the
+AWS rate card by any other route: a change set replaces the whole card.
+
 ## Writing conventions
 
 - **No em-dashes** in published copy. Applies to the short syndication versions too.

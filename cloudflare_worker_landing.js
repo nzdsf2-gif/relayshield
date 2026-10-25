@@ -14,7 +14,7 @@ const HTML = `<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RelayShield: Identity Security, Threat Monitoring and Intelligence for the Agentic AI Era</title>
-<meta name="description" content="Identity security, threat monitoring and intelligence for the agentic AI era. TAP verifier for agentic commerce, MCP Proxy Firewall for AI agents, and threat intelligence APIs backed by 700K+ indicators across 125 monitored marketplaces.">
+<meta name="description" content="Identity security, threat monitoring and intelligence for the agentic AI era. TAP verifier for agentic commerce, MCP Proxy Firewall for AI agents, and threat intelligence APIs backed by 725K indicators across 129 monitored marketplaces.">
 <meta property="og:title" content="RelayShield: Identity Security, Threat Monitoring and Intelligence for the Agentic AI Era">
 <meta property="og:description" content="TAP verifier, MCP Proxy Firewall, and threat intelligence APIs for the agentic AI era.">
 <meta property="og:type" content="website">
@@ -204,7 +204,7 @@ const HTML = `<!DOCTYPE html>
   <div class="wrap">
     <span class="kicker">Identity Security for the Agentic AI Era</span>
     <h1>Identity Security, Threat Monitoring and <span class="accent">Intelligence</span> for the Agentic AI Era</h1>
-    <p class="sub">AI agents transact, browse, and call tools on your behalf. RelayShield verifies who is acting, screens what they touch, and watches the threat landscape behind them. Built on a live corpus of 700K+ threat indicators across 125 monitored marketplaces.</p>
+    <p class="sub">AI agents transact, browse, and call tools on your behalf. RelayShield verifies who is acting, screens what they touch, and watches the threat landscape behind them. Built on a live corpus of 725K threat indicators across 129 monitored marketplaces.</p>
     <div class="hero-ctas">
       <a class="btn btn-primary" href="https://api.relayshield.net/developers">Get API access</a>
       <a class="btn btn-ghost" href="#products" data-goto-tab="products">Explore products</a>
@@ -214,9 +214,9 @@ const HTML = `<!DOCTYPE html>
 
 <div class="metrics">
   <div class="wrap metrics-inner">
-    <div class="metric"><div class="num">125</div><div class="lbl">Monitored marketplaces</div></div>
-    <div class="metric"><div class="num">700K+</div><div class="lbl">Threat indicators</div></div>
-    <div class="metric"><div class="num">8.7M</div><div class="lbl">Corpus citations</div></div>
+    <div class="metric"><div class="num">129</div><div class="lbl">Monitored marketplaces</div></div>
+    <div class="metric"><div class="num">725K</div><div class="lbl">Threat indicators</div></div>
+    <div class="metric"><div class="num">9M+</div><div class="lbl">Corpus citations</div></div>
   </div>
 </div>
 
@@ -651,7 +651,7 @@ var PRODUCT_DETAILS = {
     tag: 'Live', title: 'TAP Verifier',
     sub: 'Cryptographic proof for agentic payments',
     body: 'RelayShield verifies Visa Trusted Agent Protocol messages so merchants know the agent at checkout is who it claims to be. Built for the x402 agent-to-agent economy and listed on Coinbase Bazaar. Each verification checks the RFC 9421 message signature, validates the signing key against the Visa JWKS, and screens the agent identity against the RelayShield threat corpus.',
-    list: ['RFC 9421 message signature verification', 'Signing key validation against Visa JWKS', 'Intent mismatch detection on payment details', 'Agent identity screening against the 700K+ indicator corpus', 'Signed verification receipts'],
+    list: ['RFC 9421 message signature verification', 'Signing key validation against Visa JWKS', 'Intent mismatch detection on payment details', 'Agent identity screening against the 725K indicator corpus', 'Signed verification receipts'],
     links: [
       { text: '$49/mo flat', href: 'https://buy.stripe.com/bJe28semO0mxf9adoj0Ny0l', cls: 'btn btn-primary btn-sm' },
       { text: 'API docs', href: 'https://api.relayshield.net/developers', cls: 'btn btn-ghost btn-sm' }
@@ -670,7 +670,7 @@ var PRODUCT_DETAILS = {
   ti: {
     tag: 'Live', title: 'Threat Intelligence APIs',
     sub: 'The corpus behind everything we build',
-    body: 'REST, MCP, and x402 pay-per-call access to the RelayShield corpus: 700K+ indicators and 8.7M citations across 125 monitored Telegram marketplaces and 20 authoritative feeds. Breach exposure, infostealer logs, SIM swap signals, wallet and domain reputation, and MCP registry risk. Now with live licenses on AWS Marketplace.',
+    body: 'REST, MCP, and x402 pay-per-call access to the RelayShield corpus: 725K indicators and 9M+ citations across 129 monitored Telegram marketplaces and 20 authoritative feeds. Breach exposure, infostealer logs, SIM swap signals, wallet and domain reputation, and MCP registry risk. Now with live licenses on AWS Marketplace.',
     list: ['Live licenses on AWS Marketplace', 'REST, MCP, STIX/TAXII, and x402 rails', 'Breach, infostealer, SIM swap, wallet, domain, and MCP registry coverage', 'Free checks with no signup', 'Pay per call when you scale'],
     links: [
       { text: 'Browse the API', href: 'https://api.relayshield.net/developers', cls: 'btn btn-primary btn-sm' },
@@ -694,8 +694,8 @@ var PRODUCT_DETAILS = {
   solana: {
     tag: 'Live', title: 'Solana Crypto Shield Mobile',
     sub: 'Wallet screening in your pocket',
-    body: 'Crypto Shield Mobile brings RelayShield scam checks to your phone, with Solana wallet screening built in. Check wallet addresses, links, and tokens before you sign a transaction. The same 700K+ indicator corpus, in your pocket.',
-    list: ['Solana wallet address screening', 'Link and token checks before you sign', 'Phishing and drainer detection', 'Same 700K+ indicator corpus as the API', 'Phone friendly: works where mobile browsers do not support extensions'],
+    body: 'Crypto Shield Mobile brings RelayShield scam checks to your phone, with Solana wallet screening built in. Check wallet addresses, links, and tokens before you sign a transaction. The same 725K indicator corpus, in your pocket.',
+    list: ['Solana wallet address screening', 'Link and token checks before you sign', 'Phishing and drainer detection', 'Same 725K indicator corpus as the API', 'Phone friendly: works where mobile browsers do not support extensions'],
     links: [
       { text: 'Crypto Shield mobile', href: 'https://cryptoshieldmobile.relayshield.net', cls: 'btn btn-primary btn-sm' }
     ]
@@ -731,7 +731,7 @@ var PRODUCT_DETAILS = {
     tag: 'Live', title: 'Chrome Extension',
     sub: 'Scam checks in your browser',
     body: 'The RelayShield Chrome extension screens links and pages as you browse, with tri-state verdicts: BLOCKED, FLAGGED, ALLOWED. An ALLOWED verdict means no flags were found, with caveats shown.',
-    list: ['Tri-state verdicts: BLOCKED, FLAGGED, ALLOWED', 'Screenshot to verdict', 'Same 700K+ indicator corpus', 'Privacy respecting: checks run against the API, browsing stays local'],
+    list: ['Tri-state verdicts: BLOCKED, FLAGGED, ALLOWED', 'Screenshot to verdict', 'Same 725K indicator corpus', 'Privacy respecting: checks run against the API, browsing stays local'],
     links: [
       { text: 'Get the extension', href: 'https://api.relayshield.net/developers', cls: 'btn btn-primary btn-sm' }
     ]

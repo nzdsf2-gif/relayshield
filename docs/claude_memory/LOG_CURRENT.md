@@ -875,3 +875,25 @@ From Andrew's own pastes (read, not assumed):
 * **Fixed:** the probe guard is now the first thing in `lambda_handler`, before the lock. `test_relayshield_intel_monitor_contract.py::ImportProbeGuard` checks it precedes `_acquire_lock()` and does no work; proven by changing the string and watching it fail. Deploys with the next push to main that touches the file.
 * **NOT established:** which invocation produced the Errors datapoint at 23:31. The first read filtered on `ERROR/Traceback/Runtime/Task timed out` and showed no failing invocation. Next read: the `REPORT RequestId` lines (Status, Duration, Max Memory) for 23:25 to 23:45.
 * **Side finding:** `@cti_vn` is private or the account is banned from it. It will log an ERROR every run until removed from `relayshield_intel_channels`.
+
+## 2026-10-25: "DEPLOYED ON AWS: NO" ON `prod-szi2wdww3obry` IS THE 2026-09-20 CHOICE, NOT A WAFR SIDE EFFECT. READ FROM THE PORTAL, NOT RECALLED.
+
+Andrew reported the listing "was deployed on AWS and something in our WAFR submission changed the status". **Not supported by any record.**
+Read from his screenshots of the Management Portal (SaaS products, then the Public row):
+
+* The product's **Architecture details** tab reads `AWS hosting pattern of your application: None of the above.` and the
+  Assessment reads `Deployed on AWS: No, this product is not fully deployed on AWS. Contact us for details.` That is the answer
+  chosen 2026-09-20 (`bundle_b_architecture_details_2026-09-20.md`), because the supply-chain endpoint depends on a paid third-party
+  API and secret-scan on six public registries.
+* **Portal SaaS products list:** three rows titled "Attack Surface & Supply Chain API". The **Public** one (last modified Sep 22) is the
+  real listing `prod-szi2wdww3obry`. The two **Restricted** ones (Sep 23) are the withdrawn duplicates `prod-v5nr5gjtdnofi` and
+  `prod-p3ei5nmgufnnq`. Never open or edit those two; the ids differ only by a random suffix.
+* **Gmail (own inbox) has no AWS message** about a status change, the WAFR result or architecture details. The only recent AWS mail
+  on this listing is the 2026-10-23 "AI Insights" notice.
+* **Not established:** whether the field was ever Yes, and what a WAFR/FTR does to it. The buyer-side "Manage subscriptions" page
+  is NOT where listings live; sellers use the Management Portal, SaaS products tab (the Server products tab is empty).
+* **Do not select "The product runs entirely on AWS"** until AWS says outbound calls to public APIs are not "3rd party dependencies".
+  Today it would be a public claim a reviewer can check, and it would be false.
+
+**Next:** Andrew sends the Requests log tab (shows any change request against this product), and opens a Contact us case asking whether
+the field was ever Yes and what restores it. Nothing is changed on the tab in the same sitting.

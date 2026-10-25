@@ -17362,9 +17362,12 @@ class _DynamoBindingStore:
         })
 
     def is_consumed(self, binding_id: str) -> bool:
+        # "consumed" is a DynamoDB reserved word: it cannot appear
+        # bare in an expression, so it rides behind an alias.
         item = self._table.get_item(
             Key={"binding_id": binding_id},
-            ProjectionExpression="consumed").get("Item")
+            ProjectionExpression="#c",
+            ExpressionAttributeNames={"#c": "consumed"}).get("Item")
         return bool(item and item.get("consumed"))
 
     def consume(self, binding_id: str) -> bool:
@@ -17374,10 +17377,11 @@ class _DynamoBindingStore:
         try:
             self._table.update_item(
                 Key={"binding_id": binding_id},
-                UpdateExpression="SET consumed = :true, consumed_at = :now",
+                UpdateExpression="SET #c = :true, consumed_at = :now",
                 ConditionExpression=(
                     "attribute_exists(binding_id) AND "
-                    "(attribute_not_exists(consumed) OR consumed = :false)"),
+                    "(attribute_not_exists(#c) OR #c = :false)"),
+                ExpressionAttributeNames={"#c": "consumed"},
                 ExpressionAttributeValues={
                     ":true": True,
                     ":false": False,

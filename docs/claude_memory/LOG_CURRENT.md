@@ -897,3 +897,26 @@ Read from his screenshots of the Management Portal (SaaS products, then the Publ
 
 **Next:** Andrew sends the Requests log tab (shows any change request against this product), and opens a Contact us case asking whether
 the field was ever Yes and what restores it. Nothing is changed on the tab in the same sitting.
+
+## 2026-10-25 (later): THE FTR IS BLOCKED BY TWO PREREQUISITES, NOT BY THE WAFR. READ FROM PARTNER CENTRAL SCREENSHOTS.
+
+Partner Central, solution `soln-aicwx4eiyofnm`, Validation details: **FTR status Blocked; "Request validation" is greyed out.**
+Prerequisites, in AWS's sequence: linked to exactly one Marketplace product **Complete**; no non-Marketplace products **Complete**;
+software product **Complete**; **"AWS Marketplace product is deployed on AWS" INCOMPLETE** (banner: "FTR validation requires your product
+to be hosted on AWS"); **"Partner Revenue Measurement (PRM) enabled" INCOMPLETE** (needs one of Resource Tagging, User Agent String or
+Marketplace Metering; the dashboard takes up to 7 days to reflect it, so it is the long pole).
+
+* **CORRECTION OF MY OWN EARLIER STATEMENT:** I told Andrew the console did not tie the FTR to "Deployed on AWS". It does. The repo had flagged
+  this on 2026-10-18 (`ftr_finish_2026-10-18.md` section 6) and I under-weighted it.
+* The linked product is `prod-kkvurtspreofy`; its Architecture details tab also reads "Deployed on AWS: No" (product last modified Aug 5).
+  `prod-szi2wdww3obry` is NOT what the FTR judges. Neither product was changed by the WAFR.
+* Well-Architected Tool workload "RelayShield API": 57/57 answered, **37 High, 15 Medium** (last updated 2026-10-18). That is the
+  "disappointing" result. It is not what blocks the request; the two prerequisites do.
+* **AWS rule, SECONDARY (search summary of the SaaS guidelines; docs.aws.amazon.com is unreachable from the container, WebFetch too):**
+  "deployed on AWS" needs the application AND control planes entirely on AWS; third-party services that transmit, store or process
+  application data must also run on AWS (CDN, DNS and corporate IdP exempt); agents/gateways may sit outside if they send data only to AWS.
+* **Likely causes in `prod-kkvurtspreofy`, from code:** the declared MCP endpoint is the Hugging Face Space (`hf-space-mcp-server/app.py`,
+  outside AWS, receives callers' keys and queried domains); `relayshield_agentic_api.py` calls `rdap.org`. NOT checked: the other Bundle D
+  endpoints' outbound calls. The authoritative answer is the "Contact us for details" case on the tab's Assessment panel.
+* **PRM:** metering already exists (`BatchMeterUsage`) but secondary sources say PRM metering covers AMI/ML, so Resource Tagging
+  (`aws-apn-id`) is the safer route for SaaS. Needs the exact tag value from Partner Central; do not guess it.

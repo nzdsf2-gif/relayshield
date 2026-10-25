@@ -85,7 +85,7 @@
     <div class="arrow">&#8595; &#8593;</div>
     <div class="box rs"><b>Amazon DynamoDB</b><span>Indicator corpus, key records, usage counters</span></div>
     <div class="arrow">&#8595;</div>
-    <div class="box rs"><b>AWS Secrets Manager</b><span>Upstream data-source credentials, read at runtime</span></div>
+    <div class="box rs"><b>AWS Secrets Manager</b><span>Service credentials, read at runtime</span></div>
   </div>
 
   <div class="col">
@@ -103,6 +103,6 @@
 
 <div class="outside"><span class="tag">Outside AWS &nbsp;&middot;&nbsp; shown so the boundary is explicit</span>
   <div class="box ext"><b>Cloudflare Workers, public web pages</b><span>Marketing, documentation and pricing pages. API traffic does not pass through them</span></div>
-  <div class="box ext"><b>Third-party data providers</b><span>Queried over HTTPS by some endpoints for enrichment. Their credentials are held in AWS Secrets Manager</span></div>
+  <div class="box ext"><b>Public data sources</b><span>Read by the scheduled collectors to build the indicator corpus. No customer query data is sent to them, and no customer call reaches them</span></div>
 </div>
 <div class="foot">Compute is AWS Lambda. DynamoDB tables use on-demand capacity. Metered calls are authenticated by API key.</div>

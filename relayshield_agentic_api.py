@@ -453,8 +453,16 @@ def handle_mcp_registry_risk(params: dict) -> dict:
                 })
                 break
 
-    # 3. RDAP registration-age check — newly registered domains are higher risk
-    if domain:
+    # 3. RDAP registration-age check — newly registered domains are higher risk.
+    #
+    # NOT RUN for an AWS-licensed key (params["_aws_data_path"], set by the dispatcher
+    # from the key record and never from the request). This is an outbound call that
+    # sends the queried domain to a third party, and the AWS Foundational Technical
+    # Review requires the listed product to be deployed entirely on AWS. Added
+    # 2026-10-25. The response names the check as not run, so a young domain that
+    # would have been flagged is never mistaken for a checked one.
+    first_party = bool(params.get("_aws_data_path"))
+    if domain and not first_party:
         age_days = _rdap_registration_age_days(domain)
         if age_days is not None and age_days < 30:
             findings.append({
@@ -473,6 +481,7 @@ def handle_mcp_registry_risk(params: dict) -> dict:
     verdict = max((f["severity"] for f in findings), key=lambda s: severity_order.get(s, 0), default="LOW")
 
     return _ok({
+        **({"data_path": "first_party", "signals_not_run": ["domain_registration_age"]} if first_party else {}),
         "queried":  server_url or package_name,
         "domain":   domain,
         "verdict":  verdict,
@@ -1324,6 +1333,12 @@ def lambda_handler(event: dict, context) -> dict:
         )
 
     params = _body(event)
+    # First-party-only data path for AWS-licensed keys. Set here from the key record,
+    # never from the request: anything the caller sent under this name is removed first.
+    if isinstance(params, dict):
+        params.pop("_aws_data_path", None)
+        if key_record.get("aws_customer_id"):
+            params["_aws_data_path"] = True
     result = handler(params)
 
     # Only meter successful calls (2xx) — never bill a request that errored.

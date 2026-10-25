@@ -15,8 +15,13 @@ routes = [
 # before the custom route is verified, following the checkemail pattern.
 workers_dev = true
 
-# NO npm dependencies and NO node_modules: the Worker imports nothing.
-# jsQR for the browser decode loads from CDN in the page itself.
+# npm dependencies: jsqr (server QR decode) and jpeg-js (JPEG pixels),
+# pinned in package.json at the repo root. Run `npm install` in the repo
+# root before deploy so wrangler can bundle them (esbuild resolves bare
+# imports from node_modules; no wrangler config change is needed, and no
+# nodejs_compat flag: both packages are pure JS with no node builtins).
+# node_modules is never committed. jsQR for the browser decode still loads
+# from CDN in the page itself.
 
 # ---------------------------------------------------------------------------
 # KV. COMMENTED OUT FOR THE FIRST DEPLOY, following the checkemail pattern:

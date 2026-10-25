@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "jpeg-js": "^0.4.4",
+    "jsqr": "^1.4.0"
+  },
+  "description": "RelayShield webcheck Worker dependencies (relayshield.net/check).",
+  "private": true
+}

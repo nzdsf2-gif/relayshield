@@ -1,22 +1,41 @@
 // Tests for cloudflare_worker_webcheck.js. Run with: node test_webcheck.mjs
-// No dependencies. The Worker file is ESM syntax in a .js file, so this test
-// copies it to a temp .mjs and imports that (Cloudflare serves the .js as
-// a module Worker; node needs the .mjs extension without a package.json).
+// after `npm install` in the repo root. The Worker file is ESM syntax in a
+// .js file, so this test copies it to a temp .mjs and imports that
+// (Cloudflare serves the .js as a module Worker; node needs the .mjs
+// extension without a package.json "type": "module"). The Worker imports
+// jsqr and jpeg-js, so the temp dir gets a node_modules symlink into the
+// repo root; without `npm install` the import below throws a clear error.
 // The Worker must not touch Cloudflare-only globals at import time: fetch,
 // crypto.subtle, Request, Response, FormData, btoa are all node globals.
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, copyFileSync, readFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  copyFileSync,
+  readFileSync,
+  existsSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
+import jpeg from "jpeg-js";
 
 const dir = mkdtempSync(join(tmpdir(), "webcheck-test-"));
 const workerMjs = join(dir, "worker.mjs");
 const workerSrc = fileURLToPath(
   new URL("./cloudflare_worker_webcheck.js", import.meta.url),
 );
+const repoRoot = fileURLToPath(new URL(".", import.meta.url));
+const nodeModules = join(repoRoot, "node_modules");
+if (!existsSync(nodeModules)) {
+  throw new Error(
+    "node_modules not found in the repo root. Run `npm install` in the repo " +
+      "root first (package.json pins jsqr and jpeg-js).",
+  );
+}
+symlinkSync(nodeModules, join(dir, "node_modules"), "dir");
 copyFileSync(workerSrc, workerMjs);
 const mod = await import(pathToFileURL(workerMjs).href);
 const handler = mod.default;
@@ -339,14 +358,76 @@ test("findCheckableInText prefers URL, then wallet, then email", () => {
   });
 });
 
-test("decodeQrServerSide is a documented seam, null until wired", async () => {
-  assert.equal(await mod.decodeQrServerSide(new Uint8Array([1, 2, 3]), "png"), null);
-  mod.__setQrDecoderForTests(async () => "https://example.com/qr");
+// --- server-side QR decode ---------------------------------------------------
+// Fixtures: a QR code for the QR_TEXT link as an RGBA PNG, a solid 16x16
+// gray PNG (no QR code), and a tiny 2x2 RGB PNG for the exact-pixel check.
+// Embedded as base64 so the suite needs no QR encoder at test time.
+const QR_TEXT = "https://relayshield.net/check-qr-fixture";
+const QR_PNG_B64 = "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";
+const SOLID_PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAAAAAAAAAAAAAAAD0lEQVR4nGM4gQYYRrYAAEdGyAEAAAAAAAAAAElFTkQAAAAA";
+const TINY_RGB_PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAAAAAAAAAAAFElEQVR4nGP4z8DAAMIM/////w8AH+4F+wAAAAAAAAAASUVORAAAAAA=";
+const fromB64 = (s) => new Uint8Array(Buffer.from(s, "base64"));
+
+test("decodeQrServerSide decodes a QR PNG", async () => {
+  assert.equal(
+    await mod.decodeQrServerSide(fromB64(QR_PNG_B64), "png"),
+    QR_TEXT,
+  );
+});
+
+test("decodeQrServerSide decodes a QR JPEG", async () => {
+  const img = await mod.decodeImageToRgba(fromB64(QR_PNG_B64), "png");
+  const jpg = jpeg.encode(
+    { data: Buffer.from(img.data), width: img.width, height: img.height },
+    92,
+  );
+  assert.equal(
+    await mod.decodeQrServerSide(new Uint8Array(jpg.data), "jpeg"),
+    QR_TEXT,
+  );
+});
+
+test("decodeQrServerSide returns null for a non-QR image", async () => {
+  assert.equal(
+    await mod.decodeQrServerSide(fromB64(SOLID_PNG_B64), "png"),
+    null,
+  );
+});
+
+test("decodeQrServerSide never throws on bad input", async () => {
   assert.equal(
     await mod.decodeQrServerSide(new Uint8Array([1, 2, 3]), "png"),
-    "https://example.com/qr",
+    null,
   );
-  mod.__setQrDecoderForTests(null);
+  assert.equal(
+    await mod.decodeQrServerSide(fromB64(QR_PNG_B64).subarray(0, 60), "png"),
+    null,
+  );
+  assert.equal(
+    await mod.decodeQrServerSide(
+      new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]),
+      "gif",
+    ),
+    null,
+  );
+});
+
+test("decodeImageToRgba recovers exact pixels", async () => {
+  const img = await mod.decodeImageToRgba(fromB64(TINY_RGB_PNG_B64), "png");
+  assert.deepEqual([...img.data], [
+    255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255,
+  ]);
+});
+
+test("downscaleRgba caps large images", () => {
+  const data = new Uint8ClampedArray(2000 * 1000 * 4).fill(128);
+  const scaled = mod.downscaleRgba(data, 2000, 1000);
+  assert.equal(scaled.width, 1000);
+  assert.equal(scaled.height, 500);
+  assert.equal(scaled.data.length, 1000 * 500 * 4);
+  const small = mod.downscaleRgba(data, 800, 600);
+  assert.equal(small.width, 800);
+  assert.equal(small.data, data);
 });
 
 // --- SigV4 shape ---------------------------------------------------------------
@@ -578,6 +659,35 @@ test("POST /check/api/upload without OCR secrets degrades to unchecked, not an e
     const data = await resp.json();
     assert.equal(data.card.badge, "UNCHECKED");
     assert.match(data.card.why[0], /not configured/);
+  });
+});
+
+test("POST /check/api/upload decodes a QR image before OCR", async () => {
+  // No OCR secrets here: if the QR path works, the upload still returns a
+  // card (via upload-qr), not the "not configured" unchecked card.
+  const kv = new FakeKV();
+  const form = new FormData();
+  form.append(
+    "file",
+    new Blob([fromB64(QR_PNG_B64)], { type: "image/png" }),
+    "qr.png",
+  );
+  await withFetch(apiFetch, async () => {
+    const resp = await handler.fetch(
+      new Request("https://relayshield.net/check/api/upload", {
+        method: "POST",
+        body: form,
+      }),
+      { WEBCHECK_KV: kv },
+      ctx,
+    );
+    assert.equal(resp.status, 200);
+    const data = await resp.json();
+    assert.equal(data.ok, true);
+    assert.equal(data.card.via, "upload-qr");
+    assert.equal(data.card.badge, "THREAT DETECTED");
+    const m = await mod.readMetrics(kv, new Date());
+    assert.equal(m.checks_by_type.upload, 1);
   });
 });
 

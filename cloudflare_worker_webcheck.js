@@ -31,22 +31,25 @@
  * Uploaded images: the page first tries to decode a QR code in the browser
  * (jsQR from CDN, full browser image support). Only if that fails does the
  * file reach this Worker, where it is validated (size, magic bytes) and run
- * through screenshot OCR (AWS Rekognition DetectText, the same engine the
- * bots' MSGSCAN path uses) and any link, wallet, or email found in the
- * recognised text is checked. Server-side QR decode is a documented seam
- * (decodeQrServerSide below), not live in this patch: the Worker runtime
- * has no image decoder and jsQR cannot be vendored byte-faithfully through
- * this build's text-only fetch path. NOTES.md gives the exact enablement
- * step (npm i jsqr plus a pixel pipeline). Until then the browser covers
- * QR decode and the server covers OCR, which is the honest split.
+ * through server-side QR decode first (jsQR over a PNG/JPEG pixel pipeline
+ * below), then screenshot OCR (AWS Rekognition DetectText, the same engine
+ * the bots' MSGSCAN path uses) if no QR code is found. Any link, wallet, or
+ * email found in the decoded text is checked. GIF and WebP uploads skip the
+ * QR step (no decoder for those formats here) and go straight to OCR.
  *
  * Submitted items are checked, not stored. KV holds counts only: check
  * totals by type and verdict, conversion clicks by destination, and daily
  * buckets for the weekly report. No input, no image, no IP is persisted
  * beyond the rate-limit window.
  *
- * NO npm dependencies. The Worker imports nothing.
+ * npm dependencies: jsqr (QR decode) and jpeg-js (JPEG pixels). PNG pixels
+ * come from a small decoder in this file (DecompressionStream inflate).
+ * package.json at the repo root pins both; node_modules is never committed.
+ * The browser page still loads jsQR from CDN for its own decode path.
  */
+
+import jsQR from "jsqr";
+import jpeg from "jpeg-js";
 
 const API_BASE_DEFAULT = "https://api.relayshield.net";
 const CHECK_TIMEOUT_MS = 15000;
@@ -518,7 +521,7 @@ export async function runCheck(kind, value, apiBase, fetchFn) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Uploads: validation, QR seam, Rekognition OCR fallback.             */
+/* Uploads: validation, QR decode, Rekognition OCR fallback.            */
 /* ------------------------------------------------------------------ */
 
 export function sniffImageType(bytes) {
@@ -553,30 +556,297 @@ export function validateUpload(bytes, fileName) {
 }
 
 /**
- * SERVER QR DECODE SEAM, NOT YET WIRED.
+ * Server-side QR decode: image bytes to QR text, or null. Never throws:
+ * any failure here must fall through to the OCR path below, not fail the
+ * upload. Order in handleUpload is QR first, then OCR.
  *
- * This must decode a QR code from raw image bytes and return its text, or
- * null when no QR code is present. It is intentionally a stub in this
- * patch. The Worker runtime has no image decoder, and the QR decoder
- * library (jsQR, MIT) cannot be vendored byte-faithfully through this
- * build's text-only fetch path, so shipping a half-working decoder would
- * be worse than shipping the seam. To enable it (NOTES.md step 5):
- *   1. npm install jsqr (wrangler bundles npm deps into the Worker), and
- *   2. add a pixel pipeline (PNG decode covers most QR screenshots; JPEG
- *      needs a JPEG decoder or a WASM image module), then
- *   3. replace this body with jsQR(pixels, width, height)?.data ?? null.
- * Until then the browser decodes QR codes (full image support via canvas)
- * and this endpoint covers screenshots through the OCR fallback below.
- * Tests inject a stub through __setQrDecoderForTests; production code
- * never sees a decoder until the step above lands.
+ * Pipeline: PNG pixels come from decodePngToRgba in this file (pure JS:
+ * chunk walk, DecompressionStream inflate, all five row filters, color
+ * types 0/2/3/4/6, bit depths 1/2/4/8/16). JPEG pixels come from jpeg-js.
+ * GIF and WebP have no decoder here and return null. Interlaced
+ * (Adam7) PNGs return null; the browser decode path covers those, since
+ * canvas decodes every PNG shape. Large images are box-averaged down to
+ * a 1600px max dimension before jsQR, so a phone screenshot cannot blow
+ * the Worker's CPU budget on a 4000px decode.
  */
-let qrDecoderForTests = null;
-export function __setQrDecoderForTests(fn) {
-  qrDecoderForTests = fn;
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+const MAX_QR_DIMENSION = 1600;
+
+async function inflateZlib(data) {
+  const stream = new Blob([data])
+    .stream()
+    .pipeThrough(new DecompressionStream("deflate"));
+  const buf = await new Response(stream).arrayBuffer();
+  return new Uint8Array(buf);
 }
+
+function paeth(a, b, c) {
+  const p = a + b - c;
+  const pa = Math.abs(p - a);
+  const pb = Math.abs(p - b);
+  const pc = Math.abs(p - c);
+  if (pa <= pb && pa <= pc) return a;
+  if (pb <= pc) return b;
+  return c;
+}
+
+/**
+ * Decode PNG bytes to RGBA. Returns {data, width, height} or null.
+ * Non-interlaced only; see the block comment above for the covered set.
+ */
+export async function decodePngToRgba(bytes) {
+  if (!bytes || bytes.length < 8) return null;
+  for (let i = 0; i < 8; i++) {
+    if (bytes[i] !== PNG_SIGNATURE[i]) return null;
+  }
+  let pos = 8;
+  let width = 0;
+  let height = 0;
+  let bitDepth = 0;
+  let colorType = 0;
+  let palette = null;
+  let trns = null;
+  const idat = [];
+  while (pos + 8 <= bytes.length) {
+    const len =
+      (bytes[pos] << 24) | (bytes[pos + 1] << 16) | (bytes[pos + 2] << 8) | bytes[pos + 3];
+    const type = String.fromCharCode(
+      bytes[pos + 4],
+      bytes[pos + 5],
+      bytes[pos + 6],
+      bytes[pos + 7],
+    );
+    const start = pos + 8;
+    const end = start + len;
+    if (end + 4 > bytes.length) return null;
+    const chunk = bytes.subarray(start, end);
+    if (type === "IHDR") {
+      width =
+        (chunk[0] << 24) | (chunk[1] << 16) | (chunk[2] << 8) | chunk[3];
+      height =
+        (chunk[4] << 24) | (chunk[5] << 16) | (chunk[6] << 8) | chunk[7];
+      bitDepth = chunk[8];
+      colorType = chunk[9];
+      if (chunk[10] !== 0 || chunk[11] !== 0) return null;
+      if (chunk[12] !== 0) return null; // interlaced (Adam7): not supported
+    } else if (type === "PLTE") {
+      palette = chunk;
+    } else if (type === "tRNS") {
+      trns = chunk;
+    } else if (type === "IDAT") {
+      idat.push(chunk);
+    } else if (type === "IEND") {
+      break;
+    }
+    pos = end + 4;
+  }
+  if (!width || !height || !bitDepth) return null;
+  const channels = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[colorType];
+  if (!channels) return null;
+  if (![1, 2, 4, 8, 16].includes(bitDepth)) return null;
+  if (colorType === 3 && !palette) return null;
+
+  const total = idat.reduce((n, c) => n + c.length, 0);
+  const compressed = new Uint8Array(total);
+  let off = 0;
+  for (const c of idat) {
+    compressed.set(c, off);
+    off += c.length;
+  }
+  let raw;
+  try {
+    raw = await inflateZlib(compressed);
+  } catch {
+    return null;
+  }
+  const bitsPerPixel = channels * bitDepth;
+  const rowBytes = Math.ceil((width * bitsPerPixel) / 8);
+  const stride = rowBytes + 1;
+  if (raw.length < height * stride) return null;
+
+  // Unfilter in place, row by row.
+  const bpp = Math.max(1, Math.floor(bitsPerPixel / 8));
+  const rows = new Uint8Array(height * rowBytes);
+  let prev = null;
+  for (let y = 0; y < height; y++) {
+    const filter = raw[y * stride];
+    const row = raw.subarray(y * stride + 1, y * stride + 1 + rowBytes);
+    const out = rows.subarray(y * rowBytes, (y + 1) * rowBytes);
+    if (filter === 0) {
+      out.set(row);
+    } else if (filter === 1) {
+      for (let i = 0; i < rowBytes; i++) {
+        const a = i >= bpp ? out[i - bpp] : 0;
+        out[i] = (row[i] + a) & 0xff;
+      }
+    } else if (filter === 2) {
+      for (let i = 0; i < rowBytes; i++) {
+        const b = prev ? prev[i] : 0;
+        out[i] = (row[i] + b) & 0xff;
+      }
+    } else if (filter === 3) {
+      for (let i = 0; i < rowBytes; i++) {
+        const a = i >= bpp ? out[i - bpp] : 0;
+        const b = prev ? prev[i] : 0;
+        out[i] = (row[i] + Math.floor((a + b) / 2)) & 0xff;
+      }
+    } else if (filter === 4) {
+      for (let i = 0; i < rowBytes; i++) {
+        const a = i >= bpp ? out[i - bpp] : 0;
+        const b = prev ? prev[i] : 0;
+        const c = i >= bpp && prev ? prev[i - bpp] : 0;
+        out[i] = (row[i] + paeth(a, b, c)) & 0xff;
+      }
+    } else {
+      return null;
+    }
+    prev = out;
+  }
+
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  const maxSample = (1 << bitDepth) - 1;
+  const readSample = (rowData, px, ch) => {
+    if (bitDepth === 8) return rowData[px * channels + ch];
+    if (bitDepth === 16) return rowData[(px * channels + ch) * 2];
+    const bitPos = px * bitsPerPixel + ch * bitDepth;
+    const byte = rowData[bitPos >> 3];
+    const shift = 8 - bitDepth - (bitPos & 7);
+    return (byte >> shift) & maxSample;
+  };
+  const scale = (v) => (bitDepth === 8 ? v : Math.round((v * 255) / maxSample));
+  for (let y = 0; y < height; y++) {
+    const rowData = rows.subarray(y * rowBytes, (y + 1) * rowBytes);
+    for (let x = 0; x < width; x++) {
+      const o = (y * width + x) * 4;
+      if (colorType === 0) {
+        const g = scale(readSample(rowData, x, 0));
+        rgba[o] = g;
+        rgba[o + 1] = g;
+        rgba[o + 2] = g;
+        rgba[o + 3] = 255;
+        if (trns && trns.length >= 2) {
+          const t = (trns[0] << 8) | trns[1];
+          if (readSample(rowData, x, 0) === t) rgba[o + 3] = 0;
+        }
+      } else if (colorType === 2) {
+        const r = scale(readSample(rowData, x, 0));
+        const g = scale(readSample(rowData, x, 1));
+        const b = scale(readSample(rowData, x, 2));
+        rgba[o] = r;
+        rgba[o + 1] = g;
+        rgba[o + 2] = b;
+        rgba[o + 3] = 255;
+        if (trns && trns.length >= 6) {
+          const tr = (trns[0] << 8) | trns[1];
+          const tg = (trns[2] << 8) | trns[3];
+          const tb = (trns[4] << 8) | trns[5];
+          if (
+            readSample(rowData, x, 0) === tr &&
+            readSample(rowData, x, 1) === tg &&
+            readSample(rowData, x, 2) === tb
+          ) {
+            rgba[o + 3] = 0;
+          }
+        }
+      } else if (colorType === 3) {
+        const idx = readSample(rowData, x, 0);
+        const pi = idx * 3;
+        if (pi + 2 >= palette.length) return null;
+        rgba[o] = palette[pi];
+        rgba[o + 1] = palette[pi + 1];
+        rgba[o + 2] = palette[pi + 2];
+        rgba[o + 3] = trns && idx < trns.length ? trns[idx] : 255;
+      } else if (colorType === 4) {
+        const g = scale(readSample(rowData, x, 0));
+        const a = scale(readSample(rowData, x, 1));
+        rgba[o] = g;
+        rgba[o + 1] = g;
+        rgba[o + 2] = g;
+        rgba[o + 3] = a;
+      } else if (colorType === 6) {
+        rgba[o] = scale(readSample(rowData, x, 0));
+        rgba[o + 1] = scale(readSample(rowData, x, 1));
+        rgba[o + 2] = scale(readSample(rowData, x, 2));
+        rgba[o + 3] = scale(readSample(rowData, x, 3));
+      }
+    }
+  }
+  return { data: rgba, width, height };
+}
+
+/** Decode JPEG bytes to RGBA via jpeg-js. Returns null on failure. */
+export function decodeJpegToRgba(bytes) {
+  try {
+    const img = jpeg.decode(bytes);
+    return {
+      data: new Uint8ClampedArray(img.data),
+      width: img.width,
+      height: img.height,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Box-average downscale so jsQR never sees a huge image. */
+export function downscaleRgba(data, width, height) {
+  const maxDim = Math.max(width, height);
+  if (maxDim <= MAX_QR_DIMENSION) return { data, width, height };
+  const factor = Math.ceil(maxDim / MAX_QR_DIMENSION);
+  const nw = Math.floor(width / factor);
+  const nh = Math.floor(height / factor);
+  const out = new Uint8ClampedArray(nw * nh * 4);
+  for (let y = 0; y < nh; y++) {
+    for (let x = 0; x < nw; x++) {
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let a = 0;
+      let n = 0;
+      for (let dy = 0; dy < factor; dy++) {
+        for (let dx = 0; dx < factor; dx++) {
+          const sx = x * factor + dx;
+          const sy = y * factor + dy;
+          if (sx >= width || sy >= height) continue;
+          const o = (sy * width + sx) * 4;
+          r += data[o];
+          g += data[o + 1];
+          b += data[o + 2];
+          a += data[o + 3];
+          n++;
+        }
+      }
+      const o = (y * nw + x) * 4;
+      out[o] = Math.round(r / n);
+      out[o + 1] = Math.round(g / n);
+      out[o + 2] = Math.round(b / n);
+      out[o + 3] = Math.round(a / n);
+    }
+  }
+  return { data: out, width: nw, height: nh };
+}
+
+/** Decode any supported image bytes to RGBA, or null. */
+export async function decodeImageToRgba(bytes, contentType) {
+  try {
+    if (contentType === "png") return await decodePngToRgba(bytes);
+    if (contentType === "jpeg") return decodeJpegToRgba(bytes);
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function decodeQrServerSide(bytes, contentType) {
-  if (qrDecoderForTests) return qrDecoderForTests(bytes, contentType);
-  return null;
+  try {
+    const img = await decodeImageToRgba(bytes, contentType);
+    if (!img) return null;
+    const scaled = downscaleRgba(img.data, img.width, img.height);
+    const code = jsQR(scaled.data, scaled.width, scaled.height);
+    return code ? code.data : null;
+  } catch {
+    return null;
+  }
 }
 
 /** AWS SigV4 signing for one Rekognition DetectText call. */

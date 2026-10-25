@@ -596,3 +596,27 @@ work (x402 manifest count 36 != 38, bundle_b_gating, day3, weekly_metrics and ot
 **NEXT, in order:** merge this branch; CI deploys `relayshield-api` and `relayshield-agentic-api` (check the run is green AND the import probe passes); re-run
 `tools/create_mcp_http_lambda.sh` (it now sets the toolset); prove an AWS-licensed key's bulk-identity-risk response says `first_party`; THEN the listing change set (endpoint +
 copy) and the Architecture details resubmission with the new diagram. The PRM prerequisite is still open: ask what Partner Central detects before adding a User Agent string anywhere.
+
+## 2026-10-25 (pricing + copy): THE AWS EDITION OF BUNDLE D IS PRICED 5-10% BELOW STRIPE-DIRECT. TOOLS BUILT, NOTHING SUBMITTED.
+
+**Decided by Andrew, in his words:** *"if we ever [have AWS subscribers], it should be at a 5-10% discount off the Stripe price which includes more. I'm ok to state the scores come
+from RS own corpus."* He also removed agent-bait: *"a capability of the RS mcp proxy fw which is a different product."* There are no AWS subscribers, so no price moved.
+
+* **Live offer read (Actions run 40237468649, `offer-3d5w6tbuis4wu`, State Released):** `UsageBasedPricingTerm` bulk_identity_risk 2.000, tech_stack_cve 0.200, mcp_registry_risk 0.350,
+  prompt_injection_breach 0.350, llm_credential_exposure 0.400; `ConfigurableUpfrontPricingTerm` P1M agentic_bundle_access 299; plus Legal, Support, Renewal terms and a country
+  TargetingRule. Identical to `aws_marketplace/offer_baseline_2026-07-31.json`. Stripe-direct per-call prices are `METERED_CREDIT_COSTS` in `relayshield_api.py`.
+* **New AWS prices:** $270 monthly (9.7% off; $269 would be 10.03%, outside the band), bulk 1.800, tech-stack 0.180, mcp-registry 0.320, prompt-injection 0.320, llm-credential 0.360.
+  Spec: `aws_marketplace/bundle_d_aws_prices.json`. Tool: `tools/marketplace_update_offer_prices.py` (dry run reads the live offer; copies the two pricing terms verbatim; ONE
+  `UpdatePricingTerms` change; refuses a missing/extra dimension, a live price that has moved, a price outside the band, the wrong offer/state, apply without confirmation, wrong
+  account). Workflow `.github/workflows/marketplace_offer_prices.yml` (dropdown confirm). `test_bundle_d_aws_prices.py`, 22 tests, proven by mutation; the request was also validated
+  against botocore's real marketplace-catalog model in a throwaway venv. **NOT proven:** that AWS accepts `UpdatePricingTerms` on a Released public offer. Only AWS can say.
+* **Listing copy** (`aws_marketplace/bundle_d_listing_copy.json`, paste file `bundle_d_listing_copy_aws_edition.md`, `test_bundle_d_listing_copy.py`, 13 tests): agent-bait out, no tool count,
+  no "newly-registered" claim (the registration-age lookup does not run for AWS keys), no corpus counts, no vendor names, and the new promise "queries are not forwarded to outside data
+  providers". **The old draft ShortDescription was 631 characters in a 500-character field and would have been refused;** the live accepted one is 475, this is 469.
+* **Product edits go through the Management Portal, not a hand-built change set,** because the live delivery option is `Type: ApiRegistration` (`ApiType: MCP_SERVER`) and the repo holds no accepted
+  change-set example for it. Inventing the shape would be the seven-rejections mistake again. The portal composes it, as it did for "Update architecture details" on 2026-09-22.
+* **Stale wording left in place on purpose:** comments in `relayshield_developer_signup.py` (Bundle D "same product, same price, two doors") and `relayshield_api.py` ("the two doors cannot drift")
+  predate this decision. Editing them would redeploy two live Lambdas for comments. The customer-visible "same rates as the AWS Marketplace listing" line is in the Bundle A email, not Bundle D.
+* **ORDER, and why:** (1) merge, re-run `tools/create_mcp_http_lambda.sh` so the endpoint serves only the listed tools; (2) prices dry run, then apply; (3) portal: Fulfillment options, MCP endpoint
+  to `https://api.relayshield.net/mcp`; (4) portal: Product information copy; (5) ONLY AFTER the endpoint change completes, portal: Architecture details plus the diagram. Declaring "entirely on
+  AWS" before the endpoint moves would be a false public claim.

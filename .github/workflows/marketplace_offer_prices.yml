@@ -1,0 +1,84 @@
+name: Marketplace Bundle D AWS prices
+
+# Changes the PRICES on Bundle D's public AWS offer (offer-3d5w6tbuis4wu) to the AWS-edition
+# prices in aws_marketplace/bundle_d_aws_prices.json, and nothing else.
+#
+# DECIDED 2026-10-25 by Andrew: the AWS edition scores from RelayShield's own corpus and carries
+# fewer tools than the Stripe-direct bundle, so it sells 5 to 10 percent below it. There were no
+# AWS subscribers at the time, so no existing price moves.
+#
+# WHY THIS IS NOT marketplace_changeset.yml. That workflow CREATES products and its tool refuses
+# every live entity by design. This one MODIFIES a live offer, which is the dangerous direction:
+# a change set replaces the whole rate card, and it rolled Bundle D's prices back to placeholders
+# on 2026-07-27. So the tool reads the live offer first, copies its terms verbatim, changes only
+# the numbers in the spec, and refuses if the live card is not exactly what the spec was written
+# against. See the header of tools/marketplace_update_offer_prices.py.
+#
+# DEFAULT IS A DRY RUN, and it reads the live offer, so the table it prints is the real
+# before-and-after. `apply` additionally needs the confirmation, a DROPDOWN rather than a typed
+# phrase (2026-09-19: CREATE-NEW_PRODUCT was refused over one underscore and the round was spent).
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'dry-run (reads the live offer, prints old and new prices, sends nothing) | apply (SENDS THE CHANGE SET)'
+        type: choice
+        options: [dry-run, apply]
+        default: dry-run
+      confirm:
+        description: 'For apply ONLY: select UPDATE-LIVE-PRICES'
+        type: choice
+        options:
+          - ''
+          - UPDATE-LIVE-PRICES
+        default: ''
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  prices:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # A dispatch runs the DEFAULT BRANCH's copy of the workflow, the tool AND the spec, so
+      # "Claude fixed it" and "the fix is in this run" are different facts. This names the commit.
+      - name: Which commit and which prices
+        run: |
+          echo "commit : $(git --no-pager log --oneline -1)"
+          python3 - <<'PY'
+          import json
+          s = json.load(open("aws_marketplace/bundle_d_aws_prices.json"))
+          print("offer  :", s["offer_id"], "on", s["product_id"])
+          for group in ("monthly", "per_call"):
+              for dim, v in s[group].items():
+                  print(f"         {dim:<26} {v['reference']:>7} -> {v['aws']:>7}")
+          PY
+
+      - name: Refuse apply without the confirmation
+        if: ${{ inputs.mode == 'apply' }}
+        run: |
+          if [ "${{ inputs.confirm }}" != "UPDATE-LIVE-PRICES" ]; then
+            echo "::error::apply requires confirm = UPDATE-LIVE-PRICES."
+            echo "This replaces the rate card on a live public offer."
+            exit 1
+          fi
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::239677749008:role/relayshield-github-deploy
+          aws-region: us-east-1
+
+      - name: Install boto3
+        run: pip install --quiet boto3
+
+      - name: Dry run
+        if: ${{ inputs.mode == 'dry-run' }}
+        run: python3 tools/marketplace_update_offer_prices.py
+
+      - name: Apply
+        if: ${{ inputs.mode == 'apply' }}
+        run: python3 tools/marketplace_update_offer_prices.py --apply --confirm UPDATE-LIVE-PRICES

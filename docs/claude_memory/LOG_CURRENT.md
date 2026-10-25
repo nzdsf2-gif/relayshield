@@ -875,3 +875,72 @@ From Andrew's own pastes (read, not assumed):
 * **Fixed:** the probe guard is now the first thing in `lambda_handler`, before the lock. `test_relayshield_intel_monitor_contract.py::ImportProbeGuard` checks it precedes `_acquire_lock()` and does no work; proven by changing the string and watching it fail. Deploys with the next push to main that touches the file.
 * **NOT established:** which invocation produced the Errors datapoint at 23:31. The first read filtered on `ERROR/Traceback/Runtime/Task timed out` and showed no failing invocation. Next read: the `REPORT RequestId` lines (Status, Duration, Max Memory) for 23:25 to 23:45.
 * **Side finding:** `@cti_vn` is private or the account is banned from it. It will log an ERROR every run until removed from `relayshield_intel_channels`.
+
+## 2026-10-25: "DEPLOYED ON AWS: NO" ON `prod-szi2wdww3obry` IS THE 2026-09-20 CHOICE, NOT A WAFR SIDE EFFECT. READ FROM THE PORTAL, NOT RECALLED.
+
+Andrew reported the listing "was deployed on AWS and something in our WAFR submission changed the status". **Not supported by any record.**
+Read from his screenshots of the Management Portal (SaaS products, then the Public row):
+
+* The product's **Architecture details** tab reads `AWS hosting pattern of your application: None of the above.` and the
+  Assessment reads `Deployed on AWS: No, this product is not fully deployed on AWS. Contact us for details.` That is the answer
+  chosen 2026-09-20 (`bundle_b_architecture_details_2026-09-20.md`), because the supply-chain endpoint depends on a paid third-party
+  API and secret-scan on six public registries.
+* **Portal SaaS products list:** three rows titled "Attack Surface & Supply Chain API". The **Public** one (last modified Sep 22) is the
+  real listing `prod-szi2wdww3obry`. The two **Restricted** ones (Sep 23) are the withdrawn duplicates `prod-v5nr5gjtdnofi` and
+  `prod-p3ei5nmgufnnq`. Never open or edit those two; the ids differ only by a random suffix.
+* **Gmail (own inbox) has no AWS message** about a status change, the WAFR result or architecture details. The only recent AWS mail
+  on this listing is the 2026-10-23 "AI Insights" notice.
+* **Not established:** whether the field was ever Yes, and what a WAFR/FTR does to it. The buyer-side "Manage subscriptions" page
+  is NOT where listings live; sellers use the Management Portal, SaaS products tab (the Server products tab is empty).
+* **Do not select "The product runs entirely on AWS"** until AWS says outbound calls to public APIs are not "3rd party dependencies".
+  Today it would be a public claim a reviewer can check, and it would be false.
+
+**Next:** Andrew sends the Requests log tab (shows any change request against this product), and opens a Contact us case asking whether
+the field was ever Yes and what restores it. Nothing is changed on the tab in the same sitting.
+
+## 2026-10-25 (later): THE FTR IS BLOCKED BY TWO PREREQUISITES, NOT BY THE WAFR. READ FROM PARTNER CENTRAL SCREENSHOTS.
+
+Partner Central, solution `soln-aicwx4eiyofnm`, Validation details: **FTR status Blocked; "Request validation" is greyed out.**
+Prerequisites, in AWS's sequence: linked to exactly one Marketplace product **Complete**; no non-Marketplace products **Complete**;
+software product **Complete**; **"AWS Marketplace product is deployed on AWS" INCOMPLETE** (banner: "FTR validation requires your product
+to be hosted on AWS"); **"Partner Revenue Measurement (PRM) enabled" INCOMPLETE** (needs one of Resource Tagging, User Agent String or
+Marketplace Metering; the dashboard takes up to 7 days to reflect it, so it is the long pole).
+
+* **CORRECTION OF MY OWN EARLIER STATEMENT:** I told Andrew the console did not tie the FTR to "Deployed on AWS". It does. The repo had flagged
+  this on 2026-10-18 (`ftr_finish_2026-10-18.md` section 6) and I under-weighted it.
+* The linked product is `prod-kkvurtspreofy`; its Architecture details tab also reads "Deployed on AWS: No" (product last modified Aug 5).
+  `prod-szi2wdww3obry` is NOT what the FTR judges. Neither product was changed by the WAFR.
+* Well-Architected Tool workload "RelayShield API": 57/57 answered, **37 High, 15 Medium** (last updated 2026-10-18). That is the
+  "disappointing" result. It is not what blocks the request; the two prerequisites do.
+* **AWS rule, SECONDARY (search summary of the SaaS guidelines; docs.aws.amazon.com is unreachable from the container, WebFetch too):**
+  "deployed on AWS" needs the application AND control planes entirely on AWS; third-party services that transmit, store or process
+  application data must also run on AWS (CDN, DNS and corporate IdP exempt); agents/gateways may sit outside if they send data only to AWS.
+* **Likely causes in `prod-kkvurtspreofy`, from code:** the declared MCP endpoint is the Hugging Face Space (`hf-space-mcp-server/app.py`,
+  outside AWS, receives callers' keys and queried domains); `relayshield_agentic_api.py` calls `rdap.org`. NOT checked: the other Bundle D
+  endpoints' outbound calls. The authoritative answer is the "Contact us for details" case on the tab's Assessment panel.
+* **PRM:** metering already exists (`BatchMeterUsage`) but secondary sources say PRM metering covers AMI/ML, so Resource Tagging
+  (`aws-apn-id`) is the safer route for SaaS. Needs the exact tag value from Partner Central; do not guess it.
+
+## 2026-10-25 (build): AWS-HOSTED MCP ENDPOINT WRITTEN AND TESTED; NOT DEPLOYED, LISTING NOT CHANGED.
+
+Why: the FTR prerequisite "product is deployed on AWS" fails for `prod-kkvurtspreofy` (AWS's own assistant read its hosting architecture as
+Control Plane and Application Plane both `UNSPECIFIED`, i.e. the "None of the above" answer), and the listing's registered MCP endpoint is the
+`-aws` Hugging Face Space. Repo evidence that only Bundle D registers that Space: Bundle A and B entity JSON are plain `SaaSUrlDeliveryOptionDetails`;
+`hf-space-mcp-server/app.py` says the `-aws` Space is "registered as Bundle D's MCP endpoint". The TI product (`prod-kb3ftelx44wlk`) is not in the repo,
+so it is unconfirmed. The Spaces are NOT retired.
+
+* `relayshield_mcp_http.py`: the same 13 tools, MCP Streamable HTTP (POST JSON-RPC), stdlib only, Lambda handler. Same result shapes, AWS-mode scrub always on.
+* `test_relayshield_mcp_http.py` (28 tests): runs every tool through BOTH `app.py` (gradio and requests stubbed, `AWS_MARKETPLACE_MODE=true`) and the
+  new module against identical fake upstream answers, plus the JSON-RPC transport, plus the real `_http_request` against a real local HTTP server
+  (200, 401, 500, timeout, refused). Proven by mutation: changed scope text, swapped severity order, a third-party import, a non-RelayShield host and a leaked
+  signup link each fail it.
+* `tools/create_mcp_http_lambda.sh`: dedicated logs-only role, function, `/mcp` on API `atq6wtkp6k` (ANY of POST/GET/OPTIONS), stage redeploy, proof over the
+  execute-api host AND `https://api.relayshield.net/mcp`. UNVERIFIED against AWS (no credentials here); `sh -n` clean and the demo-key extraction checked.
+* **Not done, in order:** (1) run the script; (2) map in `deploy_lambdas.yml`, `lambda_drift_check.yml`, `iam_github_deploy_invoke.json`; (3) a guarded
+  listing change set moving the registered MCP endpoint (a change set REPLACES what it is given; the 2026-07-27 rate-card rollback is the precedent);
+  (4) only then resubmit Architecture details as "runs entirely on AWS". Submitting it earlier would be a false public claim.
+* **Known limits:** API Gateway REST cuts a response at 29 s while `check_agent_risk_summary` can chain three 15 s calls; `X-RS-Source` stays
+  `hf-mcp-space` so usage still lands in the weekly report (both dispatchers match that exact string); `rdap.org` is still called by the backend and AWS may
+  count it as a third-party dependency. NOT checked: the other Bundle D endpoints' outbound calls.
+* **PRM:** AWS's assistant says User Agent String `APN_1.1/pc_46y72j0d99w7lyqkiqrakpc5k$`, management-plane calls only, one per resource per month. That
+  guidance is written for products that call into customer accounts; ours does not. Ask what the prerequisite actually detects before adding it anywhere.

@@ -1178,6 +1178,19 @@ Never put a bare partner code in that field.
 
 ---
 
+## THE AWS-LICENSED PATH MAKES NO THIRD-PARTY CALLS. ANY NEW LOOKUP ON THESE ENDPOINTS MUST HONOUR THE FLAG.
+
+**2026-10-25, decided by Andrew.** The AWS Foundational Technical Review needs `prod-kkvurtspreofy` "deployed on AWS", which AWS defines as every plane AND every
+third-party service that handles customer data running on AWS. So for a key with `aws_customer_id` the dispatchers set `params["_aws_data_path"]` (from the key
+record, never from the request), and `bulk-identity-risk`, `tech-stack-cve` and `mcp-registry-risk` skip their outbound lookups, rescale the remaining score and name
+`signals_not_run`. Stripe-direct, x402 and free callers are unchanged. Detail and tests: `test_aws_first_party_path.py`, LOG_CURRENT "decision + build".
+
+**THE RULE: a new outbound call inside any of those five endpoints, or inside anything they call, is skipped when `_aws_data_path` is set, in the same commit, with a
+test that fails if it runs.** Otherwise the architecture declaration on the listing becomes false and nothing says so. A missing signal must be rescaled and named,
+never zeroed: a lookup that scores 0 reads as clean. The AWS MCP server is limited by `RS_MCP_TOOLS` to the tools the listing sells, for the same reason.
+
+**Never "dilute, get validated, switch it back on".** The declaration has to stay true after approval.
+
 ## Writing conventions
 
 - **No em-dashes** in published copy. Applies to the short syndication versions too.

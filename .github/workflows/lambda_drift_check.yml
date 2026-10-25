@@ -217,6 +217,9 @@ jobs:
             # and finding that out from a red check costs nothing while finding
             # it out from a deploy costs the live code.
             ["relayshield_mpp_settlement.py"]="relayshield-mpp-settlement"
+            # Added 2026-10-25. Created by tools/create_mcp_http_lambda.sh from the file in main,
+            # so the first diff is clean by construction; watched here and mapped in the deployer.
+            ["relayshield_mcp_http.py"]="relayshield-mcp-http"
           )
 
           DRIFTED=""

@@ -2768,6 +2768,8 @@ print(f<span class="str">"Breaches: {breach.get('breach_count', 0)}"</span>)
     <a href="https://blog.relayshield.net/rss.xml" style="color:var(--accent)">RSS</a>
     <span style="color:var(--muted)">&nbsp;·&nbsp;</span>
     <a href="https://verify.relayshield.net" style="color:var(--accent);font-weight:600">Verify a verdict receipt</a>
+    <span style="color:var(--muted)">&nbsp;·&nbsp;</span>
+    <a href="https://relayshield.net/check" style="color:var(--accent);font-weight:600">Free scam check, no signup</a>
   </p>
   <p>RelayShield LLC · <a href="https://relayshield.net">relayshield.net</a> · <a href="mailto:support@relayshield.net">support@relayshield.net</a></p>
   <!--WA_FRONT_DOOR-->

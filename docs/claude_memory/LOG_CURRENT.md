@@ -652,3 +652,17 @@ did say "UNVERIFIED" about its AWS half, but that label is for what could differ
   The Space stays up for existing configurations, and the new text names the transport so nobody is surprised.
 * **AgentCore Gateway integration is a discovery lever worth a look, NOT done:** AWS marks it "Recommended" and it is aimed at exactly the "buyers are not finding my licenses" problem. It needs an
   OpenAPI 3.x file (`relayshield_openapi_spec.py` exists) and has requirements the repo has not read. Do not tick it in the same submission as the endpoint change.
+
+## 2026-10-26 (portal, second attempt): THE FORM REJECTED A TRAILING NEWLINE, AND THE WRONG FILE WAS PASTED.
+
+Andrew's screenshot: the MCP usage instructions field held the LONG DESCRIPTION text, with the error **"Values can not start or end with whitespace characters (space, tab, newline)."**
+* **Two faults, both mine:** (1) I had sent two paste files in one session (the Product information copy and the MCP usage text) and the wrong one ended up in the field; (2) my usage-instruction
+  files ended with a newline, so even the RIGHT file would have been refused. Whole-field paste files now carry NO trailing newline and each starts with its own heading ("Connecting",
+  "Overview"), so a wrong paste is obvious on sight.
+* **`aws_marketplace/bundle_d_api_usage_instructions.md` (3,710 chars of 4,000):** the LIVE REST usage text, rebuilt from the Actions log of run 40201513798, with exactly one sentence changed:
+  "registration-age red flags" became "known-malicious domains". Andrew could not find that phrase in a small textarea, so he gets the whole field. After the form is submitted, READ THE LIVE ENTITY
+  AGAIN and compare it to this file byte for byte: that is the check that the rebuilt text matches what was live.
+* **Guards** (`PasteableWithoutWhitespaceErrors`, `ApiUsageInstructions` in `test_bundle_d_listing_copy.py`, proven by five mutations): no leading or trailing whitespace on any pasted field, no CR,
+  the two usage files start with their own headings and are not the long description, the API text fits 4,000, the false claim is gone, the five endpoints and the curl continuations survive.
+* **Lesson:** a value pasted into a portal field is validated by that portal, and the validation rules are knowable only from the form. When the first field is rejected, check every other pasted file
+  for the same defect before sending the next one.

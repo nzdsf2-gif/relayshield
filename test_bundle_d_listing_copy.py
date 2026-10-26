@@ -133,5 +133,63 @@ class McpUsageInstructions(unittest.TestCase):
         self.assertIsNone(re.search(r"\d+(\.\d+)?\s?[MK]\+", self.TEXT))
 
 
+class PasteableWithoutWhitespaceErrors(unittest.TestCase):
+    """The Management Portal rejects any field value that starts or ends with whitespace:
+    "Values can not start or end with whitespace characters (space, tab, newline)". On 2026-10-26 the
+    MCP usage instructions file ended with a newline, so even the RIGHT file would have been refused
+    on paste. These files are pasted whole into portal fields, so they carry no trailing newline."""
+
+    PASTE_FILES = ("bundle_d_mcp_usage_instructions.md", "bundle_d_api_usage_instructions.md")
+
+    def test_whole_field_files_have_no_leading_or_trailing_whitespace(self):
+        for name in self.PASTE_FILES:
+            raw = (ROOT / "aws_marketplace" / name).read_bytes().decode("utf-8")
+            self.assertEqual(raw, raw.strip(), name)
+
+    def test_every_copy_field_has_no_leading_or_trailing_whitespace(self):
+        for key in ("ShortDescription", "LongDescription"):
+            self.assertEqual(COPY[key], COPY[key].strip(), key)
+        for item in COPY["Highlights"] + COPY["SearchKeywords"]:
+            self.assertEqual(item, item.strip(), item)
+
+    def test_no_carriage_returns_which_some_forms_count_as_extra_characters(self):
+        for name in self.PASTE_FILES:
+            self.assertNotIn("\r", (ROOT / "aws_marketplace" / name).read_bytes().decode("utf-8"), name)
+
+    def test_the_two_usage_files_are_not_each_other_or_the_long_description(self):
+        mcp = (ROOT / "aws_marketplace" / "bundle_d_mcp_usage_instructions.md").read_text(encoding="utf-8")
+        api = (ROOT / "aws_marketplace" / "bundle_d_api_usage_instructions.md").read_text(encoding="utf-8")
+        self.assertTrue(mcp.startswith("Connecting\n"), "the MCP file must start with its own heading")
+        self.assertTrue(api.startswith("Overview\n"), "the API file must start with its own heading")
+        self.assertNotIn("is built for the emerging risk", mcp + api)
+
+
+class ApiUsageInstructions(unittest.TestCase):
+    """The REST usage text is the other usage field on the same form. It is the LIVE text with one
+    sentence changed, because the registration-age lookup does not run for AWS-licensed keys."""
+
+    TEXT = (ROOT / "aws_marketplace" / "bundle_d_api_usage_instructions.md").read_text(encoding="utf-8")
+
+    def test_fits_the_4000_character_field(self):
+        self.assertLessEqual(len(self.TEXT), 4000)
+
+    def test_the_false_claim_is_gone_and_the_true_one_is_in(self):
+        self.assertNotIn("registration-age", self.TEXT)
+        self.assertIn("typosquat risk and known-malicious domains", self.TEXT)
+
+    def test_all_five_endpoints_and_the_base_url_survive(self):
+        for path in ("mcp-registry-risk", "prompt-injection-breach", "tech-stack-cve", "bulk-identity-risk", "llm-credential-exposure"):
+            self.assertIn(f"https://api.relayshield.net/v1/metered/{path}", self.TEXT, path)
+        self.assertIn("X-RS-API-KEY", self.TEXT)
+
+    def test_curl_continuation_lines_are_intact(self):
+        self.assertGreaterEqual(sum(1 for line in self.TEXT.splitlines() if line.endswith(" \\")), 10)
+
+    def test_house_rules(self):
+        self.assertNotIn("\u2014", self.TEXT)
+        for name in ("have i been pwned", "haveibeenpwned", "hibp", "hudson rock", "cavalier", "github", "rdap", "stripe"):
+            self.assertNotIn(name, self.TEXT.lower(), name)
+
+
 if __name__ == "__main__":
     unittest.main()

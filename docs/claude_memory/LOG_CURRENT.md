@@ -768,3 +768,8 @@ Andrew (403 for Claude). If it passes, go straight to todo 2 (Product informatio
 Verifier run 40406106919 (stage endpoint, head a68264e), read from the job log: all 8 endpoint lines PASS (MCP_SERVER, one endpoint, `https://api.relayshield.net/mcp`, API_KEY only, MCP usage text exact,
 **API usage text exact**, fulfillment URL unchanged, Public). The corrupted API text is fixed. Other stages read DIFFERS as expected. Live copy still has the old 475-char short description, the
 5.0M/3,750/85 corpus-count highlight, and keywords 'consumption pricing' + 'agent framework security'. NEXT: Product information copy (step 2) from `aws_marketplace/portal_fields/`.
+
+## 2026-10-26 (keywords): THE PORTAL'S KEYWORDS FIELD WANTS ONE COMMA-SEPARATED LINE, NOT ONE PER LINE.
+
+Andrew's screenshot: "Provide a comma-separated list of keywords", up to 15 keywords, each under 50 characters. My per-line file was a guess about a control this session had not seen, and I had flagged it as unseen. File is now
+`aws_marketplace/portal_fields/6_search_keywords_comma_separated.txt` (13 keywords joined by a bare comma, no space after it, so no keyword can start with whitespace); the drift test was updated and passes.

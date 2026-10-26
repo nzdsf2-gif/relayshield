@@ -98,5 +98,40 @@ class PasteFile(unittest.TestCase):
         self.assertEqual(int(m.group(1)), len(COPY["ShortDescription"]))
 
 
+class McpUsageInstructions(unittest.TestCase):
+    """The MCP usage instructions are a field on the Fulfillment options form, next to the endpoint URL.
+    On 2026-10-26 the endpoint URL was changed in the form while this text still told buyers to connect
+    to the old Space and described a registration-age check that no longer runs."""
+
+    TEXT = (ROOT / "aws_marketplace" / "bundle_d_mcp_usage_instructions.md").read_text(encoding="utf-8")
+
+    def test_fits_the_4000_character_field(self):
+        self.assertLessEqual(len(self.TEXT), 4000)
+
+    def test_points_at_the_aws_endpoint_and_never_at_the_old_space(self):
+        self.assertIn("https://api.relayshield.net/mcp", self.TEXT)
+        for stale in ("hf.space", "gradio", "/sse", "huggingface"):
+            self.assertNotIn(stale, self.TEXT.lower(), stale)
+
+    def test_names_the_transport_so_an_sse_only_client_is_not_surprised(self):
+        self.assertIn("Streamable HTTP", self.TEXT)
+
+    def test_documents_exactly_the_tools_the_endpoint_serves(self):
+        import re
+        script = (ROOT / "tools" / "create_mcp_http_lambda.sh").read_text(encoding="utf-8")
+        toolset = set(re.search(r'^TOOLSET="([^"]+)"', script, re.M).group(1).split(","))
+        documented = set(re.findall(r"^(check_[a-z_]+):", self.TEXT, re.M))
+        self.assertEqual(documented, toolset)
+
+    def test_claims_nothing_the_aws_path_does_not_do(self):
+        self.assertIsNone(re.search(r"registration[- ]age|newly[- ]registered|domain age", self.TEXT, re.I))
+
+    def test_house_rules(self):
+        self.assertNotIn("\u2014", self.TEXT)
+        for name in ("have i been pwned", "haveibeenpwned", "hibp", "hudson rock", "cavalier", "github", "rdap", "stripe"):
+            self.assertNotIn(name, self.TEXT.lower(), name)
+        self.assertIsNone(re.search(r"\d+(\.\d+)?\s?[MK]\+", self.TEXT))
+
+
 if __name__ == "__main__":
     unittest.main()

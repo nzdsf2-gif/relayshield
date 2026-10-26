@@ -636,3 +636,47 @@ did say "UNVERIFIED" about its AWS half, but that label is for what could differ
   and refuses `Variables={` in any non-comment line. Proven by putting the shorthand back.
 * **Also read this turn:** the "Marketplace Bundle D AWS prices" run (Actions 40248369052) was a DRY RUN against the live offer; the table matched the spec exactly; nothing was sent.
 * **Lesson for the next script that passes a list to the aws CLI:** put it in JSON, and run the argument through the real CLI before handing it over. `pip install awscli` in the scratchpad venv works.
+
+## 2026-10-26 (portal): THE AWS MCP ENDPOINT IS LIVE WITH 6 TOOLS; THE FULFILLMENT FORM'S USAGE TEXT STILL POINTED AT THE HUGGING FACE SPACE.
+
+* `tools/create_mcp_http_lambda.sh` re-run succeeded after the JSON fix: `https://api.relayshield.net/mcp` and the execute-api host both return `tools/list -> 6 tools`; stage `co89ol` deployed.
+* Andrew's Fulfillment options form (product `prod-kkvurtspreofy`, Management Portal) showed: Fulfillment method "Redirect to your website" (cannot be changed in the form; support request only),
+  Fulfillment URL `https://api.relayshield.net/marketplace/bundle-fulfillment`, AI agent or tool details Type "MCP server", **MCP endpoint URL typed by Andrew into the form (from my instruction) as `https://api.relayshield.net/mcp`, NOT yet submitted, so the live listing still points at the Space**,
+  MCP usage instructions (max 4,000 chars) and optional API usage instructions (max 4,000) still carrying the OLD text, Authorization method "API key", and
+  **"Amazon Bedrock AgentCore Gateway integration": "Enable tool for AgentCore Gateway integration - Recommended" vs "Do not enable" (currently NOT enabled).**
+* **Submitting only the URL would have left the listing contradicting itself:** the old MCP instructions say "Point your MCP client at: ...hf.space/gradio_api/mcp/sse" and describe
+  "domain-registration age"; the old API instructions say mcp-registry-risk scores "registration-age red flags". Both are false on the AWS path. Replacement:
+  `aws_marketplace/bundle_d_mcp_usage_instructions.md` (2,049 chars, guarded by `McpUsageInstructions` in `test_bundle_d_listing_copy.py`, proven by five mutations). For the API instructions the
+  single phrase "registration-age red flags" becomes "known-malicious domains".
+* **TRADE-OFF TO KNOW:** the Space spoke the legacy SSE transport; the AWS endpoint speaks Streamable HTTP (the current MCP transport). An MCP client that supports only SSE cannot use the new URL.
+  The Space stays up for existing configurations, and the new text names the transport so nobody is surprised.
+* **AgentCore Gateway integration is a discovery lever worth a look, NOT done:** AWS marks it "Recommended" and it is aimed at exactly the "buyers are not finding my licenses" problem. It needs an
+  OpenAPI 3.x file (`relayshield_openapi_spec.py` exists) and has requirements the repo has not read. Do not tick it in the same submission as the endpoint change.
+
+## 2026-10-26 (portal, second attempt): THE FORM REJECTED A TRAILING NEWLINE, AND THE WRONG FILE WAS PASTED.
+
+Andrew's screenshot: the MCP usage instructions field held the LONG DESCRIPTION text, with the error **"Values can not start or end with whitespace characters (space, tab, newline)."**
+* **Two faults, both mine:** (1) I had sent two paste files in one session (the Product information copy and the MCP usage text) and the wrong one ended up in the field; (2) my usage-instruction
+  files ended with a newline, so even the RIGHT file would have been refused. Whole-field paste files now carry NO trailing newline and each starts with its own heading ("Connecting",
+  "Overview"), so a wrong paste is obvious on sight.
+* **`aws_marketplace/bundle_d_api_usage_instructions.md` (3,710 chars of 4,000):** the LIVE REST usage text, rebuilt from the Actions log of run 40201513798, with exactly one sentence changed:
+  "registration-age red flags" became "known-malicious domains". Andrew could not find that phrase in a small textarea, so he gets the whole field. After the form is submitted, READ THE LIVE ENTITY
+  AGAIN and compare it to this file byte for byte: that is the check that the rebuilt text matches what was live.
+* **Guards** (`PasteableWithoutWhitespaceErrors`, `ApiUsageInstructions` in `test_bundle_d_listing_copy.py`, proven by five mutations): no leading or trailing whitespace on any pasted field, no CR,
+  the two usage files start with their own headings and are not the long description, the API text fits 4,000, the false claim is gone, the five endpoints and the curl continuations survive.
+* **Lesson:** a value pasted into a portal field is validated by that portal, and the validation rules are knowable only from the form. When the first field is rejected, check every other pasted file
+  for the same defect before sending the next one.
+
+## 2026-10-26 (submitted): FULFILLMENT OPTIONS REQUEST IS UNDER REVIEW; A READ-ONLY LISTING VERIFIER NOW EXISTS.
+
+* **Request `8k3v6j9uihtt9hh4vnp7lwbwzi`, "Update fulfillment options" (change: Update delivery options), entity `RelayShield - Consumption Security API Bundles`, status Under review**, submitted
+  2026-10-25 8:40 PM EDT, revision `prod-kkvurtspreofy@30`. What Andrew actually pasted into the usage fields is NOT known to this session; the verifier is how it gets established.
+  **One open change per product at a time (AWS seller-ops, 2026-07-17): do not submit the Product information copy until this request completes.**
+* **`tools/verify_bundle_d_listing.py`** + workflow **"Marketplace Bundle D listing check (read only)"** (`marketplace_verify_listing.yml`; stage dropdown endpoint | copy | architecture | prices | all): reads the live product and
+  the offer, compares byte for byte with `bundle_d_mcp_usage_instructions.md`, `bundle_d_api_usage_instructions.md`, `bundle_d_listing_copy.json` and `bundle_d_aws_prices.json`, prints PASS or DIFFERS per field,
+  and says WHERE the first difference is and whether it is only whitespace. A named stage judges the exit code; all four stages are always printed. `test_verify_bundle_d_listing.py` (24 tests), proven by nine
+  mutations, one of which SURVIVED the first version (highlights not compared) and now has tests. Run over a botocore-Stubber-validated `describe_entity` client in a throwaway venv.
+  Fixture `aws_marketplace/fixtures/prod_kkvurtspreofy_before_2026-10-25.json` is the real entity structure before any change; free-text fields nobody reads are shortened.
+* **My new workflow's first draft did not parse** (a plain YAML value containing ": "), which `test_workflows_parse.py` caught before it was pushed. That is the rule working; run it after every workflow edit.
+* **NEXT:** when the request completes, run the verifier with stage `endpoint`; only if it PASSES, submit the Product information copy; verify stage `copy`; then Architecture details plus the diagram; verify
+  stage `architecture`; then the prices dry run, apply, verify stage `prices`.

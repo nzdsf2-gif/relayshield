@@ -680,3 +680,19 @@ Andrew's screenshot: the MCP usage instructions field held the LONG DESCRIPTION 
 * **My new workflow's first draft did not parse** (a plain YAML value containing ": "), which `test_workflows_parse.py` caught before it was pushed. That is the rule working; run it after every workflow edit.
 * **NEXT:** when the request completes, run the verifier with stage `endpoint`; only if it PASSES, submit the Product information copy; verify stage `copy`; then Architecture details plus the diagram; verify
   stage `architecture`; then the prices dry run, apply, verify stage `prices`.
+
+## 2026-10-26 (verified): ENDPOINT AND MCP TEXT ARE LIVE AND EXACT. THE API USAGE TEXT WENT LIVE CORRUPTED, BECAUSE IT WAS COPIED FROM A RENDERED MARKDOWN PREVIEW.
+
+Request `8k3v6j9uihtt9hh4vnp7lwbwzi` Succeeded. Verifier run (Actions 40253202290, stage endpoint), read from the log:
+* **PASS:** ApiType MCP_SERVER, exactly one endpoint, **endpoint URL `https://api.relayshield.net/mcp`**, authorization API_KEY only, **MCP usage instructions identical to `bundle_d_mcp_usage_instructions.md`**,
+  fulfillment URL unchanged, product Public. The listing now points buyers at the AWS endpoint.
+* **DIFFERS:** API usage instructions: live 3,675 characters against 3,710, first difference at character 214, `1. Subscribe` live as `1 Subscribe`.
+  **Cause, reproduced to the character:** copying from a rendered Markdown view consumes the trailing backslash on every curl continuation line (13 lines, 2 characters each, the space before it trimmed too)
+  and draws each `N. ` list marker as `N ` (9 markers, 1 character each). 26 + 9 = 35. A simulation of exactly that transform gives length 3,675 and first difference 214. The MCP file has neither
+  construct, which is why it passed. **The live API text therefore LOST the backslashes in its curl examples, which breaks them if copied.** (The previous live text had them: the baseline read shows `\` line endings.)
+* **MY FAULT:** I sent the paste files as `.md`. A `.md` opens in a previewer. For text that is pasted into a form, the exact bytes must reach the clipboard: `pbcopy < file` does that with no rendering in between.
+  **Standing rule for any paste-into-a-form text: give a `pbcopy < ~/dev/relayshield/<path>` line, and say what the field must look like before submitting** (here: `1. Subscribe` keeps its period, curl lines end in a backslash).
+* **Verifier improved** (`tools/verify_bundle_d_listing.py`): on a mismatch it now lists EVERY differing region and recognises the rendered-Markdown signature by name (`as_rendered_markdown`), with
+  tests using the real numbers (`TheRenderedMarkdownSignature`, proven by mutation). The next stage is to resubmit the API text via pbcopy and re-run the endpoint check.
+* **STILL TRUE, do not forget:** copy, architecture and prices stages all read DIFFERS, as expected; none has been submitted. One open change per product: the endpoint request is complete, so the copy may go
+  next, but ONLY after the API text is fixed, because a Fulfillment-options resubmission is a change on the same product.

@@ -810,3 +810,9 @@ NEXT: Succeeded -> verifier stage `architecture` (Andrew dispatches or re-runs; 
   apigateway and dynamodb service models passes for the real tool and rejects the mutant (check script was in the scratchpad, not committed). NOT proven: that AWS accepts the REST API ARN form for tagging, and that the FTR prerequisite turns
   Complete on this small a spend. Tagging relayshield-api attributes ALL of that shared function's spend to Bundle D's code; acceptable for the prerequisite.
 * NEXT: Andrew runs the tool on the Mac (dry run, then `--apply`); wait up to 7 days for the dashboard; prices apply on his go; re-check Partner Central.
+
+## 2026-10-26 (prices SUBMITTED): CHANGE SET `5bf8i6hbov1600xq5q10bs0m2` SENT; AWS REVIEWS ASYNCHRONOUSLY. GREEN MEANS SUBMITTED, NOT LIVE.
+
+Actions run 40419471680 (apply, head a68264e, 23:24 UTC): the log's final lines are `SUBMITTED. ChangeSetId 5bf8i6hbov1600xq5q10bs0m2` and the document sent carries bulk 1.800, tech_stack 0.180, mcp_registry 0.320,
+prompt_injection 0.320, llm_credential 0.360 and monthly agentic_bundle_access 270. **Not yet verified live:** the verifier's `prices` stage is the check; do not call prices done until it reads PASS. One open change on the
+product until the change set finishes. PRM tagging is an AWS-account action, not a Marketplace change, so it does not collide.

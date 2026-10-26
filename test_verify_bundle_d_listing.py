@@ -169,6 +169,37 @@ class TheWaysAPasteGoesWrong(unittest.TestCase):
         self.assertFalse(v.run(p, after_offer(), "architecture")[1])
 
 
+class TheRenderedMarkdownSignature(unittest.TestCase):
+    """2026-10-26: the API usage text went live 35 characters short (3,675 of 3,710), first difference at
+    character 214, because it was copied from a rendered Markdown preview. The numbers below are the
+    real ones, and the MCP file passed because it contains neither construct."""
+
+    API = v.read("bundle_d_api_usage_instructions.md")
+
+    def test_the_real_numbers_reproduce_exactly(self):
+        rendered = v.as_rendered_markdown(self.API)
+        self.assertEqual((len(self.API), len(rendered)), (3710, 3675))
+        self.assertEqual(next(i for i, (a, b) in enumerate(zip(self.API, rendered)) if a != b), 214)
+
+    def test_the_verifier_names_the_cause(self):
+        msg = v.where_different(self.API, v.as_rendered_markdown(self.API))
+        self.assertIn("rendered Markdown preview", msg)
+        self.assertIn("pbcopy", msg)
+
+    def test_it_does_not_claim_that_cause_for_other_differences(self):
+        self.assertNotIn("rendered Markdown", v.where_different(self.API, self.API.replace("Overview", "Overveiw")))
+        self.assertNotIn("rendered Markdown", v.where_different(self.API, self.API[:-5]))
+
+    def test_every_differing_region_is_listed_not_just_the_first(self):
+        msg = v.where_different(self.API, v.as_rendered_markdown(self.API))
+        self.assertIn("22 differing region(s)", msg)       # 13 backslash lines + 9 list markers
+        self.assertIn("(+12 more)", msg)
+
+    def test_the_mcp_file_is_unaffected_by_rendering(self):
+        mcp = v.read("bundle_d_mcp_usage_instructions.md")
+        self.assertEqual(v.as_rendered_markdown(mcp), mcp)
+
+
 class EveryCopyFieldIsActuallyCompared(unittest.TestCase):
     """A mutant that stopped comparing Highlights survived the first version of this file."""
 

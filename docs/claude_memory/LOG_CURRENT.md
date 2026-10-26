@@ -816,3 +816,9 @@ NEXT: Succeeded -> verifier stage `architecture` (Andrew dispatches or re-runs; 
 Actions run 40419471680 (apply, head a68264e, 23:24 UTC): the log's final lines are `SUBMITTED. ChangeSetId 5bf8i6hbov1600xq5q10bs0m2` and the document sent carries bulk 1.800, tech_stack 0.180, mcp_registry 0.320,
 prompt_injection 0.320, llm_credential 0.360 and monthly agentic_bundle_access 270. **Not yet verified live:** the verifier's `prices` stage is the check; do not call prices done until it reads PASS. One open change on the
 product until the change set finishes. PRM tagging is an AWS-account action, not a Marketplace change, so it does not collide.
+
+## 2026-10-26 (prices, re-run refused): THE SECOND APPLY WAS REFUSED BECAUSE THE FIRST HAD ALREADY TAKEN EFFECT. THE GUARD WORKED.
+
+Run 40419471680 attempt 2 (23:27 UTC, a re-run three minutes after the first apply) exited 2 with `REFUSED: the live prices are not the prices the spec was written against`, listing live agentic_bundle_access 270, bulk 1.800, llm_credential 0.360,
+mcp_registry 0.320, prompt_injection 0.320, tech_stack 0.180. Those ARE the new AWS-edition prices, so change set `5bf8i6hbov1600xq5q10bs0m2` completed within about three minutes and the tool refused to apply the same change twice.
+This is read from Andrew's screenshot of the refusal, NOT yet from the verifier: next, verifier stage `prices` must read PASS before prices are called done. Do not re-run apply.

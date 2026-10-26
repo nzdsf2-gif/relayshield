@@ -788,3 +788,10 @@ NEXT: when it Succeeds, Andrew dispatches "Marketplace Bundle D listing check (r
 * Before declaring "runs entirely on AWS": deploy run 40235523349 (head c61fdd9, which contains cfa8bd9, the first-party path) succeeded and the import probe passed for `relayshield-agentic-api`, `relayshield-api` and
   `relayshield-mcp-http`. **Still NOT proven live:** an AWS-licensed key's response saying `data_path: first_party` (tests prove it with the real dispatchers; no production call has been made). Recommend doing it after submitting.
 * NEXT: Architecture details + `assets/marketplace/consumption_security_architecture.png` (1600x900, already on main), then verify stage `architecture`; then prices on his explicit go; then PRM; then Partner Central re-check.
+
+## 2026-10-26 (step 3 SUBMITTED): "UPDATE HOSTING ARCHITECTURE" REQUEST `7c016057sqdn42spdi30yevay` IS UNDER REVIEW (`prod-kkvurtspreofy@34`).
+
+Submitted by Andrew 2026-10-26 7:14 PM EDT. The form had a single "Application plane" section ("Entirely or mostly in your seller AWS account", whose own text says both application and control plane run in the seller's
+account) and NO separate control plane section, so only that was answered. **Not yet known:** whether the diagram upload was attached (Andrew did not say), and whether the entity will read CONTROL_PLANE as declared; the
+verifier's `architecture` stage answers both. One open change per product: nothing else may be submitted until it shows Succeeded. If AWS rejects, the likely named cause is a third-party dependency; do NOT edit the diagram to hide the Cloudflare box.
+NEXT: Succeeded -> verifier stage `architecture` (Andrew dispatches or re-runs; I read the job log) -> prices only on his explicit go -> PRM question -> Partner Central re-check.

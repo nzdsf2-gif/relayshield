@@ -773,3 +773,10 @@ Verifier run 40406106919 (stage endpoint, head a68264e), read from the job log: 
 
 Andrew's screenshot: "Provide a comma-separated list of keywords", up to 15 keywords, each under 50 characters. My per-line file was a guess about a control this session had not seen, and I had flagged it as unseen. File is now
 `aws_marketplace/portal_fields/6_search_keywords_comma_separated.txt` (13 keywords joined by a bare comma, no space after it, so no keyword can start with whitespace); the drift test was updated and passes.
+
+## 2026-10-26 (step 2 SUBMITTED): "UPDATE PRODUCT INFORMATION" REQUEST `6e7hu041897ertq2ajm01r59y` IS UNDER REVIEW.
+
+Submitted by Andrew 2026-10-26 6:06 PM EDT, change type "Update information", entity `RelayShield - Consumption Security API Bundles`, from the six files in `aws_marketplace/portal_fields/`
+(keywords as one comma-separated line). **What he actually pasted into each field is NOT known until the verifier reads it.** One open change per product: NOTHING else may be submitted until this shows Succeeded.
+NEXT: when it Succeeds, Andrew dispatches "Marketplace Bundle D listing check (read only)" with stage `copy`; I read the log. Only if copy PASSES: Architecture details + diagram
+(`assets/marketplace/consumption_security_architecture.png`), then verify stage `architecture`, then prices (explicit go only), then PRM, then the Partner Central re-check.

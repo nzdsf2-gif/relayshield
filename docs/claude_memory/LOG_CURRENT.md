@@ -762,3 +762,9 @@ Andrew (403 for Claude). If it passes, go straight to todo 2 (Product informatio
 * `aws_marketplace/portal_fields/` holds the six Product information fields, one file each, generated from `bundle_d_listing_copy.json`, no trailing whitespace, no CR. A test
   (`test_per_field_portal_files_are_exactly_the_json_fields`) fails if any file drifts from the JSON; proven by appending a character. Route: raw URL, Cmd+A, Cmd+C, per the 2026-10-26 lesson (no pbcopy).
 * The portal's keyword control is unseen by this session; the keyword file is one per line and may need adapting to the form.
+
+## 2026-10-26 (step 1 DONE): ENDPOINT STAGE ALL PASS, INCLUDING API USAGE INSTRUCTIONS.
+
+Verifier run 40406106919 (stage endpoint, head a68264e), read from the job log: all 8 endpoint lines PASS (MCP_SERVER, one endpoint, `https://api.relayshield.net/mcp`, API_KEY only, MCP usage text exact,
+**API usage text exact**, fulfillment URL unchanged, Public). The corrupted API text is fixed. Other stages read DIFFERS as expected. Live copy still has the old 475-char short description, the
+5.0M/3,750/85 corpus-count highlight, and keywords 'consumption pricing' + 'agent framework security'. NEXT: Product information copy (step 2) from `aws_marketplace/portal_fields/`.

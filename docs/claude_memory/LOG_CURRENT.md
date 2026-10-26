@@ -795,3 +795,18 @@ Submitted by Andrew 2026-10-26 7:14 PM EDT. The form had a single "Application p
 account) and NO separate control plane section, so only that was answered. **Not yet known:** whether the diagram upload was attached (Andrew did not say), and whether the entity will read CONTROL_PLANE as declared; the
 verifier's `architecture` stage answers both. One open change per product: nothing else may be submitted until it shows Succeeded. If AWS rejects, the likely named cause is a third-party dependency; do NOT edit the diagram to hide the Cloudflare box.
 NEXT: Succeeded -> verifier stage `architecture` (Andrew dispatches or re-runs; I read the job log) -> prices only on his explicit go -> PRM question -> Partner Central re-check.
+
+## 2026-10-26 (step 3 DONE; PRM TOOL BUILT, NOT RUN): ARCHITECTURE STAGE ALL PASS; PRM = RESOURCE TAGGING `aws-apn-id = pc:46y72j0d99w7lyqkiqrakpc5k`.
+
+* Request `7c016057sqdn42spdi30yevay` Succeeded (7:15 PM EDT). Verifier run 40406106919 attempt 3 (23:17 UTC): endpoint 8/8, copy 4/4, **architecture 3/3 PASS** (CONTROL_PLANE and APPLICATION_PLANE declared, diagram URL set). Only prices DIFFERS.
+  The single "Application plane" answer ("seller AWS account") covered the control plane too; the form had no separate section.
+* **Andrew's correction, recorded:** the trigger for contacting Dave Shapiro was the WAFR/FTR effort, not this listing work. He also expects more cleanup of "gaps"; the WAFR is 37 High / 15 Medium (2026-10-18).
+* **PRM, researched by search only** (docs.aws.amazon.com and help.clazar.io are unreachable from the container, so everything below is SECONDARY): AWS offers three methods (Marketplace Metering, automatic for AMI/ML; Resource Tagging, suits SaaS;
+  User Agent String, `APN_1.1/pc_<code>$`, management-plane SDK calls). Tag: key `aws-apn-id`, value `pc:<product code>` (AWS Jan 2026 launch announcement as quoted); newer account-suffixed key `aws-apn-id-<partner account id>` allows up to
+  10 partners per resource. Only resources that INCUR CHARGES are attributed; IAM etc. give nothing; dashboard lags up to 7 days. The product code `46y72j0d99w7lyqkiqrakpc5k` is the real entity's `Description.ProductCode`.
+  The earlier AWS-assistant advice (User Agent String) is for products that call INTO customer accounts; ours does not, so tagging is the route.
+* **Built:** `aws_marketplace/prm_tag_spec.json` (4 Lambdas, REST API `atq6wtkp6k`, 6 DynamoDB tables) and `tools/prm_tag_resources.py` (dry run default; adds ONE tag; refuses to overwrite a different `aws-apn-id`; refuses wrong account;
+  reports missing resources). `test_prm_tag_resources.py` 8 tests, 4 of 5 mutations caught by it; the 5th (wrong parameter name to the Lambda call) can only be caught against the real library, and WAS: botocore Stubber over the real lambda,
+  apigateway and dynamodb service models passes for the real tool and rejects the mutant (check script was in the scratchpad, not committed). NOT proven: that AWS accepts the REST API ARN form for tagging, and that the FTR prerequisite turns
+  Complete on this small a spend. Tagging relayshield-api attributes ALL of that shared function's spend to Bundle D's code; acceptable for the prerequisite.
+* NEXT: Andrew runs the tool on the Mac (dry run, then `--apply`); wait up to 7 days for the dashboard; prices apply on his go; re-check Partner Central.

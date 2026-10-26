@@ -1,0 +1,22 @@
+{
+  "_why": "AWS Partner Revenue Measurement, resource tagging method. Tag key aws-apn-id, value pc:<Marketplace product code>. Product code from the live entity (aws_marketplace/fixtures/prod_kkvurtspreofy_before_2026-10-25.json, ProductCode). Only resources that incur AWS charges are attributed; IAM and other no-cost resources produce nothing. UNVERIFIED against AWS docs (docs.aws.amazon.com is unreachable from the build container); the tag format comes from AWS's January 2026 launch announcement as quoted by search. Edit this list, not the tool.",
+  "account": "239677749008",
+  "region": "us-east-1",
+  "tag_key": "aws-apn-id",
+  "tag_value": "pc:46y72j0d99w7lyqkiqrakpc5k",
+  "lambda_functions": [
+    "relayshield-api",
+    "relayshield-agentic-api",
+    "relayshield-mcp-http",
+    "relayshield-bundle-fulfillment"
+  ],
+  "rest_api_ids": ["atq6wtkp6k"],
+  "dynamodb_tables": [
+    "relayshield_api_keys",
+    "relayshield_intel_iocs",
+    "relayshield_stolen_sessions",
+    "relayshield_ransomware_victims",
+    "relayshield_intel_cve",
+    "relayshield_identity_graph"
+  ]
+}

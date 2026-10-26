@@ -384,7 +384,7 @@ class ToolsetRestriction(unittest.TestCase):
         m = re.search(r'^TOOLSET="([^"]+)"', script, re.M)
         self.assertIsNotNone(m, "tools/create_mcp_http_lambda.sh must define TOOLSET")
         self.assertEqual(set(m.group(1).split(",")), AWS_LISTING_TOOLS)
-        self.assertIn("RS_MCP_TOOLS=$TOOLSET", script)
+        self.assertIn('"$DEMO_KEY" "$TOOLSET")', script)   # the JSON is built from exactly this variable
 
     def test_no_excluded_tool_is_one_that_the_listing_sells(self):
         excluded = {t["name"] for t in LAMBDA.TOOLS} - AWS_LISTING_TOOLS
@@ -392,6 +392,45 @@ class ToolsetRestriction(unittest.TestCase):
         self.assertTrue(excluded.isdisjoint({"check_mcp_server_risk", "check_prompt_injection_breach",
                                              "check_tech_stack_cve", "check_bulk_identity_risk",
                                              "check_llm_credential_exposure"}))
+
+
+class SetupScriptEnvironment(unittest.TestCase):
+    """The script failed on its first re-run, 2026-10-25: the CLI's Variables={A=1,B=x,y,z}
+    shorthand reads every comma as a separator, and RS_MCP_TOOLS is a comma-separated list.
+    These execute the script's OWN line rather than reading around it."""
+
+    SCRIPT = (ROOT / "tools" / "create_mcp_http_lambda.sh").read_text(encoding="utf-8")
+
+    def _generated(self):
+        import re
+        import subprocess
+        toolset = re.search(r'^TOOLSET="([^"]+)"', self.SCRIPT, re.M).group(1)
+        line = re.search(r"^ENV_JSON=\$\(.*\)$", self.SCRIPT, re.M)
+        self.assertIsNotNone(line, "the script must build ENV_JSON")
+        out = subprocess.run(["sh", "-c", f'DEMO_KEY="rs_live_testvalue"; TOOLSET="{toolset}"; {line.group(0)}; printf %s "$ENV_JSON"'],
+                             capture_output=True, text=True, check=True).stdout
+        return toolset, json.loads(out)
+
+    def test_the_generated_environment_is_valid_json_with_both_variables_intact(self):
+        toolset, env = self._generated()
+        self.assertEqual(env["Variables"]["RS_MCP_TOOLS"], toolset)
+        self.assertEqual(env["Variables"]["RS_DEMO_API_KEY"], "rs_live_testvalue")
+        self.assertEqual(set(env), {"Variables"})
+
+    def test_the_tool_list_really_does_contain_commas(self):
+        # If this ever stops being true the shorthand would work again and this guard would
+        # look pointless. It is the reason the JSON form exists.
+        toolset, _ = self._generated()
+        self.assertGreater(toolset.count(","), 2)
+
+    def test_no_aws_command_in_the_script_uses_the_shorthand_environment(self):
+        for n, line in enumerate(self.SCRIPT.splitlines(), 1):
+            if line.lstrip().startswith("#"):
+                continue
+            self.assertNotIn("Variables={", line, f"line {n}: shorthand --environment breaks on commas")
+
+    def test_both_function_calls_pass_the_json(self):
+        self.assertEqual(self.SCRIPT.count('--environment "$ENV_JSON"'), 2)
 
 
 class RealHttpSeam(unittest.TestCase):

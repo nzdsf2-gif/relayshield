@@ -620,3 +620,19 @@ from RS own corpus."* He also removed agent-bait: *"a capability of the RS mcp p
 * **ORDER, and why:** (1) merge, re-run `tools/create_mcp_http_lambda.sh` so the endpoint serves only the listed tools; (2) prices dry run, then apply; (3) portal: Fulfillment options, MCP endpoint
   to `https://api.relayshield.net/mcp`; (4) portal: Product information copy; (5) ONLY AFTER the endpoint change completes, portal: Architecture details plus the diagram. Declaring "entirely on
   AWS" before the endpoint moves would be a false public claim.
+
+## 2026-10-26: THE MCP SETUP SCRIPT FAILED ON ITS FIRST RE-RUN. SHORTHAND `--environment` BREAKS ON COMMAS. FIXED AND PROVEN WITH THE REAL aws CLI.
+
+Andrew's run of `tools/create_mcp_http_lambda.sh` died at step 5 with `Error parsing parameter '--environment': Expected: '=', received: ','`. **Mine, and knowable:** I wrote
+`Variables={RS_DEMO_API_KEY=...,RS_MCP_TOOLS=a,b,c}`, and the CLI's shorthand reads every comma as a separator, while `RS_MCP_TOOLS` is a comma-separated list. The script header
+did say "UNVERIFIED" about its AWS half, but that label is for what could differ in his state, not for a defect one `pip install awscli` reproduces in 30 seconds.
+
+* **State left behind:** `update-function-code` had succeeded (the new module with `RS_MCP_TOOLS` support is on the function) and `update-function-configuration` had not, so the endpoint
+  still serves all 13 tools until the script is re-run. Nothing is broken; the listing still points at the Space.
+* **Fix:** the environment is built once as JSON by python3 (`ENV_JSON`) and passed to BOTH `create-function` and `update-function-configuration`. Reproduced the old error and verified the
+  new form with `awscli` in a throwaway venv pointed at a dead endpoint, so it fails after argument parsing: the shorthand gives the caret under the comma, the JSON gives "Could not connect".
+  The venv awscli is v1; his is v2, whose JSON-argument parsing is the same.
+* **Test that would have caught it:** `SetupScriptEnvironment` in `test_relayshield_mcp_http.py` runs the script's OWN `ENV_JSON` line with the script's real tool list and parses the result,
+  and refuses `Variables={` in any non-comment line. Proven by putting the shorthand back.
+* **Also read this turn:** the "Marketplace Bundle D AWS prices" run (Actions 40248369052) was a DRY RUN against the live offer; the table matched the spec exactly; nothing was sent.
+* **Lesson for the next script that passes a list to the aws CLI:** put it in JSON, and run the argument through the real CLI before handing it over. `pip install awscli` in the scratchpad venv works.

@@ -20,7 +20,9 @@ STAGES, in the order the changes are submitted (one open change per product at a
 exits non-zero only for that stage, so "endpoint passes" can be asserted before the copy exists.
 """
 import argparse
+import difflib
 import json
+import re
 import sys
 from decimal import Decimal
 from pathlib import Path
@@ -39,6 +41,21 @@ def read(name: str) -> str:
     return (AWS / name).read_bytes().decode("utf-8")
 
 
+def as_rendered_markdown(text: str) -> str:
+    """What copying from a RENDERED Markdown view (a preview pane, Quick Look) does to source text: a
+    trailing backslash is a hard line break, so the backslash is consumed and the space before it
+    trimmed, and an ordered-list marker "1. " is drawn by the viewer and copies as "1 "."""
+    text = re.sub(r" \\$", "", text, flags=re.M)
+    return re.sub(r"^(\d+)\. ", r"\1 ", text, flags=re.M)
+
+
+def diff_regions(want: str, got: str, limit: int = 10) -> str:
+    ops = [o for o in difflib.SequenceMatcher(None, want, got, autojunk=False).get_opcodes() if o[0] != "equal"]
+    shown = [f"at {i1}: want {want[i1:i2]!r} live {got[j1:j2]!r}" for _, i1, i2, j1, j2 in ops[:limit]]
+    more = f" (+{len(ops) - limit} more)" if len(ops) > limit else ""
+    return f"{len(ops)} differing region(s): " + "; ".join(shown) + more
+
+
 def where_different(want: str, got: str) -> str:
     if want == got:
         return "identical"
@@ -48,9 +65,13 @@ def where_different(want: str, got: str) -> str:
         note.append("differs ONLY in leading/trailing whitespace")
     elif want.replace("\r\n", "\n") == got.replace("\r\n", "\n"):
         note.append("differs ONLY in line endings")
+    elif as_rendered_markdown(want) == got:
+        note.append("this is EXACTLY what copying from a rendered Markdown preview produces; "
+                    "copy the raw file instead, for example pbcopy < the-file")
     return (f"first difference at character {n}; want {len(want)} chars, live {len(got)} chars; "
             f"want ...{want[max(0, n - 20):n + 25]!r} live ...{got[max(0, n - 20):n + 25]!r}"
-            + (f" ({'; '.join(note)})" if note else ""))
+            + (f" ({'; '.join(note)})" if note else "")
+            + ("" if want.strip() == got.strip() else " | " + diff_regions(want, got)))
 
 
 def delivery_option(product: dict) -> dict:

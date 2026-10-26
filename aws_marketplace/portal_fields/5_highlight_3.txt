@@ -1,0 +1,1 @@
+Scored from RelayShield's own continuously collected corpus, with no customer query sent to outside data providers, and callable directly by an AI agent over MCP.

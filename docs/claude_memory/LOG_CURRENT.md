@@ -780,3 +780,11 @@ Submitted by Andrew 2026-10-26 6:06 PM EDT, change type "Update information", en
 (keywords as one comma-separated line). **What he actually pasted into each field is NOT known until the verifier reads it.** One open change per product: NOTHING else may be submitted until this shows Succeeded.
 NEXT: when it Succeeds, Andrew dispatches "Marketplace Bundle D listing check (read only)" with stage `copy`; I read the log. Only if copy PASSES: Architecture details + diagram
 (`assets/marketplace/consumption_security_architecture.png`), then verify stage `architecture`, then prices (explicit go only), then PRM, then the Partner Central re-check.
+
+## 2026-10-26 (step 2 DONE, step 3 READY): PRODUCT INFORMATION REQUEST SUCCEEDED AND THE COPY STAGE PASSES; THE FIRST-PARTY CODE IS CONFIRMED DEPLOYED.
+
+* Request `6e7hu041897ertq2ajm01r59y` Succeeded. Verifier (run 40406106919, attempt 2, a "Re-run all jobs" that ran 23:06 UTC after the Succeeded; it prints all four stages from live data): **copy stage PASS on all four
+  fields** (ShortDescription, LongDescription, Highlights, SearchKeywords); endpoint stage still all PASS. Architecture and prices still DIFFERS, as expected.
+* Before declaring "runs entirely on AWS": deploy run 40235523349 (head c61fdd9, which contains cfa8bd9, the first-party path) succeeded and the import probe passed for `relayshield-agentic-api`, `relayshield-api` and
+  `relayshield-mcp-http`. **Still NOT proven live:** an AWS-licensed key's response saying `data_path: first_party` (tests prove it with the real dispatchers; no production call has been made). Recommend doing it after submitting.
+* NEXT: Architecture details + `assets/marketplace/consumption_security_architecture.png` (1600x900, already on main), then verify stage `architecture`; then prices on his explicit go; then PRM; then Partner Central re-check.

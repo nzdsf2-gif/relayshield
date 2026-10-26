@@ -636,3 +636,19 @@ did say "UNVERIFIED" about its AWS half, but that label is for what could differ
   and refuses `Variables={` in any non-comment line. Proven by putting the shorthand back.
 * **Also read this turn:** the "Marketplace Bundle D AWS prices" run (Actions 40248369052) was a DRY RUN against the live offer; the table matched the spec exactly; nothing was sent.
 * **Lesson for the next script that passes a list to the aws CLI:** put it in JSON, and run the argument through the real CLI before handing it over. `pip install awscli` in the scratchpad venv works.
+
+## 2026-10-26 (portal): THE AWS MCP ENDPOINT IS LIVE WITH 6 TOOLS; THE FULFILLMENT FORM'S USAGE TEXT STILL POINTED AT THE HUGGING FACE SPACE.
+
+* `tools/create_mcp_http_lambda.sh` re-run succeeded after the JSON fix: `https://api.relayshield.net/mcp` and the execute-api host both return `tools/list -> 6 tools`; stage `co89ol` deployed.
+* Andrew's Fulfillment options form (product `prod-kkvurtspreofy`, Management Portal) showed: Fulfillment method "Redirect to your website" (cannot be changed in the form; support request only),
+  Fulfillment URL `https://api.relayshield.net/marketplace/bundle-fulfillment`, AI agent or tool details Type "MCP server", **MCP endpoint URL already edited to `https://api.relayshield.net/mcp`**,
+  MCP usage instructions (max 4,000 chars) and optional API usage instructions (max 4,000) still carrying the OLD text, Authorization method "API key", and
+  **"Amazon Bedrock AgentCore Gateway integration": "Enable tool for AgentCore Gateway integration - Recommended" vs "Do not enable" (currently NOT enabled).**
+* **Submitting only the URL would have left the listing contradicting itself:** the old MCP instructions say "Point your MCP client at: ...hf.space/gradio_api/mcp/sse" and describe
+  "domain-registration age"; the old API instructions say mcp-registry-risk scores "registration-age red flags". Both are false on the AWS path. Replacement:
+  `aws_marketplace/bundle_d_mcp_usage_instructions.md` (2,049 chars, guarded by `McpUsageInstructions` in `test_bundle_d_listing_copy.py`, proven by five mutations). For the API instructions the
+  single phrase "registration-age red flags" becomes "known-malicious domains".
+* **TRADE-OFF TO KNOW:** the Space spoke the legacy SSE transport; the AWS endpoint speaks Streamable HTTP (the current MCP transport). An MCP client that supports only SSE cannot use the new URL.
+  The Space stays up for existing configurations, and the new text names the transport so nobody is surprised.
+* **AgentCore Gateway integration is a discovery lever worth a look, NOT done:** AWS marks it "Recommended" and it is aimed at exactly the "buyers are not finding my licenses" problem. It needs an
+  OpenAPI 3.x file (`relayshield_openapi_spec.py` exists) and has requirements the repo has not read. Do not tick it in the same submission as the endpoint change.

@@ -162,7 +162,7 @@ class PasteableWithoutWhitespaceErrors(unittest.TestCase):
             "3_highlight_1.txt": COPY["Highlights"][0],
             "4_highlight_2.txt": COPY["Highlights"][1],
             "5_highlight_3.txt": COPY["Highlights"][2],
-            "6_search_keywords_one_per_line.txt": "\n".join(COPY["SearchKeywords"]),
+            "6_search_keywords_comma_separated.txt": ",".join(COPY["SearchKeywords"]),
         }
         self.assertEqual(sorted(p.name for p in d.iterdir()), sorted(want))
         for name, text in want.items():

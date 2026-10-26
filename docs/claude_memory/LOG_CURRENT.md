@@ -750,3 +750,8 @@ corruption. Pre-submit check: first line `Overview`, `1. Subscribe` keeps its pe
 * Paste-into-a-form text: raw bytes only, no trailing newline, and say what the field must look like before submit. Never send a `.md` to be opened in a previewer and copied.
 * "Public" on a catalogue row means listed, not released-after-a-change and not validated.
 * A claim about what is live is checked with the read-only verifier, not inferred from a form saying Succeeded.
+
+### UPDATE, same night, 2026-10-26: ANDREW REPORTS THE API USAGE INSTRUCTIONS UPDATE SUCCEEDED IN AWS MARKETPLACE
+His words: "It was successfully updated in AWS marketplace just now." **That is his report of the portal request, NOT a verifier result.** Todo 1 above shrinks to: dispatch "Marketplace Bundle D listing check
+(read only)" with stage `endpoint` and confirm the API usage line PASSES (live text must be 3,710 characters, identical to `aws_marketplace/bundle_d_api_usage_instructions.md`). Workflow dispatch is a click for
+Andrew (403 for Claude). If it passes, go straight to todo 2 (Product information copy). Nothing else changed tonight.

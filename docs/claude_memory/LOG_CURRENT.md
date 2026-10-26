@@ -696,3 +696,57 @@ Request `8k3v6j9uihtt9hh4vnp7lwbwzi` Succeeded. Verifier run (Actions 4025320229
   tests using the real numbers (`TheRenderedMarkdownSignature`, proven by mutation). The next stage is to resubmit the API text via pbcopy and re-run the endpoint check.
 * **STILL TRUE, do not forget:** copy, architecture and prices stages all read DIFFERS, as expected; none has been submitted. One open change per product: the endpoint request is complete, so the copy may go
   next, but ONLY after the API text is fixed, because a Fulfillment-options resubmission is a change on the same product.
+
+## WHERE 2026-10-26 LEFT THINGS. BUNDLE D "DEPLOYED ON AWS" WORK: ENDPOINT LIVE, API USAGE TEXT AWAITING RESUBMISSION. READ THIS FIRST.
+
+**This section supersedes the earlier "WHERE ... LEFT THINGS" lists for the AWS Bundle D / FTR thread only.** The 2026-10-20 list still holds for everything else (first-seen sequence, WAFR, indicator report).
+
+### WHY ANY OF THIS EXISTS
+Andrew's goal is DISCOVERY on AWS Marketplace: buyers do not find his listings, so he wants the Foundational Technical Review (FTR) to qualify Bundle D for co-sell, Partner Solution Finder and an assigned AWS
+sales contact (he intends to ask Dave Shapiro at AWS for a partner sales contact once qualified). The FTR on solution `soln-aicwx4eiyofnm` (linked to `prod-kkvurtspreofy`, "Consumption Security API Bundles")
+is BLOCKED by two Partner Central prerequisites: **"AWS Marketplace product is deployed on AWS"** and **"Partner Revenue Measurement (PRM) enabled"**. The first was UNSPECIFIED because the listing's
+Architecture details were declared "None of the above" on 2026-09-20 (not changed by the WAFR; the Requests log showed only our own edits). He chose, over my objection, to DILUTE the AWS edition of Bundle D
+(AWS path makes no third-party calls, agent-bait removed, ~5-10% cheaper than Stripe-direct, Stripe-direct bundle unchanged). The two editions now diverge on purpose.
+
+### STATE AT END OF SESSION (verified unless marked)
+* **Code, all merged to Andrew's `main`, tests green for the new work:** first-party data path (`relayshield_api.py`, `relayshield_agentic_api.py`, CLAUDE.md rule); AWS-hosted MCP server `relayshield_mcp_http.py`
+  (Lambda `relayshield-mcp-http`, `RS_MCP_TOOLS` = 6 tools); `tools/marketplace_update_offer_prices.py` + workflow; `tools/verify_bundle_d_listing.py` + workflow; listing copy and usage-text files under `aws_marketplace/`.
+* **LIVE and verified (Actions run 40253202290, stage endpoint):** MCP endpoint `https://api.relayshield.net/mcp` (6 tools, both hosts proven), MCP usage instructions exact, ApiType MCP_SERVER, API_KEY auth only,
+  fulfillment URL unchanged, product Public. Public is NOT news: it has been Public since Aug 5, and says nothing about FTR status.
+* **LIVE but WRONG:** the **API usage instructions** field holds a 3,675-char corrupted text (curl backslashes and list-marker periods lost to a rendered-Markdown copy). Correct text is
+  `aws_marketplace/bundle_d_api_usage_instructions.md` (3,710 bytes, starts `Overview`, no trailing newline). **Resubmission was IN PROGRESS when Andrew stopped: a Fulfillment options "update request" is open/in
+  progress. Do not assume it completed.**
+* **NOT SUBMITTED, all four read DIFFERS as expected:** Product information copy, Architecture details + diagram, prices (dry run matched; apply never run).
+* **PRM prerequisite: unresolved.** No decision made on how it is detected.
+
+### THE PASTE FAILURE, SO THE NEXT SESSION DOES NOT REPEAT IT
+Twice Cmd+V in the portal pasted the TERMINAL TRANSCRIPT instead of the file (the clipboard was overwritten after `pbcopy`, most likely by copying terminal output to send to me; the portal then refused it for exceeding 4,000
+characters, which is harmless). **Do not hand a `pbcopy` route again for this text.** The route that avoids the terminal altogether, verified byte-identical (3,710 bytes, `text/plain`, `cmp` IDENTICAL):
+open `https://raw.githubusercontent.com/nzdsf2-gif/relayshield/main/aws_marketplace/bundle_d_api_usage_instructions.md`, Cmd+A, Cmd+C, then in the portal field Cmd+A, Delete, Cmd+V. Raw text view is not rendered, so no Markdown
+corruption. Pre-submit check: first line `Overview`, `1. Subscribe` keeps its period, curl lines end in `\`. The same raw-URL route works for every other paste file. **Only possible while the file is on `main`.**
+
+### TODO FOR NEXT SESSION, IN ORDER (one open change per product at a time)
+1. **Ask Andrew whether the Fulfillment options request completed and what the API usage field held when submitted.** Then dispatch "Marketplace Bundle D listing check (read only)" with stage `endpoint` and read the
+   log with the GitHub MCP tools. Pass condition: every endpoint line PASS, including API usage instructions. If it DIFFERS, the verifier names the first differing character and the cause.
+2. **Product information copy** (only after step 1 passes): short description (469 chars), long description, 3 highlights, 13 keywords from `aws_marketplace/bundle_d_listing_copy.json` / `bundle_d_listing_copy_aws_edition.md`.
+   Because that is many fields, give Andrew a raw-URL (or per-field `.txt`) for each, one field at a time, and say what each field must look like. Then verify stage `copy`.
+3. **Architecture details + diagram** (only after endpoint is verified live): declare control and application planes on AWS, upload `assets/marketplace/consumption_security_architecture.png`. AWS feedback on this is fast
+   (about an hour), so expect a possible rejection naming a dependency. Verify stage `architecture`.
+4. **Prices:** workflow "Marketplace Bundle D AWS prices", mode `apply`, confirm `UPDATE-LIVE-PRICES`, ONLY on Andrew's explicit go. Dry run already matched the live card. UNVERIFIED: whether AWS accepts
+   `UpdatePricingTerms` on a Released public offer; if refused, the error names why and the fallback is the portal's pricing edit. Verify stage `prices`.
+5. **PRM:** before building anything, Andrew should ask AWS's PRM assistant WHAT the prerequisite detects (resource tags vs User Agent String `APN_1.1/pc_<productcode>$` in CloudTrail vs Marketplace Metering) and on
+   WHICH resources. Product code is `46y72j0d99w7lyqkiqrakpc5k`. If it needs a User Agent string, the `relayshield-mcp-http` Lambda is the natural carrier; a separate heartbeat Lambda is the fallback.
+6. **After 1 to 5 pass:** re-check Partner Central: does the FTR still show "Blocked", and on what? Only then is it worth Andrew emailing Dave Shapiro.
+
+### OPTIONAL / LOWER PRIORITY
+* AgentCore Gateway integration option was shown as "Recommended" in the portal (needs an OpenAPI file). Unexplored.
+* Live proof of the first-party path with a real AWS-licensed key has not been done (the tests prove it; production has not been exercised).
+* Stale `lambda-drift` issues (#53, #20, #19, #16, #13) are probably closable; check before closing.
+* Code comments saying Bundle D is "same product, same price, two doors" are wrong since 2026-10-25; fix when those Lambdas are next deployed.
+* Hudson Rock free-API terms still unread (attribution may collide with the no-vendor-names rule).
+* 14 test files fail identically at baseline (x402 manifest count 36 vs 38, bundle_b_gating, day3, weekly_metrics and others). Pre-existing, not from this work.
+
+### STANDING LESSONS FROM THIS SESSION (rules, not history)
+* Paste-into-a-form text: raw bytes only, no trailing newline, and say what the field must look like before submit. Never send a `.md` to be opened in a previewer and copied.
+* "Public" on a catalogue row means listed, not released-after-a-change and not validated.
+* A claim about what is live is checked with the read-only verifier, not inferred from a form saying Succeeded.

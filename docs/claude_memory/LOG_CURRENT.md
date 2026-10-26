@@ -822,3 +822,10 @@ product until the change set finishes. PRM tagging is an AWS-account action, not
 Run 40419471680 attempt 2 (23:27 UTC, a re-run three minutes after the first apply) exited 2 with `REFUSED: the live prices are not the prices the spec was written against`, listing live agentic_bundle_access 270, bulk 1.800, llm_credential 0.360,
 mcp_registry 0.320, prompt_injection 0.320, tech_stack 0.180. Those ARE the new AWS-edition prices, so change set `5bf8i6hbov1600xq5q10bs0m2` completed within about three minutes and the tool refused to apply the same change twice.
 This is read from Andrew's screenshot of the refusal, NOT yet from the verifier: next, verifier stage `prices` must read PASS before prices are called done. Do not re-run apply.
+
+## 2026-10-26 (ALL FOUR VERIFIER STAGES PASS): THE LISTING SIDE OF THE BUNDLE D "DEPLOYED ON AWS" WORK IS COMPLETE AND READ BACK FROM AWS.
+
+Verifier run 40420394927 (stage all, 23:32 UTC, head a68264e), read from the job log: **endpoint 8/8, copy 4/4, architecture 3/3, prices PASS ("offer rate card is AFTER, the AWS-edition prices are live"), "ALL JUDGED CHECKS PASS".**
+Requests: fulfillment `8k3v6j9uihtt9hh4vnp7lwbwzi`, product info `6e7hu041897ertq2ajm01r59y`, architecture `7c016057sqdn42spdi30yevay`, prices change set `5bf8i6hbov1600xq5q10bs0m2`, API usage text fixed.
+**REMAINING, nothing else on the listing:** (1) PRM tagging on Andrew's Mac (`tools/prm_tag_resources.py`, dry run then `--apply`; NOT yet run as far as this session knows); (2) wait up to 7 days for the PRM dashboard; (3) re-check Partner Central: does the
+FTR still show Blocked, and on what; (4) live proof of the first-party path with a real AWS-licensed key (still unproven in production); (5) then Dave Shapiro. Lower priority: AgentCore Gateway option, stale lambda-drift issues, stale "two doors" code comments.

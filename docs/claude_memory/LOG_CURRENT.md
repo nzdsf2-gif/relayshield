@@ -755,3 +755,10 @@ corruption. Pre-submit check: first line `Overview`, `1. Subscribe` keeps its pe
 His words: "It was successfully updated in AWS marketplace just now." **That is his report of the portal request, NOT a verifier result.** Todo 1 above shrinks to: dispatch "Marketplace Bundle D listing check
 (read only)" with stage `endpoint` and confirm the API usage line PASSES (live text must be 3,710 characters, identical to `aws_marketplace/bundle_d_api_usage_instructions.md`). Workflow dispatch is a click for
 Andrew (403 for Claude). If it passes, go straight to todo 2 (Product information copy). Nothing else changed tonight.
+
+## 2026-10-26 (next session, step 2 prepared): PER-FIELD PASTE FILES FOR THE PRODUCT INFORMATION COPY. STEP 1 (ENDPOINT VERIFY) STILL NEEDS ANDREW'S CLICK.
+
+* Read the Actions list: the only "Marketplace Bundle D listing check" run is 40253202290 (pre-fix, failed). Andrew's "update succeeded" is therefore still unverified; dispatch is a click for him.
+* `aws_marketplace/portal_fields/` holds the six Product information fields, one file each, generated from `bundle_d_listing_copy.json`, no trailing whitespace, no CR. A test
+  (`test_per_field_portal_files_are_exactly_the_json_fields`) fails if any file drifts from the JSON; proven by appending a character. Route: raw URL, Cmd+A, Cmd+C, per the 2026-10-26 lesson (no pbcopy).
+* The portal's keyword control is unseen by this session; the keyword file is one per line and may need adapting to the form.

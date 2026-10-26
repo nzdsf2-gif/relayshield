@@ -152,6 +152,22 @@ class PasteableWithoutWhitespaceErrors(unittest.TestCase):
         for item in COPY["Highlights"] + COPY["SearchKeywords"]:
             self.assertEqual(item, item.strip(), item)
 
+    def test_per_field_portal_files_are_exactly_the_json_fields(self):
+        """aws_marketplace/portal_fields/ is what Andrew opens by raw URL and pastes one field at a time.
+        It must be byte-identical to the JSON the verifier compares against, or a correct paste reads DIFFERS."""
+        d = ROOT / "aws_marketplace" / "portal_fields"
+        want = {
+            "1_short_description.txt": COPY["ShortDescription"],
+            "2_long_description.txt": COPY["LongDescription"],
+            "3_highlight_1.txt": COPY["Highlights"][0],
+            "4_highlight_2.txt": COPY["Highlights"][1],
+            "5_highlight_3.txt": COPY["Highlights"][2],
+            "6_search_keywords_one_per_line.txt": "\n".join(COPY["SearchKeywords"]),
+        }
+        self.assertEqual(sorted(p.name for p in d.iterdir()), sorted(want))
+        for name, text in want.items():
+            self.assertEqual((d / name).read_bytes(), text.encode("utf-8"), name)
+
     def test_no_carriage_returns_which_some_forms_count_as_extra_characters(self):
         for name in self.PASTE_FILES:
             self.assertNotIn("\r", (ROOT / "aws_marketplace" / name).read_bytes().decode("utf-8"), name)

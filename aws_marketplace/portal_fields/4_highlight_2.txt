@@ -1,0 +1,1 @@
+Contract-with-consumption pricing: a minimum monthly commitment covers included usage, with transparent per-call pricing for anything above that baseline.

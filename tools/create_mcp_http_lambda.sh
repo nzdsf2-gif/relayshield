@@ -35,10 +35,13 @@
 # key. app.py holds it; this reads it from there at run time and sets it as the
 # function's RS_DEMO_API_KEY. The value is never printed.
 #
-# UNVERIFIED FROM THE CONTAINER: this container has no AWS credentials and no aws
-# CLI, so nothing below that talks to AWS has been run. The Python it packages has
-# (test_relayshield_mcp_http.py, including real sockets). The first run is the
-# first test of the AWS half; every step prints what it did and STOPs on a surprise.
+# WHAT HAS AND HAS NOT BEEN RUN. This container has no AWS credentials, so no step that talks
+# to AWS has run here. What HAS been exercised: the Python it packages (test_relayshield_mcp_http.py,
+# including real sockets), the sh syntax, and the --environment argument, which is parsed by the real
+# aws CLI (a throwaway venv with awscli, pointed at a dead endpoint so it fails after argument
+# parsing). That last check exists because the first version used the CLI's shorthand and failed on
+# the commas in RS_MCP_TOOLS on 2026-10-25. The rest is first run on the Mac; every step prints what
+# it did and STOPs on a surprise.
 
 set -eu
 
@@ -85,6 +88,14 @@ if [ -z "$DEMO_KEY" ]; then
   exit 1
 fi
 echo "   demo key read from app.py (value not printed)"
+
+# THE ENVIRONMENT IS PASSED AS JSON, NOT AS THE CLI's SHORTHAND, AND THAT IS NOT STYLE.
+# Variables={A=1,B=x,y,z} reads every comma as a separator, so a value that contains commas
+# (RS_MCP_TOOLS is a comma-separated list) fails with "Error parsing parameter '--environment':
+# Expected: '=', received: ','". It did, on 2026-10-25, on the first re-run. Reproduced with the
+# real aws CLI, and the JSON form parses. The JSON is built by python3 so no value is ever
+# interpolated into a quoted string.
+ENV_JSON=$(python3 -c 'import json,sys; print(json.dumps({"Variables":{"RS_DEMO_API_KEY":sys.argv[1],"RS_MCP_TOOLS":sys.argv[2]}}))' "$DEMO_KEY" "$TOOLSET")
 echo
 
 echo "== 3. The dedicated role"
@@ -127,7 +138,7 @@ if aws lambda get-function --function-name "$FUNC" >/dev/null 2>&1; then
   # update-function-configuration REPLACES the environment block, so both variables
   # are sent every time. The function holds nothing else in its environment.
   aws lambda update-function-configuration --function-name "$FUNC" \
-    --environment "Variables={RS_DEMO_API_KEY=$DEMO_KEY,RS_MCP_TOOLS=$TOOLSET}" \
+    --environment "$ENV_JSON" \
     --query 'FunctionName' --output text
   aws lambda wait function-updated --function-name "$FUNC"
 else
@@ -141,7 +152,7 @@ else
     --zip-file fileb:///tmp/mcp_http_deploy.zip \
     --timeout 60 --memory-size 256 \
     --description "MCP server (Streamable HTTP) for the Consumption Security bundles, hosted on AWS" \
-    --environment "Variables={RS_DEMO_API_KEY=$DEMO_KEY,RS_MCP_TOOLS=$TOOLSET}" \
+    --environment "$ENV_JSON" \
     --query 'FunctionName' --output text
   do
     if [ "$ATTEMPT" -ge 6 ]; then

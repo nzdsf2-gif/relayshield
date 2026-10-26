@@ -849,3 +849,15 @@ Andrew has NOT seen Amazon's WAFR response (nobody has; it is not in Gmail or th
 
 **Confirmed later the same night:** a second dry run read `OK  already tagged` on all 11 resources, `0 to tag, 11 already done, 0 need attention`. PRM dashboard lag (up to 7 days) now runs from 2026-10-26.
 NEXT: Andrew to screenshot Partner Central, solution `soln-aicwx4eiyofnm`, **Validation** tab (and Change history if no WAFR response is there): FTR status, prerequisites, any WAFR result, any FTR Guide text on High risks. Then Bundle D E2E test offer (the change-set tool's live-listing refusal must be read first), then the WAFR list.
+
+## 2026-10-26 (E2E): BUNDLE D TEST OFFER BUILT AND DRY-RUN CLEAN; THE LIVE-LISTING GUARD DOES NOT REFUSE IT. NOT SENT.
+
+* `aws_marketplace/bundle_d_test_offer.json` = Bundle B's accepted test offer with ONLY the product id (literal `prod-kkvurtspreofy`, so there is no typed placeholder), the six live dimension keys (grant `agentic_bundle_access`, five metered at `0.00000001`) and the wording changed.
+  Private offer to buyer account `442429445748`, one month, charge 0.01 USD, same nine changes ending in `ReleaseOffer`. `python3 tools/marketplace_submit_changeset.py aws_marketplace/bundle_d_test_offer.json` (dry run, no AWS needed) validates 9 changes, both dates ok.
+* **The tool's LIVE_ENTITIES guard checks only `Entity.Identifier`; a `CreateOffer` carries its product in `DetailsDocument.ProductId`, so it passes, correctly (a new private offer replaces no rate card).** No tool change. The guard still refuses any change whose Entity.Identifier is the live id (tested).
+  The runbook's claim that a typed Bundle A/D id is refused at test-offer time is NOT what the code does; I could not find that check.
+* The only dry-run warning left is the DimensionKey `llm_credential_exposure` (23 chars vs 21 proven): unavoidable, it is the real live dimension and is already accepted inside the live offer. My first description was 135 chars vs 129 accepted; shortened to 111.
+* `test_bundle_d_test_offer.py` (8 tests, 5 mutations caught: wrong product, wrong buyer, zero price, truncated key, last change swapped).
+* **Dispatch needs the file on `main`** (the OIDC trust is tight, so a run from a branch is unlikely to assume the role; UNVERIFIED). Andrew's local `main` was 5 commits ahead of `origin/main` with no Lambda `.py` among them, so pushing it deploys nothing.
+* NEXT: merge to main + `git push origin main`; Actions "Marketplace Change Set" with changeset `aws_marketplace/bundle_d_test_offer.json`, dry-run then apply (confirm `CREATE-NEW-PRODUCT`, `product_id` EMPTY); accept the private offer from the TestUser buyer account; follow the fulfillment redirect;
+  read the key; ONE call to `bulk-identity-risk` must say `data_path: first_party`; verify `BatchMeterUsage` succeeded. Still pending from Andrew: the Validation-tab screenshot.

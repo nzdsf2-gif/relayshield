@@ -99,6 +99,7 @@ import relayshield_phone_reputation as _phone_reputation  # v1: keyed + keyless-
 # relayshield_* import resolution, same as relayshield_openapi_spec.
 import relayshield_scamkit
 import relayshield_scamkit_fetch as _scamkit_fetch  # v1b: TLS/redirect/header telemetry (stdlib only)
+import relayshield_scamkit_lineage  # sklin-v1: mutation-resistant lineage under exact identity (stdlib only)
 
 # Signed agent reputation passports (added 2026-10-22). Pure stdlib plus
 # lazy boto3 on the KMS path only; packaged via the same transitive
@@ -290,6 +291,8 @@ X402_V2_ENABLED_PATHS: set[str] = {
     # Scam-kit fingerprinting (added 2026-09-24) — v2 from launch.
     "/v1/payg/scamkit-fingerprint",
     "/v1/payg/scamkit-match",
+    # Scam-kit lineage lookup (sklin-v1).
+    "/v1/payg/scamkit-lineage",
     "/v1/payg/campaign-scan",
     # Intent binding (staged 2026-10-23) -- v2 from launch.
     "/v1/payg/intent-bind",
@@ -318,6 +321,11 @@ INTENT_BIND_PRICE_UNITS_PLACEHOLDER = 100000          # == scamkit-match, APPROV
 INTENT_SETTLE_CHECK_PRICE_UNITS_PLACEHOLDER = 100000  # == scamkit-match, APPROVED
 INTENT_BIND_CREDIT_COST_PLACEHOLDER = 10              # == scamkit-match, APPROVED
 INTENT_SETTLE_CHECK_CREDIT_COST_PLACEHOLDER = 10      # == scamkit-match, APPROVED
+
+# Scam-kit lineage (sklin-v1). APPROVED: $0.10 per call, 10 credits, scamkit-match parity.
+# PLACEHOLDER constant names kept to avoid churning staged references.
+SCAMKIT_LINEAGE_PRICE_UNITS_PLACEHOLDER = 100000
+SCAMKIT_LINEAGE_CREDIT_COST_PLACEHOLDER = 10
 
 # PAYG pricing in USDC base units (6 decimals): $0.10 = 100000
 PAYG_PRICE_UNITS: dict[str, int] = {
@@ -358,6 +366,7 @@ PAYG_PRICE_UNITS: dict[str, int] = {
     # here; the x402 manifest and OpenAPI spec both read this table.
     "/v1/payg/scamkit-fingerprint":  500000,   # $0.50 — kit fingerprint from URL or HTML
     "/v1/payg/scamkit-match":        100000,   # $0.10 — match a kit_<sha256> against the corpus
+    "/v1/payg/scamkit-lineage":      SCAMKIT_LINEAGE_PRICE_UNITS_PLACEHOLDER,
     "/v1/payg/campaign-scan":       5500000,   # $5.50 flat — composite over the TI endpoints
     # Intent binding (staged 2026-10-23, price APPROVED 2026-10-24
     # at $0.10/call, scamkit-match parity).
@@ -426,6 +435,12 @@ INTEL_IOCS_TABLE        = "relayshield_intel_iocs"
 # tools/setup_kit_fingerprints_table.sh BEFORE the fingerprinting code ships;
 # handlers degrade gracefully (log + continue) when it is absent.
 KIT_FINGERPRINTS_TABLE  = "relayshield_kit_fingerprints"
+# Scam-kit lineages (lineage_<sha256>, sklin-v1): one row per structural
+# lineage — representative features, member fingerprint IDs, borderline
+# candidates. Created alongside the sklin-v1 deploy; the lineage handlers
+# degrade gracefully (log + continue) when it is absent, same as the
+# fingerprint table above.
+KIT_LINEAGES_TABLE      = "relayshield_kit_lineages"
 # Malpedia malware-family taxonomy (family_id PK; common_name, alt_names,
 # attribution, description, url). Weekly ingest; read at match/display time.
 # Malware fingerprint rows live in KIT_FINGERPRINTS_TABLE with kind="malware".
@@ -516,6 +531,7 @@ STRIPE_METER_EVENTS: dict[str, str] = {
     # above. CREATE METERS IN DASHBOARD.
     "/v1/metered/scamkit-fingerprint": "relayshield_scamkit_fingerprint_calls",
     "/v1/metered/scamkit-match":       "relayshield_scamkit_match_calls",
+    "/v1/metered/scamkit-lineage":     "relayshield_scamkit_lineage_calls",
     # Intent binding (staged 2026-10-23). The Stripe meters behind
     # these names do not exist yet -- create them before the metered
     # twins bill (see INTEGRATION.md).
@@ -579,6 +595,7 @@ METERED_CREDIT_COSTS: dict[str, int] = {
     # 1:1 (credits: 1 = $0.01), per the fiat/x402 parity convention.
     "/v1/metered/scamkit-fingerprint": 50,   # $0.50/call
     "/v1/metered/scamkit-match":       10,   # $0.10/call
+    "/v1/metered/scamkit-lineage":     SCAMKIT_LINEAGE_CREDIT_COST_PLACEHOLDER,
     # Intent binding (staged 2026-10-23, price APPROVED 2026-10-24
     # at 10 credits/call, scamkit-match parity).
     "/v1/metered/intent-bind":         INTENT_BIND_CREDIT_COST_PLACEHOLDER,
@@ -1522,6 +1539,7 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
         # x402 rail — API-key auth and credit billing happen above.
         "/v1/metered/scamkit-fingerprint": handle_scamkit_fingerprint,
         "/v1/metered/scamkit-match":       handle_scamkit_match,
+        "/v1/metered/scamkit-lineage":     handle_scamkit_lineage,
         # Intent binding (staged 2026-10-23): metered twins of the
         # PAYG pair for API-key callers; registry tenant is the key.
         "/v1/metered/intent-bind":         handle_metered_intent_bind,
@@ -11172,6 +11190,9 @@ def handle_secret_scan_text(params: dict) -> dict:
 #   POST /v1/payg/scamkit-fingerprint  ($0.50 — fingerprint a kit from URL or HTML)
 #   POST /v1/payg/scamkit-match        ($0.10 — match a kit_<sha256> against the corpus)
 #   POST /v1/payg/campaign-scan        ($5.50 flat — composite fan-out)
+#   POST /v1/payg/scamkit-lineage      (sklin-v1 — lineage record by fingerprint_id
+#                                       or lineage_id; price is a PLACEHOLDER, see
+#                                       SCAMKIT_LINEAGE_PRICE_UNITS_PLACEHOLDER)
 # Also served on /v1/metered/* with the same handlers (Stripe credit rail).
 #
 # Pure fingerprinting math lives in relayshield_scamkit (stdlib only); these
@@ -11487,6 +11508,452 @@ def _scamkit_upsert(fingerprint_id: str, signals: dict, caller_family: str | Non
     return out
 
 
+# ---------------------------------------------------------------------------
+# Scam-kit lineage (sklin-v1) — registry glue
+# ---------------------------------------------------------------------------
+# The pure math (structural features, weighted similarity, assignment)
+# lives in relayshield_scamkit_lineage; this section is the DynamoDB
+# registry underneath it, in the same style as _scamkit_upsert:
+#
+#   * KIT_LINEAGES_TABLE holds ONE row per lineage: the founding
+#     member's feature set (the representative), member fingerprint IDs,
+#     and borderline candidates recorded by suggested decisions.
+#   * A fingerprint row records its assignment (lineage_id /
+#     lineage_candidate + lineage_decision) exactly once. An existing
+#     assignment is NEVER rewritten by a later sighting — the lineage-id
+#     stability rule, the same reason _scamkit_upsert never renames a
+#     family. Suggested kits record the candidate only; nothing merges
+#     without the weekly review loop (the suggest_family rule).
+#   * Float math (similarity, confidence) is stored via
+#     _floats_to_decimal and read back via _decimals_to_plain — the
+#     DynamoDB resource API rejects native floats.
+#   * Best-effort throughout: a lineage-store failure degrades the
+#     block's "stored" flag, never the fingerprint response — the same
+#     posture as the fingerprint upsert itself.
+LINEAGE_MEMBER_DISPLAY_CAP = 25    # house 25-cap, applied to member lists
+LINEAGE_CANDIDATE_CAP      = 25    # borderline candidates kept per lineage
+LINEAGE_MEMBER_READ_CAP    = 100   # member rows read for family derivation
+
+
+def _lineage_known_lineages(limit: int = 100) -> list:
+    """Representative feature sets of the registered lineages.
+
+    The assignment candidates for assign_lineage() — the analogue of
+    _scamkit_known_families. Best-effort: an empty list on any error,
+    which makes every kit a founder; the block then reports
+    stored=False so the gap is visible rather than silent.
+    """
+    try:
+        table = dynamodb.Table(KIT_LINEAGES_TABLE)
+        resp = table.scan(
+            Limit=limit,
+            ProjectionExpression="lineage_id, representative_features",
+        )
+    except Exception as exc:
+        logger.warning("scamkit lineage scan failed: %s", exc)
+        return []
+    out = []
+    for item in resp.get("Items", []) or []:
+        if item.get("lineage_id") and item.get("representative_features"):
+            out.append({"lineage_id": item["lineage_id"],
+                        "features": item["representative_features"]})
+    return out
+
+
+def _lineage_get(lineage_id: str) -> dict | None:
+    """One lineage row, or None when absent/unreadable. Never raises."""
+    try:
+        return dynamodb.Table(KIT_LINEAGES_TABLE).get_item(
+            Key={"lineage_id": lineage_id}).get("Item")
+    except Exception as exc:
+        logger.warning("scamkit lineage get failed for %s: %s",
+                       lineage_id[:24], exc)
+        return None
+
+
+def _lineage_block(lineage_id, decision, candidate_lineage_id, confidence,
+                   similarity, members, representative_fingerprint_id,
+                   stored) -> dict:
+    """The additive `lineage` block on the scamkit-fingerprint response.
+
+    One builder so the fresh-assignment, re-sighting, and degraded
+    paths can never drift apart in shape.
+    """
+    return {
+        "lineage_id":    lineage_id,
+        "decision":      decision,
+        "candidate_lineage_id": candidate_lineage_id,
+        "confidence":    confidence,
+        "confidence_band": (relayshield_scamkit_lineage.lineage_confidence_band(confidence)
+                            if confidence is not None else None),
+        "similarity":    similarity,
+        "members":       members,
+        "representative_fingerprint_id": representative_fingerprint_id,
+        "stored":        stored,
+    }
+
+
+def _lineage_write_assignment(fingerprint_id: str, fields: dict) -> bool:
+    """Record a lineage assignment on the fingerprint row (SET only).
+
+    Only called when the fingerprint row is known to exist — an
+    update_item on an absent key would create a stub row holding
+    nothing but lineage fields. Returns True when the write landed.
+    """
+    try:
+        sets = ", ".join(f"{k} = :{k}" for k in fields)
+        dynamodb.Table(KIT_FINGERPRINTS_TABLE).update_item(
+            Key={"fingerprint_id": fingerprint_id},
+            UpdateExpression=f"SET {sets}",
+            ExpressionAttributeValues={f":{k}": _floats_to_decimal(v)
+                                       for k, v in fields.items()},
+        )
+        return True
+    except Exception as exc:
+        logger.warning("scamkit lineage assignment write failed for %s: %s",
+                       fingerprint_id[:20], exc)
+        return False
+
+
+def _lineage_new_row(lineage_id: str, representative_fingerprint_id: str,
+                     features: dict, now: str) -> bool:
+    """Found a lineage row with one founding member. True when stored."""
+    try:
+        dynamodb.Table(KIT_LINEAGES_TABLE).put_item(Item={
+            "lineage_id":    lineage_id,
+            "lineage_version": relayshield_scamkit_lineage.LINEAGE_VERSION,
+            "kind":          "kit",
+            "representative_features": _floats_to_decimal(features),
+            "representative_fingerprint_id": representative_fingerprint_id,
+            "members":       [representative_fingerprint_id],
+            "member_count":  1,
+            "candidates":    [],
+            "sightings_count": 1,
+            "first_seen":    now,
+            "last_seen":     now,
+        })
+        return True
+    except Exception as exc:
+        logger.warning("scamkit lineage create failed for %s: %s",
+                       lineage_id[:24], exc)
+        return False
+
+
+def _scamkit_lineage_upsert(fingerprint_id: str, features: dict) -> dict:
+    """Assign a kit fingerprint to a structural lineage and persist it.
+
+    Returns the `lineage` response block (the caller adds kit_family /
+    family_status — they are the fingerprint response's own resolved
+    values). Decision semantics come from
+    relayshield_scamkit_lineage.assign_lineage: matched joins the
+    lineage, new founds one, suggested records a borderline candidate
+    on the candidate lineage's row and joins nothing.
+
+    A fingerprint with a stored assignment keeps it: later sightings
+    only bump the lineage's sighting counters, and the block reports
+    decision "matched" (membership) with the similarity and confidence
+    recorded at assignment time.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        fp_item = dynamodb.Table(KIT_FINGERPRINTS_TABLE).get_item(
+            Key={"fingerprint_id": fingerprint_id}).get("Item")
+    except Exception as exc:
+        logger.warning("scamkit lineage fingerprint get failed: %s", exc)
+        fp_item = None
+
+    if fp_item and fp_item.get("lineage_id"):
+        lid = fp_item["lineage_id"]
+        row = _lineage_get(lid)
+        members = None
+        representative = None
+        if row:
+            members = row.get("member_count") or len(row.get("members") or [])
+            members = _decimals_to_plain(members)
+            representative = row.get("representative_fingerprint_id")
+            try:
+                dynamodb.Table(KIT_LINEAGES_TABLE).update_item(
+                    Key={"lineage_id": lid},
+                    UpdateExpression=("SET sightings_count = "
+                                      "if_not_exists(sightings_count, :one) + :one, "
+                                      "last_seen = :now"),
+                    ExpressionAttributeValues={":one": 1, ":now": now},
+                )
+            except Exception as exc:
+                logger.warning("scamkit lineage sighting bump failed: %s", exc)
+        return _lineage_block(
+            lid, "matched", None,
+            _decimals_to_plain(fp_item.get("lineage_confidence")),
+            _decimals_to_plain(fp_item.get("lineage_similarity")),
+            members, representative, row is not None)
+
+    assignment = relayshield_scamkit_lineage.assign_lineage(
+        features, _lineage_known_lineages())
+    decision = assignment["decision"]
+    confidence = assignment["confidence"]
+    similarity = assignment["similarity"]
+
+    if fp_item is None:
+        # The fingerprint itself was not persisted (table unavailable),
+        # so there is no row to hang an assignment on and founding a
+        # lineage would orphan it. Report the in-memory decision with
+        # stored=False, mirroring the fingerprint upsert's own contract.
+        return _lineage_block(
+            assignment["lineage_id"] if decision != "suggested" else None,
+            decision,
+            assignment["candidate_lineage_id"] if decision == "suggested" else None,
+            confidence, similarity, None, None, False)
+
+    if decision == "new":
+        lid = assignment["lineage_id"]
+        stored = _lineage_new_row(lid, fingerprint_id, features, now)
+        if stored:
+            stored = _lineage_write_assignment(fingerprint_id, {
+                "lineage_id": lid,
+                "lineage_decision": "new",
+                "lineage_similarity": similarity,
+                "lineage_confidence": confidence,
+            })
+        return _lineage_block(lid, "new", None, confidence, similarity,
+                              1, fingerprint_id, stored)
+
+    if decision == "matched":
+        lid = assignment["lineage_id"]
+        row = _lineage_get(lid)
+        stored = True
+        if row is None:
+            # The scan saw this lineage but its row is now unreadable
+            # (or the scan raced a delete). Re-found under the ASSIGNED
+            # id — never a recomputed one — with this kit as the
+            # representative, so the registry stays coherent.
+            stored = _lineage_new_row(lid, fingerprint_id, features, now)
+            members = 1
+            representative = fingerprint_id
+        else:
+            representative = row.get("representative_fingerprint_id")
+            members_list = list(row.get("members") or [])
+            if fingerprint_id not in members_list:
+                members_list.append(fingerprint_id)
+                try:
+                    dynamodb.Table(KIT_LINEAGES_TABLE).update_item(
+                        Key={"lineage_id": lid},
+                        UpdateExpression=("SET members = :members, "
+                                          "member_count = :count, "
+                                          "sightings_count = "
+                                          "if_not_exists(sightings_count, :one) + :one, "
+                                          "last_seen = :now"),
+                        ExpressionAttributeValues={
+                            ":members": members_list,
+                            ":count": len(members_list),
+                            ":one": 1, ":now": now},
+                    )
+                except Exception as exc:
+                    logger.warning("scamkit lineage member add failed: %s", exc)
+                    stored = False
+            members = len(members_list)
+        if stored:
+            stored = _lineage_write_assignment(fingerprint_id, {
+                "lineage_id": lid,
+                "lineage_decision": "matched",
+                "lineage_similarity": similarity,
+                "lineage_confidence": confidence,
+            })
+        return _lineage_block(lid, "matched", None, confidence, similarity,
+                              members, representative, stored)
+
+    # decision == "suggested": record the borderline candidate on the
+    # candidate lineage's row (capped; read-modify-write in the same
+    # spirit as the fingerprint upsert) and the candidate pointer on
+    # the fingerprint row. The kit joins nothing.
+    cid = assignment["candidate_lineage_id"]
+    row = _lineage_get(cid) if cid else None
+    stored = True
+    members = None
+    representative = None
+    if row:
+        members = _decimals_to_plain(
+            row.get("member_count") or len(row.get("members") or []))
+        representative = row.get("representative_fingerprint_id")
+        candidates = list(row.get("candidates") or [])
+        if len(candidates) < LINEAGE_CANDIDATE_CAP:
+            candidates.append(_floats_to_decimal({
+                "fingerprint_id": fingerprint_id,
+                "similarity": similarity,
+                "last_seen": now,
+            }))
+            try:
+                dynamodb.Table(KIT_LINEAGES_TABLE).update_item(
+                    Key={"lineage_id": cid},
+                    UpdateExpression="SET candidates = :candidates",
+                    ExpressionAttributeValues={":candidates": candidates},
+                )
+            except Exception as exc:
+                logger.warning("scamkit lineage candidate record failed: %s", exc)
+                stored = False
+    if stored:
+        stored = _lineage_write_assignment(fingerprint_id, {
+            "lineage_decision": "suggested",
+            "lineage_candidate": cid,
+            "lineage_similarity": similarity,
+            "lineage_confidence": confidence,
+        })
+    return _lineage_block(None, "suggested", cid, confidence, similarity,
+                          members, representative, stored)
+
+
+def _lineage_record(row: dict) -> dict:
+    """API record for one lineage row.
+
+    Representative, member fingerprint IDs capped at
+    LINEAGE_MEMBER_DISPLAY_CAP with the true count alongside, member
+    families, borderline candidates. Member families are read from the
+    member fingerprint rows — the labels that won there, per
+    _scamkit_resolve_family's precedence — and when members disagree on
+    family the record lists every family and sets family_conflict; it
+    never picks one silently. The headline kit_family is the majority
+    member family (ties break alphabetically), falling back to the
+    representative's family.
+    """
+    members = list(row.get("members") or [])
+    shown = members[:LINEAGE_MEMBER_DISPLAY_CAP]
+    member_items: dict = {}
+    read_ids = members[:LINEAGE_MEMBER_READ_CAP]
+    if read_ids:
+        try:
+            fp_table = dynamodb.Table(KIT_FINGERPRINTS_TABLE)
+            for mid in read_ids:
+                item = fp_table.get_item(Key={"fingerprint_id": mid}).get("Item")
+                if item:
+                    member_items[mid] = item
+        except Exception as exc:
+            logger.warning("scamkit lineage member read failed: %s", exc)
+    fam_counts: dict = {}
+    for mid in read_ids:
+        item = member_items.get(mid)
+        if not item:
+            continue
+        fam = item.get("kit_family")
+        if fam:
+            entry = fam_counts.setdefault(fam, {
+                "family": fam,
+                "family_status": item.get("family_status"),
+                "kits": 0,
+            })
+            entry["kits"] += 1
+    member_families = sorted(fam_counts.values(),
+                             key=lambda e: (-e["kits"], e["family"]))
+    rep_id = row.get("representative_fingerprint_id")
+    rep_item = member_items.get(rep_id) if rep_id else None
+    rep_family = rep_item.get("kit_family") if rep_item else None
+    rep_status = rep_item.get("family_status") if rep_item else None
+    top = member_families[0] if member_families else None
+    candidates = [{
+        "fingerprint_id": cand.get("fingerprint_id"),
+        "similarity": _decimals_to_plain(cand.get("similarity")),
+        "last_seen": cand.get("last_seen"),
+    } for cand in (row.get("candidates") or [])]
+    return {
+        "lineage_id":    row.get("lineage_id"),
+        "representative_fingerprint_id": rep_id,
+        "representative_kit_family": rep_family,
+        "representative_family_status": rep_status,
+        "members":       shown,
+        "members_count": _decimals_to_plain(
+            row.get("member_count") or len(members)),
+        "members_truncated": len(members) > len(shown),
+        "member_families": member_families,
+        "kit_family":    top["family"] if top else rep_family,
+        "family_status": top["family_status"] if top else rep_status,
+        "family_conflict": len(member_families) > 1,
+        "borderline_candidates": candidates,
+        "first_seen":    row.get("first_seen"),
+        "last_seen":     row.get("last_seen"),
+        "sightings_count": _decimals_to_plain(row.get("sightings_count") or 0),
+        "lineage_version": row.get(
+            "lineage_version", relayshield_scamkit_lineage.LINEAGE_VERSION),
+    }
+
+
+# Request: POST /v1/payg/scamkit-lineage
+#   { "fingerprint_id": "kit_<64 hex>" }  XOR  { "lineage_id": "lineage_<64 hex>" }
+#
+# Response (by lineage_id):
+#   { ok: true, data: { matched, lineage_id, representative_fingerprint_id,
+#     representative_kit_family, representative_family_status, members
+#     (capped at 25), members_count, members_truncated, member_families,
+#     kit_family, family_status, family_conflict, borderline_candidates,
+#     first_seen, last_seen, sightings_count, lineage_version } }
+# Response (by fingerprint_id): { matched, fingerprint_id, kind, decision,
+#   candidate_lineage_id, lineage_id, ...same record fields when the kit
+#   is a lineage member; a suggested kit additionally carries the
+#   candidate lineage's record under "candidate_lineage" }.
+# Unknown IDs are NEVER reported as safe — same treatment as
+# scamkit-match (verdict "unknown", confidence 0.0).
+def handle_scamkit_lineage(params: dict) -> dict:
+    params = params or {}
+    fid = (params.get("fingerprint_id") or "").strip()
+    lid = (params.get("lineage_id") or "").strip()
+    if fid and lid:
+        return _err("Provide either 'fingerprint_id' or 'lineage_id', not both.", 400)
+    if lid:
+        if not relayshield_scamkit_lineage.valid_lineage_id(lid):
+            return _err("Provide a valid lineage_id of the form "
+                        "lineage_<64 hex chars>.", 400)
+        row = _lineage_get(lid)
+        if not row:
+            return _ok({
+                "matched":        False,
+                "lineage_id":     lid,
+                "verdict":        "unknown",
+                "verdict_copy":   relayshield_scamkit.verdict_copy("unknown"),
+                "confidence":     0.0,
+            })
+        data = {"matched": True}
+        data.update(_lineage_record(row))
+        return _ok(data)
+    if fid:
+        if not relayshield_scamkit.valid_fingerprint_id(fid):
+            return _err("Provide a valid fingerprint_id of the form "
+                        "kit_<64 hex chars> or malware_<64 hex chars>, "
+                        "or a lineage_id.", 400)
+        try:
+            item = dynamodb.Table(KIT_FINGERPRINTS_TABLE).get_item(
+                Key={"fingerprint_id": fid}).get("Item")
+        except Exception as exc:
+            logger.warning("scamkit lineage lookup failed: %s", exc)
+            item = None
+        if not item:
+            return _ok({
+                "matched":        False,
+                "fingerprint_id": fid,
+                "verdict":        "unknown",
+                "verdict_copy":   relayshield_scamkit.verdict_copy("unknown"),
+                "confidence":     0.0,
+            })
+        kind = (item.get("kind") or "kit").strip().lower()
+        data = {
+            "matched":    True,
+            "fingerprint_id": fid,
+            "kind":       kind,
+            "decision":   item.get("lineage_decision") or "none",
+            "candidate_lineage_id": item.get("lineage_candidate"),
+            "lineage_id": item.get("lineage_id"),
+        }
+        if item.get("lineage_id"):
+            row = _lineage_get(item["lineage_id"])
+            if row:
+                record = _lineage_record(row)
+                record.pop("lineage_id", None)
+                data.update(record)
+        elif item.get("lineage_candidate"):
+            crow = _lineage_get(item["lineage_candidate"])
+            if crow:
+                data["candidate_lineage"] = _lineage_record(crow)
+        return _ok(data)
+    return _err("Provide 'fingerprint_id' (kit_<64 hex chars>) or "
+                "'lineage_id' (lineage_<64 hex chars>).", 400)
+
+
 # Request: POST /v1/payg/scamkit-fingerprint
 #   { "url": "https://...", "html": "<...>", "source": "optional tag",
 #     "family": "optional label",
@@ -11507,7 +11974,8 @@ def _scamkit_upsert(fingerprint_id: str, signals: dict, caller_family: str | Non
 # Response:
 #   { ok: true, data: { fingerprint_id, kit_family, family_status,
 #     confidence, verdict, verdict_copy, sightings_count, signals,
-#     corpus_candidates, evidence, fetch, observations, stored } }
+#     corpus_candidates, evidence, fetch, observations, stored,
+#     lineage } }  — lineage is the additive sklin-v1 block (kit kind only)
 # Request: POST /v1/payg/scamkit-fingerprint with kind="malware"
 #   { "kind": "malware", "signals": {...caller-computed features...},
 #     "malware_family": "win.beavertail (optional Malpedia family_id)",
@@ -11635,6 +12103,16 @@ def handle_scamkit_fingerprint(params: dict) -> dict:
     family = stored["kit_family"]
     logger.info("scamkit_fingerprint id=%s family=%s verdict=%s sightings=%d stored=%s",
                 fid[:20], family, verdict, sightings, stored["stored"])
+    # Lineage (sklin-v1): structural assignment UNDERNEATH the exact
+    # fingerprint — which code lineage this kit descends from, however it
+    # was mutated. Additive block; best-effort like the upsert above, so
+    # a lineage-store failure never fails the fingerprint response.
+    lineage_block = _scamkit_lineage_upsert(
+        fid,
+        relayshield_scamkit_lineage.extract_structural_features(html, url, signals),
+    )
+    lineage_block["kit_family"] = family
+    lineage_block["family_status"] = stored["family_status"]
     url_malware_families: list[str] = []
     if url and (fetch.get("mode") == "fetch_pipeline_v1b"):
         # URL -> malware-family attribution from the IOC corpus. The kit
@@ -11659,6 +12137,7 @@ def handle_scamkit_fingerprint(params: dict) -> dict:
         "fetch":           fetch,
         "observations":    observations,  # redirect chain, headers, TLS facts, secondary fetches
         "stored":          stored["stored"],
+        "lineage":         lineage_block,  # sklin-v1 structural lineage (additive)
         "notes":           notes,
     })
 
@@ -13835,6 +14314,7 @@ def handle_payg_request(path: str, method: str, event: dict) -> dict:
         # Scam-kit fingerprinting (added 2026-09-24).
         "/v1/payg/scamkit-fingerprint":  handle_scamkit_fingerprint,
         "/v1/payg/scamkit-match":        handle_scamkit_match,
+        "/v1/payg/scamkit-lineage":      handle_scamkit_lineage,
         # Intent binding (staged 2026-10-23): the x402 standalone
         # pair. Settlement/payer handling is the dispatcher's; the
         # handlers below only see the screened request body.

@@ -3505,7 +3505,14 @@ PAYG_ENDPOINTS: dict[str, dict] = {
             "URL -> malware-family attribution: for kind='kit' with a fetched URL, the response "
             "also carries malware_families from RelayShield's IOC corpus (empty when the corpus "
             "has no malware label for the URL) with malware_attribution='relayshield_ioc_corpus' "
-            "when attributed, else null. Caller-supplied html gets no URL attribution."
+            "when attributed, else null. Caller-supplied html gets no URL attribution. "
+            "LINEAGE (additive, kind='kit' only): the response also carries a `lineage` block "
+            "assigning the kit to a structural lineage (sklin-v1): the code lineage it descends "
+            "from, scored on mutation-resistant structure (platform API surface, backend "
+            "protocol, harvest shape, tree shape) rather than exact hashes, so renamed and "
+            "paraphrased variants still land in their lineage. decision is matched, new, or "
+            "suggested; lineage_id is null for a suggested assignment, which names a "
+            "candidate_lineage_id instead and is never merged automatically."
         ),
         "price_units": 500000,
         "x402_version": 2,
@@ -3582,6 +3589,19 @@ PAYG_ENDPOINTS: dict[str, dict] = {
                 "observations": {"redirect_chain": [{"url": "https://example.com/login", "status": 200}],
                                  "tls": {"tls_version": "TLSv1.3"}},
                 "stored": True,
+                "lineage": {
+                    "lineage_id": "lineage_3f4a5b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f607182",
+                    "decision": "matched",
+                    "candidate_lineage_id": None,
+                    "confidence": 0.93,
+                    "confidence_band": "exact",
+                    "similarity": 0.88,
+                    "members": 14,
+                    "representative_fingerprint_id": "kit_9f2c4a1b3d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8",
+                    "stored": True,
+                    "kit_family": "parcel-smish-eu-04",
+                    "family_status": "suggested",
+                },
                 "notes": [],
                 "malware_families": [],
                 "malware_attribution": None,
@@ -3748,6 +3768,67 @@ PAYG_ENDPOINTS: dict[str, dict] = {
                 "binding_id": "bind_9f2c4a1b3d5e6f708192a3b4c5d6e7f80",
                 "step_up": {"required": False, "triggers": [],
                             "satisfied_by": ["human_approval"]},
+            },
+        },
+    },
+    # PLACEHOLDER price_units below: mirrors SCAMKIT_LINEAGE_PRICE_UNITS_PLACEHOLDER
+    # in relayshield_api.py (build_spec overrides it from PAYG_PRICE_UNITS at
+    # serve time anyway). The endpoint's price is Andrew's decision and is
+    # NOT yet approved — see DESIGN.md open question 5.
+    "/v1/payg/scamkit-lineage": {
+        "summary": "Look up a kit's structural lineage (mutation-resistant)",
+        "description": (
+            "Read the lineage record behind the `lineage` block on scamkit-fingerprint: the "
+            "structural code lineage (sklin-v1) a kit descends from, stable across renaming, "
+            "paraphrasing, infrastructure rotation, and decoy insertion, because it is scored "
+            "on platform API surface, backend protocol, harvest shape, and tree shape rather "
+            "than exact hashes. Look up by lineage_id for the full record (representative kit, "
+            "member fingerprint IDs capped at 25 with the true count, member families, "
+            "borderline candidates recorded for review), or by fingerprint_id for one kit's "
+            "assignment (decision matched, new, suggested, or none, plus its lineage record). "
+            "Lineage is code descent, not operator attribution: when member kits carry "
+            "different families, member_families lists them all and family_conflict is true. "
+            "An unknown ID is never reported as safe, only as no-match with an explicit "
+            "not-a-guarantee caveat, exactly as scamkit-match treats unknown fingerprints."
+        ),
+        "price_units": 100000,
+        "x402_version": 2,
+        "body": {
+            "type": "object",
+            "properties": {
+                "fingerprint_id": {
+                    "type": "string",
+                    "description": "kit_<sha256> fingerprint ID whose lineage assignment to return (64 hex chars after the prefix). Provide this OR lineage_id, not both.",
+                },
+                "lineage_id": {
+                    "type": "string",
+                    "description": "lineage_<sha256> lineage ID whose record to return (64 hex chars after the prefix). Provide this OR fingerprint_id, not both.",
+                },
+            },
+        },
+        "example": {"lineage_id": "lineage_3f4a5b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f607182"},
+        "output_example": {
+            "ok": True,
+            "data": {
+                "matched": True,
+                "lineage_id": "lineage_3f4a5b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f607182",
+                "representative_fingerprint_id": "kit_9f2c4a1b3d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8",
+                "representative_kit_family": "parcel-smish-eu-04",
+                "representative_family_status": "suggested",
+                "members": ["kit_9f2c4a1b3d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8"],
+                "members_count": 14,
+                "members_truncated": True,
+                "member_families": [
+                    {"family": "parcel-smish-eu-04", "family_status": "suggested", "kits": 14},
+                ],
+                "kit_family": "parcel-smish-eu-04",
+                "family_status": "suggested",
+                "family_conflict": False,
+                "borderline_candidates": [],
+                "first_seen": "2026-09-01T00:00:00+00:00",
+                "last_seen": "2026-10-20T00:00:00+00:00",
+                "sightings_count": 31,
+                "lineage_version": "sklin-v1",
             },
         },
     },

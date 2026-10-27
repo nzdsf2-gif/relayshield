@@ -77,7 +77,7 @@ import relayshield_whatsapp_webhook as wa  # noqa: E402
 
 FOOTER = ("Checked against a growing threat intelligence corpus "
           "with over 129 monitored marketplaces.")
-TG_BOT_LINE = "Try it yourself: https://t.me/relayshield_bot"
+TG_BOT_LINE = "[Try it yourself](https://t.me/relayshield_bot)"
 WA_BOT_LINE = "Try it yourself: https://wa.me/17407373961"
 WEBCHECK_LINE = "Try it on the web: https://relayshield.net/check"
 # A URL carrying every legacy-Markdown/WhatsApp metacharacter that can

@@ -63,7 +63,7 @@ import relayshield_whatsapp_webhook as wa  # noqa: E402
 
 FOOTER = ("Checked against a growing threat intelligence corpus "
           "with over 129 monitored marketplaces.")
-TG_BOT_LINE = "Try it yourself: https://t.me/relayshield_bot"
+TG_BOT_LINE = "[Try it yourself](https://t.me/relayshield_bot)"
 WA_BOT_LINE = "Try it yourself: https://wa.me/17407373961"
 WEBCHECK_LINE = "Try it on the web: https://relayshield.net/check"
 LABEL = "Forward this verdict by email"
@@ -289,6 +289,31 @@ class TestWhatsAppForwardLink(unittest.TestCase):
         self.assertIn(WA_BOT_LINE, card)
         self.assertLess(card.index(LABEL), card.index(WA_BOT_LINE))
         self.assertLess(card.index(WA_BOT_LINE), card.index(WEBCHECK_LINE))
+
+
+def _markdown_safe(text):
+    """Legacy-Markdown parse safety: strip link destinations and code
+    spans, then no _ or * may remain. A lone _ (as in the old bare
+    t.me/relayshield_bot URL) opens an italic entity Telegram rejects
+    with 400 "can't parse entities", and the whole card never arrives."""
+    text = re.sub(r"\[[^\]]*\]\([^)]*\)", "", text)
+    text = re.sub(r"`[^`]*`", "", text)
+    return "_" not in text and "*" not in text
+
+
+class TestTelegramCardMarkdownSafe(unittest.TestCase):
+    def test_scan_cards_markdown_safe(self):
+        for verdict, reason in (
+                ("malicious", "3/70 security vendors flagged this URL as malicious"),
+                ("clean", "Scanned by 70 security vendors, no threats found"),
+                ("unknown", "no data")):
+            card = tg._format_scan_verdict_card("evil-paypa1.com/login", verdict, reason)
+            self.assertTrue(_markdown_safe(card), card)
+
+    def test_token_cards_markdown_safe(self):
+        for danger in ("honeypot", "scam", None):
+            card = tg._format_token_free_card("0xabcdef0123456789", danger, 0.0)
+            self.assertTrue(_markdown_safe(card), card)
 
 
 if __name__ == "__main__":

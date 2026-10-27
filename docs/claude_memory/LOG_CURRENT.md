@@ -840,3 +840,12 @@ FTR still show Blocked, and on what; (4) live proof of the first-party path with
   Not yet done: read how Bundle D's earlier test was run (it has 0 subscribers, so it may have used another route), then derive and dry-run a Bundle D test offer. One open change per product, so it waits for any in-flight request.
 * **Dave Shapiro, his words:** NOT when this license is unblocked. The earlier plan is: address some of the WAFR gap items and resubmit; **when that AND the FTR pass, contact him.** The WAFR is 37 High / 15 Medium (2026-10-18). The only written starting points found are `ftr_finish_2026-10-18.md` section 4
   (the remaining High risks, each to carry a concrete plan in its Notes) and the sequence at LOG line 448 (re-tick and re-word the WAFR, save milestone, PDF under 3 MB, request FTR validation again, then email Dave). No dated remediation plan was found. Earlier lines in this log that make the Bundle D licence the trigger for contacting him are superseded.
+
+## 2026-10-27: WAFR/FTR GAP WORK STARTED. THE FTR GATE IS ZERO HIGH RISKS IN SEC, OPS AND REL ONLY (SECONDARY SOURCE). TESTS NOW RUN IN CI.
+
+* **Required to clear all 37 High? Probably not.** Search summaries of AWS's Partner Central "Request FTR" page: WAFR report under a year old, zero HRIs in Security, Operational Excellence and Reliability, solution named
+  in the workload, reviewer named, PDF under 3 MB; resubmittable. Perf/Cost/Sustainability do not gate. **UNVERIFIED against the guide itself (docs.aws.amazon.com is egress-blocked, WebFetch ENOTFOUND).** Andrew should confirm in Partner Central.
+* **Not known:** the per-pillar split of the 37 High / 15 Medium. Andrew reads OPS/SEC/REL High counts from the WAT Overview.
+* **Built:** `.github/workflows/tests.yml` + `tools/run_test_suite.py` + `tests_known_failing.txt` (13 files, may only shrink) + `tests_requirements.txt`. 104 files: 91 pass, 13 known-failing, measured with pytest, boto3, pyyaml, requests,
+  cryptography on Python 3.13. Different dependency sets give different baselines (boto3 absent turns 3 more red; cryptography absent turns 6 more red). Mutation-tested locally; **never run on GitHub yet**.
+* Plan and gap table: `wafr_ftr_gap_plan_2026-10-27.md`. NEXT: reserved concurrency, API alarm, log-retention tools (dry-run default, Stubber-checked); then IAM role split in stages.

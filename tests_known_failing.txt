@@ -1,0 +1,15 @@
+# Test files that fail at baseline (2026-10-27, measured with tests_requirements.txt installed).
+# This list may only SHRINK. See tools/run_test_suite.py. Do not add a line to hide a new failure.
+test_agent_bait_skill.py
+test_blog_publish_hygiene.py
+test_bundle_b_changeset.py
+test_bundle_b_gating.py
+test_claude_md_size.py
+test_day3.py
+test_intent_binding.py
+test_intent_binding_integration.py
+test_relayshield_langchain_gate.py
+test_url_malware_attribution.py
+test_weekly_metrics.py
+test_x401_ops_tools.py
+test_x402_manifest_completeness.py

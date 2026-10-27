@@ -909,3 +909,20 @@ Properties tab now reads: Name "RelayShield API"; **Description "RelayShield Age
 Review owner **"Andrew Gibbs, andrew@relayshield.net"** (comma, but the FTR guide's example is "First Last - email" with a DASH; the automated parser may require it, so change it to "Andrew Gibbs - andrew@relayshield.net"); Environment Production; Region us-east-1; Account 239677749008.
 Andrew's last screenshot was the Dashboard's "Well-Architected Framework issues by improvement plan item (163)" with filters All pillars / High risk issues (first rows are Cost Optimization). It has a pillar dropdown; the three pillar counts that matter (Security, Operational Excellence, Reliability) have NOT been read.
 Rule for the fixes: ticking a best practice in the Tool is an attestation. Fix the infrastructure first, tick only what is true (the 2026-10-18 lesson: this repo writes the aspiration).
+
+## 2026-10-27 (WAFR SECURITY HIGH-RISK LIST, read from three screenshots): 36 UNMET HIGH-RISK BEST PRACTICES ACROSS 9 OF THE 11 SECURITY QUESTIONS. THIS IS A PROGRAM, NOT A WEEK'S TIDY-UP.
+
+Review owner now reads "Andrew Gibbs - andrew@relayshield.net" (dash, as the FTR guide's example). Description names the solution (saved).
+Dashboard list "issues by improvement plan item", filter Security + High risk, 36 rows (the dashboard's unit is a best practice not met, NOT a question; the lens counted 37 high-risk QUESTIONS in total across all six pillars; how many of those are Security was not shown).
+**SEC1 operate:** Separate workloads using accounts; Secure account root user and properties; Identify and prioritize risks using a threat model; Evaluate and implement new security services and features regularly.
+**SEC2 identities:** Use temporary credentials; Rely on a centralized identity provider; Employ user groups and attributes.
+**SEC3 permissions:** Grant least privilege access; Define permission guardrails for your organization; Manage access based on lifecycle; Establish emergency access process; Reduce permissions continuously; Analyze public and cross account access.
+**SEC5 network:** Create network layers; Implement inspection-based protection; Automate network protection.
+**SEC6 compute:** Provision compute from hardened images; Reduce manual management and interactive access; Automate compute protection.
+**SEC7 data classification:** Understand your data classification scheme; Automate identification and classification.
+**SEC8 data at rest:** Automate data at rest protection; Enforce access control.
+**SEC10 incident response:** Identify key personnel and external resources; Develop incident management plans; Prepare forensic capabilities; Develop and test security incident response playbooks; Pre-provision access; Run simulations.
+**SEC11 application security:** Perform regular penetration testing; Regularly assess security properties of the pipelines; Train for application security; Automate testing throughout the development and release lifecycle; Conduct code reviews; Centralize services for packages and dependencies; Build a program that embeds security ownership in workload teams.
+**Not in the list (so not HRI): SEC4 detect and investigate (logging, central analysis, response automation) and SEC9 data in transit.**
+Triage proposed to Andrew: (A) written plans and processes (threat model, incident plan, playbooks, forensic plan, key personnel, emergency access, data classification, security review cadence, training, ownership): drafted by Claude from the repo, true only once adopted; (B) cheap AWS configuration (root user MFA and key deletion, IAM Access Analyzer, GuardDuty/Security Hub/Inspector, Identity Center, WAF on the API, KMS/encryption defaults); (C) structural (separate accounts and SCP guardrails via AWS Organizations; one IAM role per Lambda per `iam_role_split.md`).
+Operational Excellence and Reliability high-risk lists NOT yet read; still needed to size the whole job.

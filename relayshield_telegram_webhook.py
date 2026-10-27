@@ -3212,7 +3212,12 @@ def _provenance_suffix(target: str) -> str:
 CARD_HEADER = "🛡️ RelayShield Verdict"
 CARD_FOOTER_CORPUS = "Checked against a growing threat intelligence corpus with over 129 monitored marketplaces."
 CARD_FORWARD_EMAIL_LABEL = "Forward this verdict by email"
-CARD_BOT_LINK = "Try it yourself: https://t.me/relayshield_bot"
+# The bot URL carries an underscore (relayshield_bot). As a bare URL it
+# opens an unclosed italic entity under legacy Markdown, and Telegram
+# rejects the whole card send with 400 "can't parse entities" (live
+# failure 2026-10-27: unclosed entity at byte offset 1024). As a link
+# destination the underscore is never parsed as formatting.
+CARD_BOT_LINK = "[Try it yourself](https://t.me/relayshield_bot)"
 CARD_WEBCHECK_LINK = "Try it on the web: https://relayshield.net/check"
 
 

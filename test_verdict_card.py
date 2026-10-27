@@ -84,7 +84,7 @@ class TestTelegramScanCard(unittest.TestCase):
         self.assertIn("Link: `evil-paypa1.com/login`", card)
         self.assertIn("Why: 3/70 security vendors flagged this URL as malicious.", card)
         self.assertIn("Do not click this link. Report it and delete the message", card)
-        self.assertIn("↗ Forward this verdict to anyone who received the same link.", card)
+        self.assertIn("[Forward this verdict by email](mailto:?subject=", card)
 
     def test_suspicious(self):
         card = tg._format_scan_verdict_card(
@@ -177,7 +177,7 @@ class TestTelegramChecktokenCard(unittest.TestCase):
         self.assertIn("Contract: `0x1a2b...cdef`", card)
         self.assertIn("Why: you cannot sell this token.", card)
         self.assertIn("⛔ Do NOT swap, approve, or interact with this token.", card)
-        self.assertIn("↗ Forward this verdict to anyone holding this token.", card)
+        self.assertIn("[Forward this verdict by email](mailto:?subject=", card)
 
     def test_scam_and_tax(self):
         scam = tg._format_token_free_card("0xabcdef0123456789", "scam", 0.0)

@@ -3200,14 +3200,44 @@ def _provenance_suffix(target: str) -> str:
 # v1.2 (2026-10-24): footer gains a web-check line (relayshield.net/check)
 # below the bot link line, on the same free-tier cards only, so a forwarded
 # card reaches recipients without Telegram or WhatsApp. Paid tier untouched.
+# v1.3 (2026-10-25): the forward text line becomes a mailto link labeled
+# "Forward this verdict by email", opening an email draft whose body is
+# the card itself (without the forward line) and whose subject names the
+# target. No real button: Telegram url buttons accept HTTP or tg:// URLs
+# only, so a mailto: button is not allowed; the Markdown link is the
+# text_link entity, which carries no such scheme restriction. The old
+# forward text constants are removed; the try-it lines are unchanged.
 # ---------------------------------------------------------------------------
 
 CARD_HEADER = "🛡️ RelayShield Verdict"
 CARD_FOOTER_CORPUS = "Checked against a growing threat intelligence corpus with over 129 monitored marketplaces."
-CARD_FORWARD_LINK = "↗ Forward this verdict to anyone who received the same link."
-CARD_FORWARD_TOKEN = "↗ Forward this verdict to anyone holding this token."
+CARD_FORWARD_EMAIL_LABEL = "Forward this verdict by email"
 CARD_BOT_LINK = "Try it yourself: https://t.me/relayshield_bot"
 CARD_WEBCHECK_LINK = "Try it on the web: https://relayshield.net/check"
+
+
+def _mailto_query_value(text: str) -> str:
+    """Percent-encode a mailto query value. quote() leaves _ and ~ alone,
+    but _ opens italic in legacy Markdown and ~ opens strikethrough in
+    WhatsApp formatting, so both are encoded too; the result carries no
+    formatting metacharacters on either platform."""
+    return urllib.parse.quote(text or "", safe="").replace("_", "%5F").replace("~", "%7E")
+
+
+def _forward_mailto_url(subject: str, body: str) -> str:
+    """mailto: link opening an email draft with the verdict as the body.
+    No recipient: the user addresses it when forwarding."""
+    return ("mailto:?subject=" + _mailto_query_value(subject)
+            + "&body=" + _mailto_query_value(body))
+
+
+def _forward_email_line(subject_target: str, card_lines: list) -> str:
+    """Forward line for a card: a legacy-Markdown link labeled
+    'Forward this verdict by email'. The email body is the card itself
+    (card_lines, without this line); the email subject names the target."""
+    body = "\n".join(card_lines)
+    url = _forward_mailto_url(f"RelayShield verdict: {subject_target}", body)
+    return f"[{CARD_FORWARD_EMAIL_LABEL}]({url})"
 
 
 def _card_code_span(text: str) -> str:
@@ -3284,7 +3314,8 @@ def _format_scan_verdict_card(target: str, verdict: str, detail: str,
     lines.append(action)
     lines.append("")
     lines.append(CARD_FOOTER_CORPUS)
-    lines.append(CARD_FORWARD_LINK)
+    lines.append(_forward_email_line(
+        target, lines + [CARD_BOT_LINK, CARD_WEBCHECK_LINK]))
     lines.append(CARD_BOT_LINK)
     lines.append(CARD_WEBCHECK_LINK)
     return "\n".join(lines)
@@ -3307,7 +3338,7 @@ def _format_token_free_card(address: str, danger: str | None,
         badge = f"🚨 HIGH RISK: SELL TAX {sell_tax:.0f}%"
         why = f"sell tax of {sell_tax:.0f}% makes it effectively unsellable."
     else:
-        return "\n".join([
+        lines = [
             CARD_HEADER,
             "✅ NO FLAGS FOUND",
             "",
@@ -3316,11 +3347,13 @@ def _format_token_free_card(address: str, danger: str | None,
             "guarantee: a token's risk profile can change.",
             "",
             CARD_FOOTER_CORPUS,
-            CARD_FORWARD_TOKEN,
-            CARD_BOT_LINK,
-            CARD_WEBCHECK_LINK,
-        ])
-    return "\n".join([
+        ]
+        lines.append(_forward_email_line(
+            short, lines + [CARD_BOT_LINK, CARD_WEBCHECK_LINK]))
+        lines.append(CARD_BOT_LINK)
+        lines.append(CARD_WEBCHECK_LINK)
+        return "\n".join(lines)
+    lines = [
         CARD_HEADER,
         badge,
         "",
@@ -3330,10 +3363,12 @@ def _format_token_free_card(address: str, danger: str | None,
         "⛔ Do NOT swap, approve, or interact with this token.",
         "",
         CARD_FOOTER_CORPUS,
-        CARD_FORWARD_TOKEN,
-        CARD_BOT_LINK,
-        CARD_WEBCHECK_LINK,
-    ])
+    ]
+    lines.append(_forward_email_line(
+        short, lines + [CARD_BOT_LINK, CARD_WEBCHECK_LINK]))
+    lines.append(CARD_BOT_LINK)
+    lines.append(CARD_WEBCHECK_LINK)
+    return "\n".join(lines)
 
 
 def _send_scan_verdict(chat_id: int, target: str, verdict: str, detail: str, prefix: str = "Scan result") -> None:

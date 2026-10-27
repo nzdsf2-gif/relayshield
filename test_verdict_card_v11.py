@@ -167,7 +167,7 @@ class TestWhatsAppBotLinkLine(unittest.TestCase):
             {"flagged": False, "reasons": []},
             "that URL", "https://evil.example.com/login")
         self.assertIn(WA_BOT_LINE, card)
-        self.assertLess(card.index("Forward this verdict by email"),
+        self.assertLess(card.index("Forward this verdict:"),
                         card.index(WA_BOT_LINE))
         _assert_v11_rules(self, card)
 
@@ -267,7 +267,7 @@ class TestV11LeavesV1RulesIntact(unittest.TestCase):
         self.assertEqual(
             tg.CARD_FORWARD_EMAIL_LABEL, "Forward this verdict by email")
         self.assertEqual(
-            wa.WA_FORWARD_EMAIL_LABEL, "Forward this verdict by email")
+            wa.WA_FORWARD_LINE, "Forward this verdict: long-press this message, tap Forward, and pick a contact or group to send it to.")
         card = tg._format_scan_verdict_card(
             "evil-paypa1.com/login", "malicious",
             "3/70 security vendors flagged this URL as malicious")

@@ -1,0 +1,295 @@
+"""Verdict card v1.3 tests: the mailto forward link (2026-10-25).
+
+v1.3 replaces the old forward text line with a tappable mailto link
+labeled "Forward this verdict by email". Telegram renders it as a
+legacy-Markdown link; WhatsApp renders it as label text plus the raw
+mailto: URL (plain-text messages have no labeled-link syntax). Neither
+platform gets a real button: Telegram url buttons accept HTTP or tg://
+URLs only, and WhatsApp CTA URL buttons cap the body at 1024 characters
+and the label at 20 characters, while this bot sends plain-text session
+messages via Twilio.
+
+The email body is the card itself without the forward line; the subject
+names the target (scan cards: the full URL; token cards: the short
+address, first 6 plus last 4, as shown).
+"""
+
+import pathlib
+import re
+import sys
+import types
+import unittest
+import unittest.mock
+import urllib.parse
+
+ROOT = pathlib.Path(__file__).resolve().parent
+
+
+def _stub_aws():
+    boto3 = types.ModuleType("boto3")
+    boto3.__path__ = []
+    boto3.resource = lambda *a, **k: unittest.mock.MagicMock()
+    boto3.client = lambda *a, **k: unittest.mock.MagicMock()
+    conditions = types.ModuleType("boto3.dynamodb.conditions")
+    conditions.Key = lambda *a, **k: unittest.mock.MagicMock()
+    conditions.Attr = lambda *a, **k: unittest.mock.MagicMock()
+    dynamodb_mod = types.ModuleType("boto3.dynamodb")
+    dynamodb_mod.__path__ = []
+    dynamodb_mod.conditions = conditions
+    boto3.dynamodb = dynamodb_mod
+    sess = types.ModuleType("boto3.session")
+    sys.modules.setdefault("boto3", boto3)
+    sys.modules.setdefault("boto3.dynamodb", dynamodb_mod)
+    sys.modules.setdefault("boto3.dynamodb.conditions", conditions)
+    sys.modules.setdefault("boto3.session", sess)
+    bc = types.ModuleType("botocore")
+    bc.__path__ = []
+    ex = types.ModuleType("botocore.exceptions")
+
+    class _CE(Exception):
+        pass
+
+    ex.ClientError = _CE
+    ex.BotoCoreError = _CE
+    bc.exceptions = ex
+    sys.modules.setdefault("botocore", bc)
+    sys.modules.setdefault("botocore.exceptions", ex)
+
+
+_stub_aws()
+sys.path.insert(0, str(ROOT))
+import relayshield_telegram_webhook as tg  # noqa: E402
+import relayshield_whatsapp_webhook as wa  # noqa: E402
+
+FOOTER = ("Checked against a growing threat intelligence corpus "
+          "with over 129 monitored marketplaces.")
+TG_BOT_LINE = "Try it yourself: https://t.me/relayshield_bot"
+WA_BOT_LINE = "Try it yourself: https://wa.me/17407373961"
+WEBCHECK_LINE = "Try it on the web: https://relayshield.net/check"
+LABEL = "Forward this verdict by email"
+NASTY_URL = "https://evil.example.com/a_b*c[d]_e~f?x=1"
+OLD_SCAN_FORWARD = "Forward this verdict to anyone who received the same link."
+OLD_TOKEN_FORWARD = "Forward this verdict to anyone holding this token."
+
+# Characters that must never appear raw in a mailto URL: legacy-Markdown
+# formatting (* _ [ ] ( ) `) and WhatsApp formatting (* _ ~).
+_FORBIDDEN_IN_MAILTO = set("_*[]()`~")
+
+
+def _tg_forward_url(card):
+    match = re.search(r"\[Forward this verdict by email\]\((mailto:[^)]+)\)", card)
+    assert match is not None, "Telegram forward Markdown link missing"
+    return match.group(1)
+
+
+def _wa_forward_url(card):
+    match = re.search(r"Forward this verdict by email: (mailto:\S+)", card)
+    assert match is not None, "WhatsApp forward mailto URL missing"
+    return match.group(1)
+
+
+def _mailto_parts(url):
+    parts = urllib.parse.urlsplit(url)
+    assert parts.scheme == "mailto", url
+    assert parts.path == "", url
+    qs = urllib.parse.parse_qs(parts.query)
+    return qs["subject"][0], qs["body"][0]
+
+
+def _card_without_forward(card, prefix):
+    return "\n".join([ln for ln in card.splitlines() if not ln.startswith(prefix)])
+
+
+def _assert_no_standalone_safe(test, text):
+    # "unsafe" (the unknown action) is allowed; standalone "safe" is not.
+    test.assertIsNone(re.search(r"\bsafe\b", text, re.IGNORECASE))
+
+
+class TestTelegramForwardLink(unittest.TestCase):
+    def test_scan_forward_is_markdown_link(self):
+        card = tg._format_scan_verdict_card(
+            "evil-paypa1.com/login", "malicious",
+            "3/70 security vendors flagged this URL as malicious")
+        self.assertIn("[Forward this verdict by email](mailto:?subject=", card)
+        self.assertNotIn(OLD_SCAN_FORWARD, card)
+        url = _tg_forward_url(card)
+        self.assertTrue(url.startswith("mailto:?subject="))
+
+    def test_scan_mailto_round_trip(self):
+        card = tg._format_scan_verdict_card(
+            "evil-paypa1.com/login", "malicious",
+            "3/70 security vendors flagged this URL as malicious")
+        subject, body = _mailto_parts(_tg_forward_url(card))
+        self.assertEqual(subject, "RelayShield verdict: evil-paypa1.com/login")
+        self.assertEqual(body, _card_without_forward(card, "[Forward this verdict by email]("))
+        self.assertIn(FOOTER, body)
+        self.assertIn(TG_BOT_LINE, body)
+        self.assertIn(WEBCHECK_LINE, body)
+        self.assertNotIn(LABEL, body)
+
+    def test_scan_mailto_encoding_special_chars(self):
+        card = tg._format_scan_verdict_card(
+            NASTY_URL, "malicious", "flagged; see https://x.example/?a=1&b=2")
+        subject, body = _mailto_parts(_tg_forward_url(card))
+        self.assertEqual(subject, "RelayShield verdict: " + NASTY_URL)
+        self.assertEqual(body, _card_without_forward(card, "[Forward this verdict by email]("))
+        self.assertIn(NASTY_URL, body)
+
+    def test_scan_mailto_url_has_no_formatting_metacharacters(self):
+        card = tg._format_scan_verdict_card(NASTY_URL, "malicious", "flagged")
+        url = _tg_forward_url(card)
+        self.assertEqual(set(url) & _FORBIDDEN_IN_MAILTO, set())
+        self.assertNotIn(" ", url)
+
+    def test_token_forward_uses_short_address(self):
+        for danger in ("honeypot", "scam"):
+            card = tg._format_token_free_card("0xabcdef0123456789", danger, 0.0)
+            subject, body = _mailto_parts(_tg_forward_url(card))
+            self.assertEqual(subject, "RelayShield verdict: 0xabcd...6789")
+            self.assertEqual(body, _card_without_forward(card, "[Forward this verdict by email]("))
+            self.assertNotIn(OLD_TOKEN_FORWARD, card)
+        card = tg._format_token_free_card("0xabcdef0123456789", None, 0.0)
+        subject, body = _mailto_parts(_tg_forward_url(card))
+        self.assertEqual(subject, "RelayShield verdict: 0xabcd...6789")
+        self.assertEqual(body, _card_without_forward(card, "[Forward this verdict by email]("))
+
+    def test_scan_card_lines_otherwise_unchanged(self):
+        card = tg._format_scan_verdict_card(
+            "evil-paypa1.com/login", "malicious",
+            "3/70 security vendors flagged this URL as malicious")
+        self.assertEqual(
+            _card_without_forward(card, "[Forward this verdict by email](").splitlines(),
+            [tg.CARD_HEADER,
+             "⛔ THREAT DETECTED",
+             "",
+             "Link: `evil-paypa1.com/login`",
+             "Why: 3/70 security vendors flagged this URL as malicious.",
+             "",
+             "Do not click this link. Report it and delete the message if it was sent to you.",
+             "",
+             FOOTER,
+             TG_BOT_LINE,
+             WEBCHECK_LINE])
+
+    def test_token_card_lines_otherwise_unchanged(self):
+        card = tg._format_token_free_card("0xabcdef0123456789", None, 0.0)
+        self.assertEqual(
+            _card_without_forward(card, "[Forward this verdict by email](").splitlines(),
+            [tg.CARD_HEADER,
+             "✅ NO FLAGS FOUND",
+             "",
+             "Contract: `0xabcd...6789`",
+             "No critical flags detected for this contract. That is not a guarantee: a token's risk profile can change.",
+             "",
+             FOOTER,
+             TG_BOT_LINE,
+             WEBCHECK_LINE])
+
+    def test_no_standalone_safe_in_mailto_body(self):
+        clean = tg._format_scan_verdict_card(
+            "example.com", "clean", "Scanned by 70 security vendors, no threats found")
+        _, body = _mailto_parts(_tg_forward_url(clean))
+        _assert_no_standalone_safe(self, body)
+        unknown = tg._format_scan_verdict_card("x.com", "unknown", "no data")
+        _, body = _mailto_parts(_tg_forward_url(unknown))
+        _assert_no_standalone_safe(self, body)
+
+    def test_no_em_dash_in_forward_line(self):
+        card = tg._format_scan_verdict_card("x.com", "malicious", "flagged")
+        forward = [ln for ln in card.splitlines() if ln.startswith("[Forward this verdict by email](")][0]
+        self.assertNotIn("\u2014", forward)
+
+    def test_try_it_lines_unchanged_and_last(self):
+        card = tg._format_scan_verdict_card("x.com", "malicious", "flagged")
+        self.assertTrue(card.endswith(WEBCHECK_LINE))
+        self.assertIn(TG_BOT_LINE, card)
+        self.assertLess(card.index(LABEL), card.index(TG_BOT_LINE))
+        self.assertLess(card.index(TG_BOT_LINE), card.index(WEBCHECK_LINE))
+
+
+class TestWhatsAppForwardLink(unittest.TestCase):
+    def test_forward_is_label_plus_mailto_url(self):
+        card = wa.build_verdict_response(
+            {"malicious": 3, "suspicious": 0, "harmless": 40, "undetected": 27},
+            {"flagged": False, "reasons": []}, "evil.example.com", target="https://evil.example.com/login")
+        self.assertIn("Forward this verdict by email: mailto:?subject=", card)
+        self.assertNotIn(OLD_SCAN_FORWARD, card)
+        url = _wa_forward_url(card)
+        self.assertTrue(url.startswith("mailto:?subject="))
+
+    def test_mailto_round_trip(self):
+        card = wa.build_verdict_response(
+            {"malicious": 3, "suspicious": 0, "harmless": 40, "undetected": 27},
+            {"flagged": False, "reasons": []}, "evil.example.com", target="https://evil.example.com/login")
+        subject, body = _mailto_parts(_wa_forward_url(card))
+        self.assertEqual(subject, "RelayShield verdict: https://evil.example.com/login")
+        self.assertEqual(body, _card_without_forward(card, "Forward this verdict by email:"))
+        self.assertIn(FOOTER, body)
+        self.assertIn(WA_BOT_LINE, body)
+        self.assertIn(WEBCHECK_LINE, body)
+        self.assertNotIn(LABEL, body)
+
+    def test_mailto_encoding_special_chars(self):
+        card = wa.build_verdict_response(
+            {"malicious": 3, "suspicious": 0, "harmless": 40, "undetected": 27},
+            {"flagged": False, "reasons": []}, "evil.example.com", target=NASTY_URL)
+        subject, body = _mailto_parts(_wa_forward_url(card))
+        self.assertEqual(subject, "RelayShield verdict: " + NASTY_URL)
+        self.assertEqual(body, _card_without_forward(card, "Forward this verdict by email:"))
+        self.assertIn(NASTY_URL, body)
+
+    def test_mailto_url_has_no_formatting_metacharacters(self):
+        card = wa.build_verdict_response(
+            {"malicious": 3, "suspicious": 0, "harmless": 40, "undetected": 27},
+            {"flagged": False, "reasons": []}, "evil.example.com", target=NASTY_URL)
+        url = _wa_forward_url(card)
+        self.assertEqual(set(url) & _FORBIDDEN_IN_MAILTO, set())
+        self.assertNotIn(" ", url)
+
+    def test_card_lines_otherwise_unchanged(self):
+        card = wa.build_verdict_response(
+            {"malicious": 3, "suspicious": 0, "harmless": 40, "undetected": 27},
+            {"flagged": False, "reasons": []}, "evil.example.com", target="https://evil.example.com/login")
+        self.assertEqual(
+            _card_without_forward(card, "Forward this verdict by email:").splitlines(),
+            [wa.WA_CARD_HEADER,
+             "⛔ THREAT DETECTED",
+             "",
+             "Link: ```https://evil.example.com/login```",
+             "Why: 3 of 70 security engines confirmed a threat.",
+             "",
+             "Do not click this link. Delete the message if it was sent to you.",
+             "",
+             FOOTER,
+             WA_BOT_LINE,
+             WEBCHECK_LINE])
+
+    def test_no_standalone_safe_in_mailto_body(self):
+        clean = wa.build_verdict_response(
+            {"malicious": 0, "suspicious": 0, "harmless": 40, "undetected": 30},
+            {"flagged": False, "reasons": []}, "example.com", target="https://example.com/")
+        _, body = _mailto_parts(_wa_forward_url(clean))
+        _assert_no_standalone_safe(self, body)
+        unknown = wa.build_verdict_response(None, {"flagged": False, "reasons": []}, "x.com", target="https://x.com/")
+        _, body = _mailto_parts(_wa_forward_url(unknown))
+        _assert_no_standalone_safe(self, body)
+
+    def test_no_em_dash_in_forward_line(self):
+        card = wa.build_verdict_response(
+            {"malicious": 3, "suspicious": 0, "harmless": 40, "undetected": 27},
+            {"flagged": False, "reasons": []}, "evil.example.com", target="https://evil.example.com/login")
+        forward = [ln for ln in card.splitlines() if ln.startswith("Forward this verdict by email:")][0]
+        self.assertNotIn("\u2014", forward)
+
+    def test_try_it_lines_unchanged_and_last(self):
+        card = wa.build_verdict_response(
+            {"malicious": 3, "suspicious": 0, "harmless": 40, "undetected": 27},
+            {"flagged": False, "reasons": []}, "evil.example.com", target="https://evil.example.com/login")
+        self.assertEqual(card.splitlines()[-1], WEBCHECK_LINE)
+        self.assertIn(WA_BOT_LINE, card)
+        self.assertLess(card.index(LABEL), card.index(WA_BOT_LINE))
+        self.assertLess(card.index(WA_BOT_LINE), card.index(WEBCHECK_LINE))
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -99,7 +99,7 @@ class TestTelegramBotLinkLine(unittest.TestCase):
             "evil-paypa1.com/login", "malicious",
             "3/70 security vendors flagged this URL as malicious.")
         self.assertIn(TG_BOT_LINE, card)
-        self.assertLess(card.index(tg.CARD_FORWARD_LINK),
+        self.assertLess(card.index("Forward this verdict by email"),
                         card.index(TG_BOT_LINE))
         _assert_v11_rules(self, card)
 
@@ -108,7 +108,7 @@ class TestTelegramBotLinkLine(unittest.TestCase):
             card = tg._format_token_free_card(
                 "0x1a2b3c4d5e6f7890abcdef1234567890abcdef", danger, 0)
             self.assertIn(TG_BOT_LINE, card)
-            self.assertLess(card.index(tg.CARD_FORWARD_TOKEN),
+            self.assertLess(card.index("Forward this verdict by email"),
                             card.index(TG_BOT_LINE))
             _assert_v11_rules(self, card)
 
@@ -167,7 +167,7 @@ class TestWhatsAppBotLinkLine(unittest.TestCase):
             {"flagged": False, "reasons": []},
             "that URL", "https://evil.example.com/login")
         self.assertIn(WA_BOT_LINE, card)
-        self.assertLess(card.index(wa.WA_CARD_FORWARD_LINK),
+        self.assertLess(card.index("Forward this verdict by email"),
                         card.index(WA_BOT_LINE))
         _assert_v11_rules(self, card)
 
@@ -259,17 +259,21 @@ class TestV11LeavesV1RulesIntact(unittest.TestCase):
         self.assertNotIn("relayshield.net/check", src)
         self.assertNotIn("WA_CARD_WEBCHECK_LINK", src)
 
-    def test_v1_footer_and_forward_lines_unchanged(self):
+    def test_v1_footer_and_forward_email_label(self):
         self.assertEqual(
             tg.CARD_FOOTER_CORPUS, FOOTER)
         self.assertEqual(
             wa.WA_CARD_FOOTER_CORPUS, FOOTER)
         self.assertEqual(
-            tg.CARD_FORWARD_LINK,
-            "↗ Forward this verdict to anyone who received the same link.")
+            tg.CARD_FORWARD_EMAIL_LABEL, "Forward this verdict by email")
         self.assertEqual(
-            wa.WA_CARD_FORWARD_LINK,
-            "↗ Forward this verdict to anyone who received the same link.")
+            wa.WA_FORWARD_EMAIL_LABEL, "Forward this verdict by email")
+        card = tg._format_scan_verdict_card(
+            "evil-paypa1.com/login", "malicious",
+            "3/70 security vendors flagged this URL as malicious")
+        self.assertNotIn("Forward this verdict to anyone who received the same link.", card)
+        token = tg._format_token_free_card("0xabcdef0123456789", "honeypot", 0.0)
+        self.assertNotIn("Forward this verdict to anyone holding this token.", token)
 
 
 if __name__ == "__main__":

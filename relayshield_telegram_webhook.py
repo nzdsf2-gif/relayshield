@@ -3207,6 +3207,9 @@ def _provenance_suffix(target: str) -> str:
 # only, so a mailto: button is not allowed; the Markdown link is the
 # text_link entity, which carries no such scheme restriction. The old
 # forward text constants are removed; the try-it lines are unchanged.
+# Forward fix (2026-10-27): a mailto: text_link is NOT tappable on iOS
+# Telegram (it renders as plain text), so the destination is now the
+# relayshield.net/forward redirect, which opens the same mailto: draft.
 # ---------------------------------------------------------------------------
 
 CARD_HEADER = "🛡️ RelayShield Verdict"
@@ -3229,19 +3232,26 @@ def _mailto_query_value(text: str) -> str:
     return urllib.parse.quote(text or "", safe="").replace("_", "%5F").replace("~", "%7E")
 
 
-def _forward_mailto_url(subject: str, body: str) -> str:
-    """mailto: link opening an email draft with the verdict as the body.
-    No recipient: the user addresses it when forwarding."""
-    return ("mailto:?subject=" + _mailto_query_value(subject)
+def _forward_redirect_url(subject: str, body: str) -> str:
+    """Redirect link opening an email draft with the verdict as the body.
+    The destination is an HTTPS link (not a mailto: link): iOS Telegram
+    does not linkify a mailto: text_link, so the label rendered as plain
+    text and no draft ever opened (confirmed 2026-10-27). The redirect
+    target is relayshield.net/forward, which answers 302 to the mailto:
+    draft with the same subject and body. No recipient: the user
+    addresses it when forwarding."""
+    return ("https://relayshield.net/forward?subject=" + _mailto_query_value(subject)
             + "&body=" + _mailto_query_value(body))
 
 
 def _forward_email_line(subject_target: str, card_lines: list) -> str:
     """Forward line for a card: a legacy-Markdown link labeled
-    'Forward this verdict by email'. The email body is the card itself
-    (card_lines, without this line); the email subject names the target."""
+    'Forward this verdict by email'. The link goes to the relayshield.net
+    forward redirect, which opens an email draft whose body is the card
+    itself (card_lines, without this line) and whose subject names the
+    target."""
     body = "\n".join(card_lines)
-    url = _forward_mailto_url(f"RelayShield verdict: {subject_target}", body)
+    url = _forward_redirect_url(f"RelayShield verdict: {subject_target}", body)
     return f"[{CARD_FORWARD_EMAIL_LABEL}]({url})"
 
 

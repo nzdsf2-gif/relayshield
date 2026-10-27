@@ -826,6 +826,18 @@ export default {
     if (url.pathname === "/healthz") {
       return new Response("ok", { status: 200 });
     }
+    if (url.pathname === "/forward") {
+      // Redirect to a mailto: draft with the same subject and body.
+      // The query string passes through RAW: decoding and re-encoding
+      // it (for example via URLSearchParams) would rewrite spaces as +
+      // and alter the percent-encoding, corrupting the mail body.
+      // Telegram's forward link points here because a mailto: text_link
+      // is not tappable on iOS Telegram (confirmed 2026-10-27).
+      return new Response(null, {
+        status: 302,
+        headers: { Location: "mailto:?" + url.search.slice(1) },
+      });
+    }
     return new Response(HTML, {
       status: 200,
       headers: { "Content-Type": "text/html; charset=utf-8" },

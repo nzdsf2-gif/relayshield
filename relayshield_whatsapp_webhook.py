@@ -513,38 +513,31 @@ def _heuristic_url_check(url: str) -> dict:
 # is the label text plus the mailto: URL, whose URL part is the tappable
 # element. The old forward text constant is removed; the try-it lines
 # are unchanged.
+# Forward fix (2026-10-27): the raw mailto: URL is dropped from WhatsApp
+# cards. It dumped ~700 characters of percent-encoding into the chat,
+# WhatsApp did not linkify it as one link, and it linkified the scanned
+# target substring inside it. The forward line is now an instruction to
+# long-press, tap Forward, and pick a contact or group; the forwarded
+# copy carries the full card text including the wa.me bot line.
 # ---------------------------------------------------------------------------
 
 WA_CARD_HEADER = "🛡️ RelayShield Verdict"
 WA_CARD_FOOTER_CORPUS = "Checked against a growing threat intelligence corpus with over 129 monitored marketplaces."
-WA_FORWARD_EMAIL_LABEL = "Forward this verdict by email"
+WA_FORWARD_LINE = "Forward this verdict: long-press this message, tap Forward, and pick a contact or group to send it to."
 WA_CARD_BOT_LINK = "Try it yourself: https://wa.me/17407373961"
 WA_CARD_WEBCHECK_LINK = "Try it on the web: https://relayshield.net/check"
 
 
-def _mailto_query_value(text: str) -> str:
-    """Percent-encode a mailto query value. quote() leaves _ and ~ alone,
-    but _ opens italic in legacy Markdown and ~ opens strikethrough in
-    WhatsApp formatting, so both are encoded too; the result carries no
-    formatting metacharacters on either platform."""
-    return urllib.parse.quote(text or "", safe="").replace("_", "%5F").replace("~", "%7E")
-
-
-def _forward_mailto_url(subject: str, body: str) -> str:
-    """mailto: link opening an email draft with the verdict as the body.
-    No recipient: the user addresses it when forwarding."""
-    return ("mailto:?subject=" + _mailto_query_value(subject)
-            + "&body=" + _mailto_query_value(body))
-
-
 def _forward_email_line(subject_target: str, card_lines: list) -> str:
-    """Forward line for a card: label text plus the mailto: URL. WhatsApp
-    plain-text messages have no labeled-link syntax, so the URL itself is
-    the tappable element. The email body is the card itself (card_lines,
-    without this line); the email subject names the target."""
-    body = "\n".join(card_lines)
-    url = _forward_mailto_url(f"RelayShield verdict: {subject_target}", body)
-    return f"{WA_FORWARD_EMAIL_LABEL}: {url}"
+    """Forward line for a WhatsApp card: an instruction, not a link.
+    Plain-text WhatsApp messages cannot carry a labeled mailto link, and
+    the raw mailto: URL dumped percent-encoded garbage into the chat and
+    linkified the scanned target substring inside it. The user long-presses
+    this message, taps Forward, and picks a contact or group; the forwarded
+    copy carries the full card text including the wa.me bot line, so the
+    recipient gets the join link. subject_target and card_lines are kept
+    for call-site compatibility and are not used."""
+    return WA_FORWARD_LINE
 
 
 def _wa_code_span(text: str) -> str:

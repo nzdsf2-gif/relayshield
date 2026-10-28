@@ -840,3 +840,24 @@ FTR still show Blocked, and on what; (4) live proof of the first-party path with
   Not yet done: read how Bundle D's earlier test was run (it has 0 subscribers, so it may have used another route), then derive and dry-run a Bundle D test offer. One open change per product, so it waits for any in-flight request.
 * **Dave Shapiro, his words:** NOT when this license is unblocked. The earlier plan is: address some of the WAFR gap items and resubmit; **when that AND the FTR pass, contact him.** The WAFR is 37 High / 15 Medium (2026-10-18). The only written starting points found are `ftr_finish_2026-10-18.md` section 4
   (the remaining High risks, each to carry a concrete plan in its Notes) and the sequence at LOG line 448 (re-tick and re-word the WAFR, save milestone, PDF under 3 MB, request FTR validation again, then email Dave). No dated remediation plan was found. Earlier lines in this log that make the Bundle D licence the trigger for contacting him are superseded.
+
+## 2026-10-27: WAFR/FTR GAP WORK STARTED. THE FTR GATE IS ZERO HIGH RISKS IN SEC, OPS AND REL ONLY (SECONDARY SOURCE). TESTS NOW RUN IN CI.
+
+* **Required to clear all 37 High? Probably not.** Search summaries of AWS's Partner Central "Request FTR" page: WAFR report under a year old, zero HRIs in Security, Operational Excellence and Reliability, solution named
+  in the workload, reviewer named, PDF under 3 MB; resubmittable. Perf/Cost/Sustainability do not gate. **UNVERIFIED against the guide itself (docs.aws.amazon.com is egress-blocked, WebFetch ENOTFOUND).** Andrew should confirm in Partner Central.
+* **Not known:** the per-pillar split of the 37 High / 15 Medium. Andrew reads OPS/SEC/REL High counts from the WAT Overview.
+* **Built:** `.github/workflows/tests.yml` + `tools/run_test_suite.py` + `tests_known_failing.txt` (13 files, may only shrink) + `tests_requirements.txt`. 104 files: 91 pass, 13 known-failing, measured with pytest, boto3, pyyaml, requests,
+  cryptography on Python 3.13. Different dependency sets give different baselines (boto3 absent turns 3 more red; cryptography absent turns 6 more red). Mutation-tested locally; **never run on GitHub yet**.
+* Plan and gap table: `wafr_ftr_gap_plan_2026-10-27.md`. NEXT: reserved concurrency, API alarm, log-retention tools (dry-run default, Stubber-checked); then IAM role split in stages.
+
+## 2026-10-28: PER-PILLAR WAFR COUNTS READ FROM ANDREW'S CHART. IF THE THREE-PILLAR RULE HOLDS, THE TARGET IS 24 HIGH RISKS, NOT 37.
+OPS 5H/5M, SEC 9H/1M, REL 10H/2M, PERF 4H/1M, COST 9H/0M, SUS 0H/6M (37 H / 15 M). Gate pillars (OPS+SEC+REL) = 24 High. The rule itself is still unconfirmed against AWS's page. Recorded in `wafr_ftr_gap_plan_2026-10-27.md` section 2.
+
+## 2026-10-28 (rule CONFIRMED): THE FTR WAFR GATE IS ZERO HRIs IN SEC, OPS, REL. READ FROM AWS'S PAGE BY ANDREW.
+Five requirements: report under 1 year old; zero HRIs in Security, Operational Excellence, Reliability; solution named in workload name or description; reviewer's full name and email in the reviewer owner field; done in the Well-Architected Tool.
+Target is 24 High (5 OPS, 9 SEC, 10 REL). The earlier "UNVERIFIED" on the pillar rule is closed. Still unchecked: workload name/description names the solution; reviewer owner field is filled.
+
+## 2026-10-28 (build): `tools/wafr_hardening.py` WRITTEN AND TESTED, NOT RUN AGAINST AWS. REL 1/6/7/10.
+Steps `concurrency`, `alarm`, `retention`; dry run default; spec `tools/wafr_hardening_spec.json` (api 100, bundle-fulfillment 10, stripe-webhook 10 reserved; those numbers are MY PROPOSAL, not measured). `test_wafr_hardening.py` 13 tests: fakes for decisions,
+botocore Stubber over the real service models for request/response shapes, six planted bugs all caught. Retention DELETES events older than 90 days on groups that had none; the dry run lists size and age first. The alarm step copies the AlarmActions
+of the existing Lambda Errors alarms (found by reading them) and blocks if there are none. NEXT: Andrew runs the dry run, reads it, then `--apply` per step. After apply, REL 1/7/10 Notes and ticks can change (reserved concurrency exists; alarm exists), with evidence = the tool's output.

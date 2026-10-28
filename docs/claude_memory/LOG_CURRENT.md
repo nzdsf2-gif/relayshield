@@ -849,3 +849,6 @@ FTR still show Blocked, and on what; (4) live proof of the first-party path with
 * **Built:** `.github/workflows/tests.yml` + `tools/run_test_suite.py` + `tests_known_failing.txt` (13 files, may only shrink) + `tests_requirements.txt`. 104 files: 91 pass, 13 known-failing, measured with pytest, boto3, pyyaml, requests,
   cryptography on Python 3.13. Different dependency sets give different baselines (boto3 absent turns 3 more red; cryptography absent turns 6 more red). Mutation-tested locally; **never run on GitHub yet**.
 * Plan and gap table: `wafr_ftr_gap_plan_2026-10-27.md`. NEXT: reserved concurrency, API alarm, log-retention tools (dry-run default, Stubber-checked); then IAM role split in stages.
+
+## 2026-10-28: PER-PILLAR WAFR COUNTS READ FROM ANDREW'S CHART. IF THE THREE-PILLAR RULE HOLDS, THE TARGET IS 24 HIGH RISKS, NOT 37.
+OPS 5H/5M, SEC 9H/1M, REL 10H/2M, PERF 4H/1M, COST 9H/0M, SUS 0H/6M (37 H / 15 M). Gate pillars (OPS+SEC+REL) = 24 High. The rule itself is still unconfirmed against AWS's page. Recorded in `wafr_ftr_gap_plan_2026-10-27.md` section 2.

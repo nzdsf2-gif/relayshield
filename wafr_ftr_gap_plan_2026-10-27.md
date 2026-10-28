@@ -16,11 +16,19 @@ the "zero HRIs in SEC, OPS, REL" line. If it is there, the target shrinks from 3
 
 The FTR also has an alternative evidence path (a SOC 2 report). Not realistic for us; noted so it is not forgotten.
 
-## 2. The number I need from Andrew
+## 2. The per-pillar split (read from Andrew's console chart, 2026-10-28)
 
-The 37 High / 15 Medium split by pillar is not in the repo. **ANDREW READS THIS:** Well-Architected Tool, workload "RelayShield API",
-Overview. Send the High count shown for each of OPS, SEC, REL (PERF/COST/SUS can be ignored for the gate).
-Also still unknown from 2026-10-12: which one question was unanswered.
+| Pillar | High | Medium | Gates the FTR? |
+|---|---|---|---|
+| Operational Excellence | 5 | 5 | yes |
+| Security | 9 | 1 | yes |
+| Reliability | 10 | 2 | yes |
+| Performance Efficiency | 4 | 1 | no |
+| Cost Optimization | 9 | 0 | no |
+| Sustainability | 0 | 6 | no |
+
+Total 37 High, 15 Medium, matching the earlier figure. **If the three-pillar rule is confirmed, the target is 24 High risks
+(5 OPS + 9 SEC + 10 REL), not 37.** The 13 in Performance and Cost need no work for the gate. Still unknown: the one question left unanswered on 2026-10-12.
 
 ## 3. Why "fix" means "do it", not "tick it"
 

@@ -9146,6 +9146,10 @@ X402INDEX_DOMAIN_VERIFICATION_HASH = (
     "0d60fa79e14dc718f33d46a51b9b5228488791efe60962913a7bed5adf29e9aa"
 )
 
+# x402-list ownership proof, issued 2026-10-28 for api.relayshield.net.
+# Public by design and served verbatim at /.well-known/x402list.txt.
+X402LIST_OWNERSHIP_TOKEN = 'KODcFaPCYu2VIGSLuk_b3VjNJCi9s5ZBQCpWYKRLDXg'
+
 VERDICT_WATCHES_TABLE = "relayshield_verdict_watches"
 
 # Subject type -> the metered path whose handler produces its verdict.
@@ -18703,6 +18707,13 @@ def lambda_handler(event: dict, context) -> dict:
             "statusCode": 200,
             "headers": {"Content-Type": "text/plain; charset=utf-8"},
             "body": X402INDEX_DOMAIN_VERIFICATION_HASH,
+        }
+
+    if path == "/.well-known/x402list.txt":
+        return {
+            "statusCode": 200,
+            "headers": {"Content-Type": "text/plain; charset=utf-8"},
+            "body": X402LIST_OWNERSHIP_TOKEN,
         }
 
     # Verdict Watch licence routes. Registered in handle_metered_request's

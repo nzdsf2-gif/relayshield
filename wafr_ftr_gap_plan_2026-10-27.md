@@ -2,19 +2,22 @@
 
 Solution `soln-aicwx4eiyofnm`, product `prod-kkvurtspreofy`. Workload "RelayShield API", account 239677749008.
 
-## 1. Do we have to clear all 37 High risks? No, probably not. Three pillars, not six.
+## 1. Do we have to clear all 37 High risks? No. Only the 24 in Security, Operational Excellence and Reliability.
 
-AWS's Partner Central builder guide ("Request Foundational Technical Review", `requesting-ftr`), as reported by web search:
-the WAFR report must be **less than a year old**, show **zero high-risk issues in Security, Operational Excellence and Reliability**,
-name the partner solution in the workload name or description, name the reviewer, and be a PDF **under 3 MB**. A failed submission can be
-fixed and resubmitted as many times as needed. Performance, Cost and Sustainability are not part of that gate.
+**CONFIRMED 2026-10-28 from AWS's own FTR page, pasted by Andrew.** For a WAFR report the FTR requires:
 
-**UNVERIFIED, and it matters.** `docs.aws.amazon.com` is blocked from this container, so I could not read the guide itself. The
-pillar rule comes from search summaries of it. One third-party tool also says only *open* High risks count, so a risk you fix and
-re-tick no longer counts; that is not in AWS's text. Before spending effort, open the FTR section in Partner Central and confirm
-the "zero HRIs in SEC, OPS, REL" line. If it is there, the target shrinks from 37 to whatever those three pillars hold.
+1. Report is less than 1 year old.
+2. **Zero high-risk issues (HRIs) in the Security, Operational Excellence and Reliability pillars.**
+3. The specific partner solution is referenced in the workload name or description.
+4. The reviewer's full name and email address are in the reviewer owner field.
+5. The WAFR is done in the AWS Well-Architected Tool (self-service is allowed).
 
-The FTR also has an alternative evidence path (a SOC 2 report). Not realistic for us; noted so it is not forgotten.
+Performance, Cost and Sustainability do not gate. Still UNVERIFIED from AWS's text: the PDF size limit (3 MB, from search) and
+whether only *open* HRIs count (a third-party checker says so).
+
+**Two items to check now, both free:** the workload name or description must name the solution (`RS Agentic Attack Surface API`
+or the listing name), and the reviewer owner field must hold Andrew's full name and email. Either missing fails the report
+regardless of the risk count.
 
 ## 2. The per-pillar split (read from Andrew's console chart, 2026-10-28)
 
@@ -43,6 +46,13 @@ control, then re-ticking with evidence in the Notes.
   (the list may only shrink). Any new failing file turns the job red. Proven by mutation: a new failing file exits 1; a passing
   file listed as known prints a notice. **Not yet seen running on GitHub**; the first push to main is its first real run.
   After that run, REL 8's "tests are not yet run in CI" Note can change, and its practice may be re-ticked once a run is green.
+
+* **Reliability hardening tool (REL 1, 6, 7, 10; written 2026-10-28, NOT run against AWS).** `tools/wafr_hardening.py`, numbers in
+  `tools/wafr_hardening_spec.json`. Three steps, dry run by default: reserved concurrency (api 100, bundle-fulfillment 10,
+  stripe-webhook 10; never overwrites a different value; respects AWS's 100-unreserved floor), three alarms on `relayshield-api`
+  (errors, throttles, concurrency share) sent to the same place the existing Lambda error alarms go, and 90-day retention on log
+  groups that have none. 13 tests; requests checked against the real lambda, cloudwatch and logs service models with botocore
+  Stubber; six planted bugs each turned the suite red.
 
 ## 5. Remaining gaps, from the repo's own records (what is known, not what is guessed)
 

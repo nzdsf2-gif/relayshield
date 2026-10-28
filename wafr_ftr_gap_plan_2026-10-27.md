@@ -78,3 +78,6 @@ control, then re-ticking with evidence in the Notes.
 3. IAM role split, in stages. This is the largest SEC finding and the slowest, so start it early.
 4. Re-tick, re-word Notes, save a milestone, generate the PDF under 3 MB, request validation again.
 5. Email Dave Shapiro only after the FTR passes (Andrew's instruction, 2026-10-26).
+
+## 7. Status 2026-10-28 night
+REL tool dry run on Andrew's Mac: clean, nothing applied. Order of work and the full TODO list: `docs/claude_memory/LOG_CURRENT.md`, section "WHERE 2026-10-28 LEFT THINGS".

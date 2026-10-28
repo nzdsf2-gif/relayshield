@@ -861,3 +861,27 @@ Target is 24 High (5 OPS, 9 SEC, 10 REL). The earlier "UNVERIFIED" on the pillar
 Steps `concurrency`, `alarm`, `retention`; dry run default; spec `tools/wafr_hardening_spec.json` (api 100, bundle-fulfillment 10, stripe-webhook 10 reserved; those numbers are MY PROPOSAL, not measured). `test_wafr_hardening.py` 13 tests: fakes for decisions,
 botocore Stubber over the real service models for request/response shapes, six planted bugs all caught. Retention DELETES events older than 90 days on groups that had none; the dry run lists size and age first. The alarm step copies the AlarmActions
 of the existing Lambda Errors alarms (found by reading them) and blocks if there are none. NEXT: Andrew runs the dry run, reads it, then `--apply` per step. After apply, REL 1/7/10 Notes and ticks can change (reserved concurrency exists; alarm exists), with evidence = the tool's output.
+
+## WHERE 2026-10-28 LEFT THINGS. WAFR/FTR GAP WORK: GATE IS 24 HIGH RISKS (5 OPS, 9 SEC, 10 REL). THE REL TOOL DRY RUN IS CLEAN; NOTHING APPLIED. READ THIS FIRST FOR THE WAFR THREAD.
+
+**Supersedes the WAFR parts of the 2026-10-20 and 2026-10-26 lists. The Bundle D listing work (all four verifier stages PASS) is unchanged.**
+
+### Facts, from Andrew's own pastes
+* **FTR rule CONFIRMED from AWS's page:** WAFR under 1 year old; zero HRIs in Security, Operational Excellence, Reliability; solution named in workload name or description; reviewer's full name and email in the reviewer owner field; done in the WA Tool.
+* **Counts from his console chart:** OPS 5H/5M, SEC 9H/1M, REL 10H/2M, PERF 4H/1M, COST 9H/0M, SUS 0H/6M. Perf and Cost do not gate. Whether only OPEN HRIs count is still unconfirmed (third-party claim only).
+* **Dry run of `tools/wafr_hardening.py` on his Mac, merged to local main (NOT pushed to origin/main, so the tests workflow has not run on GitHub):** concurrency 3 to change, 0 conflicts (none of the three has a reservation today); alarm 3 to create, 0 attention; retention 54 groups already fine, 11 to set,
+  all `/aws/lambda/*`. Largest is `relayshield-feed-maintainer` (34 MB, 72 days old); the oldest group is 77 days old, so **90-day retention deletes nothing today**. Nothing has been applied.
+
+### TODO, IN ORDER
+1. **Apply the REL tool, one step at a time, each followed by a re-dry-run:** `AWS_PROFILE=relayshield python3 tools/wafr_hardening.py --step concurrency --apply`, then `--step alarm --apply`, then `--step retention --apply`. **Before the alarm step: the tool now prints a `notifies:` line (added 2026-10-28 after the dry run showed it did not); Andrew must read which target it found.** The target is copied from the existing Lambda error alarms; if it is wrong, pass `--sns-topic`.
+   Unverified: that the reserved values (api 100, fulfillment 10, stripe 10) are right; they are my proposal.
+2. **Two free checks in the WA Tool:** the workload name/description names the solution; the reviewer owner field holds Andrew's full name and email. Either missing fails the report whatever the risk count.
+3. **Push `main` so `.github/workflows/tests.yml` runs for the first time.** Expect green with 13 known failures. If it is red for an environment reason, fix that before relying on it. Then update REL 8's Note.
+4. **SECURITY, 9 High (the biggest block): one IAM role per Lambda** (`iam_role_split.md`; 41 functions share one role with 26 inline policies). Snapshot first (`tools/iam_snapshot_role.py`), then `tools/iam_split_roles.py` per function. Staged, each a pure move. Also GuardDuty/WAF decisions (cost, Andrew's call). **The saved answers for OPS and SEC were given in chat and never saved**: Andrew must send which OPS and SEC questions are High.
+5. **Remaining REL:** Lambda versions and an alias for rollback; PITR on the customer-state tables (`tools/protect_dynamodb_tables.sh`, run status unknown); AWS Backup plan; DLQs and tracing; API Gateway throttling and access logging; a load test; a DR plan. **OPS:** `relayshield_weekly_metrics.py` on a CI deploy path and in the drift check (needs an IAM grant first); tag standardisation.
+6. **Then:** re-tick and re-word Notes WITH EVIDENCE (the nine stale Notes are in `ftr_finish_2026-10-18.md` section 3), save milestone, PDF under 3 MB, request validation. **The FTR is ALSO blocked by two Partner Central prerequisites** (deployed-on-AWS now declared and verified; PRM tagging not yet run: `tools/prm_tag_resources.py`, dry run then `--apply`, then up to 7 days). **The end-to-end subscription test is still required** and has no Bundle D test-offer file yet.
+7. **Dave Shapiro only after the WAFR gaps are fixed, resubmitted and the FTR passes** (Andrew's instruction).
+
+### Standing lessons from this session
+* Tool output must show every decision the reader is asked to check. I asked Andrew to read the alarm target and the tool did not print it.
+* A suite that stubs boto3 gives a different baseline with boto3 installed; the CI dependency set is pinned in `tests_requirements.txt` for that reason.

@@ -149,7 +149,8 @@ def run(clients, account_of, spec, apply, steps, sns_topic=None, out=print):
             rows, wanted = plan_concurrency(clients["lambda"], spec)
             done = list(apply_concurrency(clients["lambda"], rows, wanted)) if apply else []
         elif step == "alarm":
-            rows, defs, _ = plan_alarm(clients["cloudwatch"], spec, sns_topic)
+            rows, defs, actions = plan_alarm(clients["cloudwatch"], spec, sns_topic)
+            out(f"  notifies: {', '.join(actions) if actions else '(nobody found)'}")
             done = []
             if apply:
                 for d in defs:

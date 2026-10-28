@@ -125,6 +125,10 @@ class Decisions(unittest.TestCase):
         go({"cloudwatch": cw}, apply=True, steps=("alarm",))
         self.assertEqual(cw.puts, ["relayshield-api-errors", "relayshield-api-throttles", "relayshield-api-concurrency-high"])
 
+    def test_alarm_step_prints_who_will_be_notified(self):
+        _rc, out = go({"cloudwatch": FakeCW()}, steps=("alarm",))
+        self.assertIn(f"notifies: {TOPIC}", out)
+
     def test_concurrency_alarm_threshold_is_share_of_reserved(self):
         d = {x["AlarmName"]: x for x in T.alarm_defs(SPEC, [TOPIC])}
         self.assertEqual(d["relayshield-api-concurrency-high"]["Threshold"], 80.0)

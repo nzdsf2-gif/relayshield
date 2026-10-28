@@ -852,3 +852,12 @@ FTR still show Blocked, and on what; (4) live proof of the first-party path with
 
 ## 2026-10-28: PER-PILLAR WAFR COUNTS READ FROM ANDREW'S CHART. IF THE THREE-PILLAR RULE HOLDS, THE TARGET IS 24 HIGH RISKS, NOT 37.
 OPS 5H/5M, SEC 9H/1M, REL 10H/2M, PERF 4H/1M, COST 9H/0M, SUS 0H/6M (37 H / 15 M). Gate pillars (OPS+SEC+REL) = 24 High. The rule itself is still unconfirmed against AWS's page. Recorded in `wafr_ftr_gap_plan_2026-10-27.md` section 2.
+
+## 2026-10-28 (rule CONFIRMED): THE FTR WAFR GATE IS ZERO HRIs IN SEC, OPS, REL. READ FROM AWS'S PAGE BY ANDREW.
+Five requirements: report under 1 year old; zero HRIs in Security, Operational Excellence, Reliability; solution named in workload name or description; reviewer's full name and email in the reviewer owner field; done in the Well-Architected Tool.
+Target is 24 High (5 OPS, 9 SEC, 10 REL). The earlier "UNVERIFIED" on the pillar rule is closed. Still unchecked: workload name/description names the solution; reviewer owner field is filled.
+
+## 2026-10-28 (build): `tools/wafr_hardening.py` WRITTEN AND TESTED, NOT RUN AGAINST AWS. REL 1/6/7/10.
+Steps `concurrency`, `alarm`, `retention`; dry run default; spec `tools/wafr_hardening_spec.json` (api 100, bundle-fulfillment 10, stripe-webhook 10 reserved; those numbers are MY PROPOSAL, not measured). `test_wafr_hardening.py` 13 tests: fakes for decisions,
+botocore Stubber over the real service models for request/response shapes, six planted bugs all caught. Retention DELETES events older than 90 days on groups that had none; the dry run lists size and age first. The alarm step copies the AlarmActions
+of the existing Lambda Errors alarms (found by reading them) and blocks if there are none. NEXT: Andrew runs the dry run, reads it, then `--apply` per step. After apply, REL 1/7/10 Notes and ticks can change (reserved concurrency exists; alarm exists), with evidence = the tool's output.

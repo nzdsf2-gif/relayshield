@@ -1,0 +1,17 @@
+{
+  "account": "239677749008",
+  "region": "us-east-1",
+  "_note": "Numbers are Claude's proposal (2026-10-28), not measured limits: observed peak concurrency was 10 under an account limit of 10. Edit freely. AWS requires at least 100 of the 1,000 account limit to stay unreserved.",
+  "reserved_concurrency": {
+    "relayshield-api": 100,
+    "relayshield-bundle-fulfillment": 10,
+    "relayshield-stripe-webhook": 10
+  },
+  "api_alarm": {
+    "function": "relayshield-api",
+    "errors_per_5min": 5,
+    "throttles_per_5min": 1,
+    "concurrency_share_of_reserved": 0.8
+  },
+  "log_retention_days": 90
+}

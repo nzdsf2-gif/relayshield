@@ -14213,18 +14213,31 @@ def _log_payg_settlement(path: str, price_units: int, settlement: dict) -> None:
     try:
         table = dynamodb.Table(PAYG_SETTLEMENTS_TABLE)
         now   = datetime.now(timezone.utc)
+        network = settlement.get("network", "unknown")
+        if network.startswith("eip155:8453"):
+            chain = "base"
+        elif network.startswith("solana"):
+            chain = "solana"
+        else:
+            chain = network
         table.put_item(Item={
             "settlement_id": str(uuid.uuid4()),
             "timestamp":     now.isoformat(),
             "path":          path,
             "amount_usd":    Decimal(str(price_units / 1_000_000)),
-            "network":       settlement.get("network", "unknown"),
+            "network":       network,
             "tx_hash":       settlement.get("transaction", ""),
             "payer":         settlement.get("payer", ""),
+            "facilitator":   settlement.get("facilitator", "unknown"),
+            "chain":         chain,
+            "amount_units":  price_units,
+            "handler_status": "settled",
+            "source":        "x402",
+            "billed":        True,
             "ttl":           int(now.timestamp()) + 90 * 86400,
         })
     except Exception as exc:
-        logger.warning("Failed to log PAYG settlement for path=%s: %s", path, exc)
+        logger.warning("SETTLEMENT_LOG_FAILURE Failed to log PAYG settlement for path=%s: %s", path, exc)
 
 
 def _log_hf_mcp_call(path: str, credit_cost: int) -> None:

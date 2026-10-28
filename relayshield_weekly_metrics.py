@@ -1003,35 +1003,67 @@ def _x402_stats() -> dict:
             resp   = table.scan(ExclusiveStartKey=resp["LastEvaluatedKey"])
             items += resp.get("Items", [])
 
-        total_calls   = len(items)
-        total_revenue = sum(float(i.get("amount_usd", 0)) for i in items)
-        this_week     = [i for i in items if i.get("timestamp", "") >= cutoff]
+        # x402 only: HF Space metered calls share this table with
+        # source hf-mcp-space and must not inflate x402 totals.
+        x402_items = [i for i in items if i.get("source") != "hf-mcp-space"]
+        # NOTE: the settlements table has a 90 day TTL, so "total" below
+        # is last 90 days, not lifetime. The email now says so.
+        total_calls   = len(x402_items)
+        total_revenue = sum(float(i.get("amount_usd", 0)) for i in x402_items)
+        this_week     = [i for i in x402_items if i.get("timestamp", "") >= cutoff]
         week_calls    = len(this_week)
         week_revenue  = sum(float(i.get("amount_usd", 0)) for i in this_week)
 
         by_endpoint: dict[str, dict] = {}
-        for i in items:
+        for i in x402_items:
             path = i.get("path", "unknown")
             e = by_endpoint.setdefault(path, {"calls": 0, "revenue": 0.0})
             e["calls"]   += 1
             e["revenue"] += float(i.get("amount_usd", 0))
-        top_endpoints = sorted(by_endpoint.items(), key=lambda x: x[1]["revenue"], reverse=True)[:5]
+        all_endpoints = sorted(by_endpoint.items(), key=lambda x: x[1]["revenue"], reverse=True)
+        top_endpoints = all_endpoints[:5]
+
+        def _short(value):
+            s = str(value or "")
+            return s if len(s) <= 16 else s[:10] + "..." + s[-6:]
+
+        recent = sorted(x402_items, key=lambda i: i.get("timestamp", ""), reverse=True)[:20]
+        recent_settlements = [
+            {
+                "timestamp": i.get("timestamp", ""),
+                "path": i.get("path", "unknown"),
+                "amount_usd": float(i.get("amount_usd", 0)),
+                "network": i.get("network", "unknown"),
+                "payer_short": _short(i.get("payer", "")),
+                "tx_hash_short": _short(i.get("tx_hash", "")),
+            }
+            for i in recent
+        ]
 
         return {
             "total_calls":       total_calls,
             "calls_this_week":   week_calls,
             "total_revenue":     round(total_revenue, 2),
             "revenue_this_week": round(week_revenue, 2),
+            "calls_last_90_days": total_calls,
+            "revenue_last_90_days": round(total_revenue, 2),
             "top_endpoints":     [
                 {"path": p, "calls": v["calls"], "revenue": round(v["revenue"], 2)}
                 for p, v in top_endpoints
             ],
+            "all_endpoints":     [
+                {"path": p, "calls": v["calls"], "revenue": round(v["revenue"], 2)}
+                for p, v in all_endpoints
+            ],
+            "recent_settlements": recent_settlements,
         }
     except Exception as exc:
         logger.warning("x402 stats scan failed: %s", exc)
         return {
             "total_calls": 0, "calls_this_week": 0,
             "total_revenue": 0, "revenue_this_week": 0, "top_endpoints": [],
+            "calls_last_90_days": 0, "revenue_last_90_days": 0,
+            "all_endpoints": [], "recent_settlements": [],
         }
 
 
@@ -1253,6 +1285,9 @@ def _webcheck_section_html(w: dict) -> str:
 def _build_email(metrics: dict) -> str:
     week_end = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     s = metrics
+    _x402 = s.get("x402", {}) or {}
+    _x402_endpoints = _x402.get("all_endpoints") or _x402.get("top_endpoints", [])
+    _x402_recent = _x402.get("recent_settlements", [])
     webcheck_section = _webcheck_section_html(s.get("webcheck") or {})
     return f"""
 <html><body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -1347,12 +1382,14 @@ def _build_email(metrics: dict) -> str:
 
 <h3 style="color: #e94560;">x402 PAYG Calls & Revenue</h3>
 <table border="0" cellpadding="4">
-  <tr><td>Total calls</td><td><b>{s['x402']['total_calls']}</b></td></tr>
+  <tr><td>Calls (last 90 days, table TTL)</td><td><b>{s['x402']['total_calls']}</b></td></tr>
   <tr><td>Calls this week</td><td><b>{s['x402']['calls_this_week']}</b></td></tr>
-  <tr><td>Total revenue</td><td><b>${s['x402']['total_revenue']}</b></td></tr>
+  <tr><td>Revenue (last 90 days, table TTL)</td><td><b>${s['x402']['total_revenue']}</b></td></tr>
   <tr><td>Revenue this week</td><td><b>${s['x402']['revenue_this_week']}</b></td></tr>
-  <tr><td colspan="2" style="padding-top:6px;color:#888;font-size:12px">Top endpoints by revenue</td></tr>
-  {"".join(f"<tr><td>&nbsp;&nbsp;{e['path']}</td><td><b>${e['revenue']}</b> ({e['calls']} calls)</td></tr>" for e in s['x402']['top_endpoints']) or '<tr><td colspan="2" style="color:#888">No settlements yet</td></tr>'}
+  <tr><td colspan="2" style="padding-top:6px;color:#888;font-size:12px">All endpoints by revenue</td></tr>
+  {"".join(f"<tr><td>&nbsp;&nbsp;{e['path']}</td><td><b>${e['revenue']}</b> ({e['calls']} calls)</td></tr>" for e in _x402_endpoints) or '<tr><td colspan="2" style="color:#888">No settlements yet</td></tr>'}
+  <tr><td colspan="2" style="padding-top:6px;color:#888;font-size:12px">Recent settlements (last 20, payer and tx truncated)</td></tr>
+  {"".join(f"<tr><td>{r['timestamp']}</td><td>{r['path']} ${r['amount_usd']} {r['network']} {r['payer_short']} {r['tx_hash_short']}</td></tr>" for r in _x402_recent) or '<tr><td colspan="2" style="color:#888">No recent settlements</td></tr>'}
 </table>
 
 <h3 style="color: #e94560;">HF MCP Server — Calls & Revenue</h3>

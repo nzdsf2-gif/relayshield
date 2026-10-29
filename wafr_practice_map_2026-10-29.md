@@ -38,7 +38,7 @@ and states why in the Note.
 | IP subnet allocation for expansion | no VPC | DONE IN THE TOOL 2026-10-29: REL 2 marked "Question does not apply" (reason Out of scope, no-VPC Notes); Reliability High 10 to 9 |
 | Prefer hub-and-spoke over mesh | no VPC | DONE IN THE TOOL 2026-10-29: REL 2 marked "Question does not apply" (reason Out of scope, no-VPC Notes); Reliability High 10 to 9 |
 | Non-overlapping private IP ranges | no VPC | DONE IN THE TOOL 2026-10-29: REL 2 marked "Question does not apply" (reason Out of scope, no-VPC Notes); Reliability High 10 to 9 |
-| Implement loosely coupled dependencies | scheduled EventBridge jobs are decoupled; the request path is synchronous | NOT BUILT |
+| Implement loosely coupled dependencies | Stripe webhook queue mode (`relayshield_stripe_webhook.py`, flag `STRIPE_EVENT_QUEUE_URL`) and `tools/wafr_stripe_queue.py` (queues, access, consumer, then the separate `--step enable`). Only the Stripe webhook is decoupled; the public API request path stays synchronous, so say so in the Note | UNRUN, PARTIAL (ticks only after `--step enable` has run and one real checkout has gone through the queue) |
 | Do constant work | scheduled polling is constant by design; not assessed | review Note |
 | Control and limit retry calls | `tools/wafr_async_failures.py --step retry`: retries 1 and max event age 3600 s on every function that is the target of an ENABLED EventBridge rule (read from AWS). Synchronous API retries are the caller's, not covered | UNRUN |
 | Fail fast and limit queues | `tools/wafr_async_failures.py` (queue, access, retry, alarm): failed and expired async events go to one encrypted failure queue with an alarm. Client timeouts and queue-depth limits elsewhere not assessed | UNRUN, PARTIAL |

@@ -882,3 +882,43 @@ Dashboard list "issues by improvement plan item", filter Security + High risk, 3
 **SEC11 application security:** Perform regular penetration testing; Regularly assess security properties of the pipelines; Train for application security; Automate testing throughout the development and release lifecycle; Conduct code reviews; Centralize services for packages and dependencies; Build a program that embeds security ownership in workload teams.
 **Not in the list (so not HRI): SEC4 detect and investigate (logging, central analysis, response automation) and SEC9 data in transit.**
 Triage proposed to Andrew: (A) written plans and processes (threat model, incident plan, playbooks, forensic plan, key personnel, emergency access, data classification, security review cadence, training, ownership): drafted by Claude from the repo, true only once adopted; (B) cheap AWS configuration (root user MFA and key deletion, IAM Access Analyzer, GuardDuty/Security Hub/Inspector, Identity Center, WAF on the API, KMS/encryption defaults); (C) structural (separate accounts and SCP guardrails via AWS Organizations; one IAM role per Lambda per `iam_role_split.md`).
+
+## WHERE 2026-10-29 LEFT THINGS. WAFR/FTR THREAD: 24 HIGH RISKS TO CLEAR. DECISION: NO GUARDDUTY, WAF DEFERRED. READ THIS FIRST FOR THE WAFR THREAD.
+
+**Supersedes the WAFR parts of every earlier "WHERE ... LEFT THINGS" list, including the 2026-10-28 one (commit `755dc6f` on `origin/claude/laughing-meitner-m54bli`, not on this branch).** Branches holding WAFR facts that are NOT merged together: `claude/kind-fermi-2y6dhb` (SEC list), `claude/laughing-meitner-m54bli` (2026-10-28 handoff, hardening tool notes). Before claiming any WAFR fact is missing: `git fetch --all --prune && git log --all --oneline -S "<string>"`, no pathspec. Merge with `tools/resolve_md_conflict.py docs/claude_memory/LOG_CURRENT.md --write`.
+
+### The gate, CONFIRMED from AWS's page (Andrew, 2026-10-28)
+Zero High-risk issues in Security, Operational Excellence and Reliability; report under 1 year old; workload name/description names the solution (saved); reviewer owner field "Andrew Gibbs - andrew@relayshield.net" (saved). Perf, Cost, Sustainability do not gate.
+
+### Counts, from Andrew's dashboard screenshot 2026-10-29 (the chart, unchanged since 10-28)
+| Pillar | High | Medium | Gates |
+|---|---|---|---|
+| Operational Excellence | 5 | 5 | yes |
+| Security | 9 | 1 | yes |
+| Reliability | 10 | 2 | yes |
+| Performance Efficiency | 4 | 1 | no |
+| Cost Optimization | 9 | 0 | no |
+| Sustainability | 0 | 6 | no |
+The chart counts HIGH-RISK QUESTIONS. The Security "issues by improvement plan item" table counts unmet PRACTICES (36 in Security). A question leaves High only when enough of its practices are genuinely met.
+
+### Which High items are KNOWN and which are NOT
+* **SEC (9 questions, 36 practices): KNOWN**, recorded verbatim in the section "2026-10-29: CORRECTION" above. High questions are SEC1, 2, 3, 5, 6, 7, 8, 10, 11. SEC4 and SEC9 are not High.
+* **OPS (5 High): the questions are NOT KNOWN.** Never read. Andrew filters the dashboard "issues by improvement plan item" table to Operational Excellence + High risk and pastes the rows. **Save them here the moment they arrive.**
+* **REL (10 High of 13 questions): WHICH 10 is NOT KNOWN.** The answers are in `wafr_answers_reliability_2026-10-11.md` but the Tool's High/Medium result per question was never recorded. Same filter, Reliability + High risk.
+* The 2026-10-10 answer TEXTS for OPS 1-11 and SEC 1-11 were chat-only and are lost; they are not needed, the High lists are.
+
+### DECISIONS, 2026-10-29, Andrew's, do not re-open without new evidence
+* **NO GuardDuty now or near-term.** It closes no High question on its own: detection is SEC4, which is not High. Its only links are SEC1 "evaluate new security services" and weakly SEC6 "automate compute protection".
+* **WAF is DEFERRED, not rejected.** It could move SEC5 (network protection) from High to Medium at best, and only if "Create network layers" can honestly be ticked as not applicable (no VPC). Weak justification for about $10-12 per month plus $0.60 per million requests (UNVERIFIED: aws.amazon.com is egress-blocked, prices came from search summaries). Reopen only if SEC5 is the last High left, or after the FTR.
+* The Security count is driven by WRITTEN PLANS (SEC10 incident response, SEC11 application security, SEC7 data classification, SEC1 threat model and root user) and the one-role-per-Lambda IAM split (SEC3), not by paid services.
+
+### Built, not yet applied to AWS
+* `tools/wafr_hardening.py` (REL 1/6/7/10): dry run on Andrew's Mac was clean 2026-10-28; nothing applied. Reserved concurrency values (api 100, fulfillment 10, stripe 10) are my proposal, unmeasured. Apply order: `--step concurrency`, then `--step alarm` (READ the `notifies:` line first), then `--step retention`, each with `AWS_PROFILE=relayshield` and `--apply`.
+* `.github/workflows/tests.yml`: has never run on GitHub (main not pushed).
+
+### TODO, IN ORDER
+1. Andrew pastes the OPS High rows and the REL High rows. Claude saves them in this file the same turn.
+2. Claude builds, dry-run-default, with botocore Stubber checks: Lambda versions plus alias deploy change, AWS Backup plan, DLQs, tracing, API Gateway throttling and access logging, tag script, weekly-metrics CI deploy path (needs an IAM grant first). Claude drafts the written plans (incident response, forensics, playbooks, data classification, threat model, secure-development, DR and test plans) from the repo, marked draft until Andrew adopts them.
+3. Andrew runs, in stages: the REL hardening tool; `tools/protect_dynamodb_tables.sh` (PITR, run status unknown); IAM snapshot then `iam_split_roles.py` per function.
+4. Re-tick in the WA Tool WITH EVIDENCE only; save a milestone; PDF under 3 MB; request validation.
+5. Dave Shapiro is contacted only after the FTR passes.

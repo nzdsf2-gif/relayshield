@@ -1,0 +1,27 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "VersionsAliasesAndRollback",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:PublishVersion",
+        "lambda:CreateAlias",
+        "lambda:UpdateAlias",
+        "lambda:GetAlias",
+        "lambda:ListVersionsByFunction",
+        "lambda:GetFunction"
+      ],
+      "Resource": [
+        "arn:aws:lambda:us-east-1:239677749008:function:relayshield-api",
+        "arn:aws:lambda:us-east-1:239677749008:function:relayshield-bundle-fulfillment",
+        "arn:aws:lambda:us-east-1:239677749008:function:relayshield-stripe-webhook",
+        "arn:aws:lambda:us-east-1:239677749008:function:relayshield-mcp-http",
+        "arn:aws:lambda:us-east-1:239677749008:function:relayshield-api:*",
+        "arn:aws:lambda:us-east-1:239677749008:function:relayshield-bundle-fulfillment:*",
+        "arn:aws:lambda:us-east-1:239677749008:function:relayshield-stripe-webhook:*",
+        "arn:aws:lambda:us-east-1:239677749008:function:relayshield-mcp-http:*"
+      ]
+    }
+  ]
+}

@@ -861,3 +861,24 @@ Target is 24 High (5 OPS, 9 SEC, 10 REL). The earlier "UNVERIFIED" on the pillar
 Steps `concurrency`, `alarm`, `retention`; dry run default; spec `tools/wafr_hardening_spec.json` (api 100, bundle-fulfillment 10, stripe-webhook 10 reserved; those numbers are MY PROPOSAL, not measured). `test_wafr_hardening.py` 13 tests: fakes for decisions,
 botocore Stubber over the real service models for request/response shapes, six planted bugs all caught. Retention DELETES events older than 90 days on groups that had none; the dry run lists size and age first. The alarm step copies the AlarmActions
 of the existing Lambda Errors alarms (found by reading them) and blocks if there are none. NEXT: Andrew runs the dry run, reads it, then `--apply` per step. After apply, REL 1/7/10 Notes and ticks can change (reserved concurrency exists; alarm exists), with evidence = the tool's output.
+
+## 2026-10-29: CORRECTION. THE WAFR SECURITY HIGH-RISK LIST WAS SAVED (ON AN UNMERGED BRANCH). I WRONGLY REPEATED "NEVER SAVED". THE OPS HIGH-RISK LIST WAS NEVER READ.
+
+The gap plan (section 5) and the 2026-10-28 handoff said the OPS and SEC answers "were given in chat and never saved". That was inherited and unchecked. Found by `git fetch --all --prune` then `git log --all -S` with no pathspec:
+* **SEC high-risk list: SAVED** in commit `77ec256` on `origin/claude/kind-fermi-2y6dhb` (never merged to main), section "2026-10-27 (WAFR SECURITY HIGH-RISK LIST ...)". Copied below verbatim.
+* **OPS high-risk list: NEVER READ.** That same commit says "Operational Excellence and Reliability high-risk lists NOT yet read". Only the COUNT (5 High) was ever recorded. Andrew has not been asked for it in a way that reached a saved record; it needs the console filter Operational Excellence + High risk.
+* **The 2026-10-10 per-question OPS 1-11 / SEC 1-11 ANSWER TEXTS** (archive_08.md ~L520) really were chat-only. That is a different thing from the HRI lists.
+* The dashboard unit is a best practice not met (36 rows in SEC); the FTR gate counts HIGH-RISK QUESTIONS (9 SEC). A question stops being High when enough of its practices are genuinely met, not when one is.
+
+Dashboard list "issues by improvement plan item", filter Security + High risk, 36 rows (the dashboard's unit is a best practice not met, NOT a question; the lens counted 37 high-risk QUESTIONS in total across all six pillars; how many of those are Security was not shown).
+**SEC1 operate:** Separate workloads using accounts; Secure account root user and properties; Identify and prioritize risks using a threat model; Evaluate and implement new security services and features regularly.
+**SEC2 identities:** Use temporary credentials; Rely on a centralized identity provider; Employ user groups and attributes.
+**SEC3 permissions:** Grant least privilege access; Define permission guardrails for your organization; Manage access based on lifecycle; Establish emergency access process; Reduce permissions continuously; Analyze public and cross account access.
+**SEC5 network:** Create network layers; Implement inspection-based protection; Automate network protection.
+**SEC6 compute:** Provision compute from hardened images; Reduce manual management and interactive access; Automate compute protection.
+**SEC7 data classification:** Understand your data classification scheme; Automate identification and classification.
+**SEC8 data at rest:** Automate data at rest protection; Enforce access control.
+**SEC10 incident response:** Identify key personnel and external resources; Develop incident management plans; Prepare forensic capabilities; Develop and test security incident response playbooks; Pre-provision access; Run simulations.
+**SEC11 application security:** Perform regular penetration testing; Regularly assess security properties of the pipelines; Train for application security; Automate testing throughout the development and release lifecycle; Conduct code reviews; Centralize services for packages and dependencies; Build a program that embeds security ownership in workload teams.
+**Not in the list (so not HRI): SEC4 detect and investigate (logging, central analysis, response automation) and SEC9 data in transit.**
+Triage proposed to Andrew: (A) written plans and processes (threat model, incident plan, playbooks, forensic plan, key personnel, emergency access, data classification, security review cadence, training, ownership): drafted by Claude from the repo, true only once adopted; (B) cheap AWS configuration (root user MFA and key deletion, IAM Access Analyzer, GuardDuty/Security Hub/Inspector, Identity Center, WAF on the API, KMS/encryption defaults); (C) structural (separate accounts and SCP guardrails via AWS Organizations; one IAM role per Lambda per `iam_role_split.md`).

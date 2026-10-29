@@ -739,6 +739,48 @@ def send_welcome_email_ses(to_email: str, subscription_tier: str) -> bool:
         return False
 
 
+def resolve_subscription_tier(session: dict) -> tuple[str | None, str | None]:
+    """
+    Resolve the subscription tier of a checkout session, three methods in
+    priority order: payment link id, session metadata, subscription price id.
+    Returns (tier, payment_link_id); tier is None when nothing resolves.
+    Shared by the Telegram-first and WhatsApp flows.
+    """
+    subscription_tier = None
+
+    # Method 1: payment_link field (standard Payment Link checkout)
+    payment_link_id = session.get("payment_link")
+    if payment_link_id:
+        subscription_tier = PAYMENT_LINK_TIER_MAP.get(payment_link_id)
+        logger.info("Resolved tier '%s' from payment_link=%s", subscription_tier, payment_link_id)
+
+    # Method 2: session metadata (manual override)
+    if not subscription_tier:
+        metadata = session.get("metadata") or {}
+        tier_meta = metadata.get("tier", "").lower().strip().replace(" ", "_")
+        if tier_meta in VALID_TIERS:
+            subscription_tier = tier_meta
+            logger.info("Resolved tier '%s' from session metadata", subscription_tier)
+
+    # Method 3: pricing table checkout — fetch subscription from Stripe API to get price ID
+    if not subscription_tier:
+        subscription_id = session.get("subscription")
+        if subscription_id:
+            try:
+                stripe_secret_key = get_secret(STRIPE_SECRET_KEY_NAME)
+                price_id = get_price_id_from_subscription(subscription_id, stripe_secret_key)
+                if price_id:
+                    subscription_tier = PRICE_TIER_MAP.get(price_id)
+                    logger.info(
+                        "Resolved tier '%s' from subscription=%s price=%s",
+                        subscription_tier, subscription_id, price_id,
+                    )
+            except Exception as exc:
+                logger.exception("Failed to resolve tier via subscription API: %s", exc)
+
+    return subscription_tier, payment_link_id
+
+
 # ---------------------------------------------------------------------------
 # Lambda handler
 # ---------------------------------------------------------------------------
@@ -893,7 +935,28 @@ def lambda_handler(event, context):
             return {"statusCode": 200, "body": json.dumps({"message": "Already processed"})}
 
         # Use tier from pre-payment record (set when user selected plan in bot)
-        resolved_tier = pre_payment.get("subscription_tier") or subscription_tier
+        # Fall back to the same resolution the WhatsApp flow uses when the
+        # record carries no tier.
+        resolved_tier = pre_payment.get("subscription_tier")
+        if not resolved_tier:
+            resolved_tier, payment_link_id = resolve_subscription_tier(session)
+            if not resolved_tier:
+                # Record left at AWAITING_PAYMENT so it can be advanced by hand.
+                logger.error(
+                    "Could not determine tier for Telegram session %s user_id=%s — "
+                    "no tier on pre-payment record, payment_link=%s, no metadata, "
+                    "subscription lookup failed.",
+                    session_id, user_id, payment_link_id,
+                )
+                return {
+                    "statusCode": 200,
+                    "body": json.dumps({
+                        "error": "Could not determine subscription tier",
+                        "session_id": session_id,
+                        "payment_link": payment_link_id,
+                        "telegram_chat_id": client_ref,
+                    }),
+                }
 
         # Advance record to AWAITING_PHONE
         advance_telegram_record(user_id, stripe_customer_id, stripe_subscription_id, resolved_tier)
@@ -960,37 +1023,7 @@ def lambda_handler(event, context):
         }
 
     # --- 6. Extract subscription tier (three methods, in priority order) ---
-    subscription_tier = None
-
-    # Method 1: payment_link field (standard Payment Link checkout)
-    payment_link_id = session.get("payment_link")
-    if payment_link_id:
-        subscription_tier = PAYMENT_LINK_TIER_MAP.get(payment_link_id)
-        logger.info("Resolved tier '%s' from payment_link=%s", subscription_tier, payment_link_id)
-
-    # Method 2: session metadata (manual override)
-    if not subscription_tier:
-        metadata = session.get("metadata") or {}
-        tier_meta = metadata.get("tier", "").lower().strip().replace(" ", "_")
-        if tier_meta in VALID_TIERS:
-            subscription_tier = tier_meta
-            logger.info("Resolved tier '%s' from session metadata", subscription_tier)
-
-    # Method 3: pricing table checkout — fetch subscription from Stripe API to get price ID
-    if not subscription_tier:
-        subscription_id = session.get("subscription")
-        if subscription_id:
-            try:
-                stripe_secret_key = get_secret(STRIPE_SECRET_KEY_NAME)
-                price_id = get_price_id_from_subscription(subscription_id, stripe_secret_key)
-                if price_id:
-                    subscription_tier = PRICE_TIER_MAP.get(price_id)
-                    logger.info(
-                        "Resolved tier '%s' from subscription=%s price=%s",
-                        subscription_tier, subscription_id, price_id,
-                    )
-            except Exception as exc:
-                logger.exception("Failed to resolve tier via subscription API: %s", exc)
+    subscription_tier, payment_link_id = resolve_subscription_tier(session)
 
     if not subscription_tier:
         logger.error(

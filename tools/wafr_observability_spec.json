@@ -1,0 +1,33 @@
+{
+  "account": "239677749008",
+  "region": "us-east-1",
+  "_note": "Numbers are Claude's proposal (2026-10-29), not measured. The throttle values sit ABOVE the usage plan relayshield-growth (50 rps, burst 100), so keyed callers are still limited by the plan; the stage default only caps callers the plan does not cover. Observed load is about 0.1 rps on average.",
+  "tracing": {
+    "lambda_functions": [
+      "relayshield-api",
+      "relayshield-bundle-fulfillment",
+      "relayshield-stripe-webhook",
+      "relayshield-mcp-http"
+    ],
+    "xray_policy_arn": "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess",
+    "iam_managed_policy_limit": 10,
+    "api_stage": "prod"
+  },
+  "throttle": {
+    "stage": "prod",
+    "rate_limit": 100,
+    "burst_limit": 200
+  },
+  "dashboard": {
+    "name": "relayshield-service-health",
+    "api_function": "relayshield-api",
+    "other_functions": ["relayshield-bundle-fulfillment", "relayshield-stripe-webhook", "relayshield-mcp-http"],
+    "query_prefix": "relayshield/"
+  },
+  "quota": {
+    "service_code": "lambda",
+    "quota_code": "L-B99A9384",
+    "alarm_name": "relayshield-account-concurrency-80pct",
+    "share": 0.8
+  }
+}

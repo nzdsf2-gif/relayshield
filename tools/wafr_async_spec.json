@@ -1,0 +1,23 @@
+{
+  "account": "239677749008",
+  "region": "us-east-1",
+  "_note": "Numbers are Claude's proposal (2026-10-29), not measured. The functions to configure are NOT listed here: they are discovered at run time as the Lambda targets of ENABLED EventBridge rules, because those are the asynchronously invoked ones (the public API is invoked synchronously by API Gateway and has no async configuration to set). extra_functions adds an async function that is not an EventBridge target (S3, SNS); exclude_functions removes one. Retries: Lambda allows 0 to 2 (default 2). Event age: 60 to 21600 seconds (default 21600, six hours). An event older than the age limit, or one that fails after its retries, goes to the failure queue instead of being silently dropped.",
+  "queue": {
+    "name": "relayshield-async-failures",
+    "retention_seconds": 1209600
+  },
+  "policy": {
+    "name": "relayshield-async-failures-send",
+    "iam_managed_policy_limit": 10
+  },
+  "async": {
+    "max_retry_attempts": 1,
+    "max_event_age_seconds": 3600,
+    "extra_functions": [],
+    "exclude_functions": []
+  },
+  "alarm": {
+    "name": "relayshield-async-failures-not-empty",
+    "messages_at_or_above": 1
+  }
+}

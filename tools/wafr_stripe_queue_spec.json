@@ -1,0 +1,22 @@
+{
+  "account": "239677749008",
+  "region": "us-east-1",
+  "_note": "WAFR REL 4 (loosely coupled dependencies), 2026-10-29. Numbers are Claude's proposal, not measured. The visibility timeout is derived from the function's own timeout (AWS guidance: at least 6 times), not typed here. A message that fails max_receive_count times moves to the dead-letter queue and stays 14 days. Lambda's minimum for an SQS mapping's maximum concurrency is 2.",
+  "function": "relayshield-stripe-webhook",
+  "env_var": "STRIPE_EVENT_QUEUE_URL",
+  "queue": {
+    "name": "relayshield-stripe-events",
+    "dlq_name": "relayshield-stripe-events-dlq",
+    "retention_seconds": 1209600,
+    "max_receive_count": 5,
+    "visibility_multiplier": 6
+  },
+  "policy": {
+    "name": "relayshield-stripe-events-access",
+    "iam_managed_policy_limit": 10
+  },
+  "consumer": {
+    "batch_size": 1,
+    "max_concurrency": 2
+  }
+}

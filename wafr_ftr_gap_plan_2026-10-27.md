@@ -68,7 +68,7 @@ control, then re-ticking with evidence in the Notes.
 | SEC | GuardDuty, WAF: none enabled | not started | Andrew decides (cost) |
 | OPS | `relayshield_weekly_metrics.py` has no CI deploy path or drift check | open | I can do it, but needs an IAM grant first |
 | OPS | Tag standardisation | not started | I can build the script |
-| OPS / SEC | The saved answers for these two pillars were given in chat and never saved | gap | send me the question numbers still High |
+| OPS / SEC | CORRECTED 2026-10-29: the SEC High list (36 practices, 9 questions) IS saved, commit 77ec256 on origin/claude/kind-fermi-2y6dhb, copied into LOG_CURRENT. The OPS High list (5) was never read | OPS list: Andrew reads it from the console (Operational Excellence + High risk) |
 
 ## 6. Recommended order (mine, overrule freely)
 

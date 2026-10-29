@@ -582,3 +582,375 @@ agent for 10 days without reaching a person. He will retry from a browser with n
   into a registry that decides who is trusted.
 * **A stand-in `aws` that answers the way its author expects is a second implementation that agrees with the first.** The grant tool
   reported a granted policy as a failure because the fake returned one row per ARN and the real API returns one per action.
+## WHERE 2026-10-17 (SECOND SESSION) LEFT THINGS. THE SHOPIFY APP IS SUBMITTED FOR REVIEW.
+
+**2026-10-17, "RelayShield Order Screening", Partner dashboard App Store review page: Submitted, "We're assigning a
+reviewer to your submission".** Review emails go to `relayshieldadmin@gmail.com`. The Submit button was greyed for ten days on
+the two Embedded app checks and went live the same afternoon. This supersedes the "SHOPIFY ORDER SCREENING: THE EMBEDDED APP
+CHECKS ARE STUCK" section of the 10-17 first-session record (that one lives on `claude/ecstatic-davinci-wh8xxr`).
+
+### WHAT UNBLOCKED THE CHECKS, AND WHAT IS NOT PROVEN
+
+* Andrew opened the app in a NEW Chrome profile with no extensions, reloaded it a few times and cancelled one order. About two
+  hours later the Embedded app checks row was ticked. **The cause is not proven:** it could be the clean profile (Shopify staff
+  advice, read only from forum snippets) or ordinary telemetry lag of up to two days. Nothing in our code changed between the
+  stuck state and the pass. I told him the two-hour wait would probably flip it with no basis for saying so, and he caught it.
+  **Do not repeat the claim that a clean profile fixes this; it is a hypothesis that happened to be followed by the result.**
+* The console evidence, from the clean profile, before the check turned: `[RelayShield] App Bridge session token acquired`
+  then `[RelayShield] session auth check: 200`. So App Bridge initialised and our backend saw the Bearer header. The code was
+  right all along, which is why waiting and escalating, not rebuilding, was the correct response.
+* **Do not post to the Shopify community forum.** Andrew's account was suspended on a first post and a repost was closed by a
+  moderator. The support ticket was the channel used; no reply from a person is recorded.
+* Chrome DevTools renamed the setting: it is **"Keep log on navigation"** (Console) and **"Keep log"** (Network), not "Preserve log".
+
+### THE DRIFT READ WAS A FALSE ALARM, THE SAME ONE AS THE PRIVACY WORKER. THE SCRIPT STILL CRIES WOLF.
+
+`sh tools/recover_live_worker.sh relayshield-order-screening shopify/worker.js` printed THEY DIFFER with 2 live-only identifiers
+(`configurable`, `target`) and 47 live-only strings (`hmacSha256`, `handleCallback`, `buildTimelineNote` and so on). Every one is
+esbuild's keep-names helper: wrangler bundles with `__name(fn, "fn")`, which writes each function name as a string, and the
+helper definition carries those two identifiers. **Reproduced, not assumed:** `esbuild --bundle --format=esm --keep-names` on the
+repo file, fed to the script's own comparison, gives exactly 2 and 47, and its opening lines match the live paste. Live was 26,076
+bytes against 25,905 for that build, the gap being the multipart wrapper. So live equalled the repo copy, comments aside.
+**The script does not filter `__name(...)` strings or those two identifiers yet.** Fix when convenient; it changes nothing about
+the Shopify submission. A "THEY DIFFER" from it on any wrangler-deployed Worker should be tested this way before it is believed.
+
+### WHAT WAS DEPLOYED, AND HOW TO REPEAT IT
+
+* `relayshield-order-screening`, version `eab0bfb6-ec2e-42ad-9255-f3be5f6057f2`, from the merged branch (token exchange for
+  managed installation). Tests first, on the merge: `node shopify/test_worker_session.mjs` (5 pass) and
+  `python3 test_shopify_worker.py`, against stubs only.
+* The KV namespace for the `RS_KV` binding is `d95c371db8754acd9e8e791e0a558915`, the only namespace titled `RS_KV`.
+  `shopify/wrangler.toml` on main still holds the placeholder; the id goes into the LOCAL copy only, then
+  `git checkout -- shopify/wrangler.toml`. `APP_URL` in that file is unused; the Worker reads only `RS_KV`, `SHOPIFY_API_KEY`,
+  `SHOPIFY_API_SECRET`.
+* **Deploy with `--keep-vars`.** A deploy replaces dashboard-set plain variables with the toml's; the flag keeps them.
+* **`wrangler kv key list` reads a LOCAL copy by default and printed `[]` for a namespace with data.** Every `wrangler kv`
+  read needs `--remote`. A read that is empty because it asked the wrong store looks exactly like a wrong id.
+* Rollback if needed: `npx wrangler rollback` from `shopify/`.
+* The local merge of `claude/ecstatic-davinci-wh8xxr` into Andrew's `main` was NOT pushed. Pushing `main` can trigger the Lambda
+  deploy workflow, so it is a separate decision.
+
+### THE FRESH-INSTALL TEST PASSED, WITH ONE HOLE
+
+Dev store `relayshield-fresh-test`, installed after the deploy and opened once BEFORE any order. `shop:relayshield-fresh-test...`
+appeared in KV (the token exchange stored a token), then order #1001 produced `screenings:relayshield-fresh-test...` (the webhook
+was registered and the Worker screened it; verdict `unknown`, 15/100). Under managed installation `/auth` is never called, so
+before the deploy a fresh install would have stored nothing; that was the reviewer-path risk and it is closed.
+
+**Not proven: the tag and timeline-note write with an exchanged token.** `verdictActions('unknown')` returns no tags and no note,
+so an `unknown` order never writes anything. The built-in fixture (`fixture-high-...@relayshield.net`) only fires on
+`relayshield-test.myshopify.com`. The screening service graded `@testsafebrowsing.appspot.com`, `@mailinator.com` and
+`@relayshield.net` all `unknown`, since the Worker sends only the buyer email and the shop URL. A reviewer's test orders will be
+`unknown` too, so they cannot reach that path either. The write failing would be logged and swallowed, not break the app. To prove
+it: allow the fresh store in the fixture, deploy, place a `fixture-high-` order, check the tag. **Do not deploy during review.**
+The scopes were granted on the install screen ("View and edit store data: Orders").
+
+### THE "DEPRECATED OFFLINE TOKEN" BANNER
+
+Dev Dashboard Overview shows a red banner, "Deprecated offline token · Fix overdue · Last detected October 3, 2026". After the
+fresh install it was unchanged and Installs read 2, so the new install is not being flagged. It is probably the old
+`relayshield-test` token, installed under the legacy flow. The deployed code sends `expiring: "1"` and refreshes the token.
+If a reviewer raises it, uninstall and reinstall the app on `relayshield-test`. Reinstalling may wipe that store's screenings
+record, which holds the listing screenshots' data, so look first.
+
+### WHERE THE SHOPIFY UI ACTUALLY IS. THIS COST THREE ROUNDS BECAUSE I GUESSED.
+
+* Creating a dev store: Partner dashboard (`partners.shopify.com`), not the store Admin. Name, plan **Basic**, tick
+  "Generate test data", leave "Test a feature preview" off.
+* Installing an unpublished app: **Dev Dashboard** (`dev.shopify.com/dashboard`), the app's Overview, **Install app** top right.
+  The store Admin's "Add apps" lists only published App Store apps. Seeing "Create app" means the wrong organisation or login,
+  and creating one would mint a different Client ID. Never create a second app.
+* I cannot reach any shopify.com page from the container, so I gave menu paths from memory twice and both were wrong. When a
+  vendor UI is unreachable, ask for a screenshot of where he is before naming a button.
+
+### THE SHOPIFY AI TOOLKIT HAS NO APP STORE REVIEW COMMAND IN THE VERSION INSTALLED
+
+`claude plugin install shopify-ai-toolkit@claude-plugins-official` installed 2.1.2 (the plugin's manifest on GitHub says 2.2.0).
+`/shopify-app-store-review` is unknown; the plugin shows 2 skills (the general `shopify-plugin:shopify` and a UCP shopping
+skill), and those run shell commands. Its manifest says scripts send usage telemetry to shopify.dev unless
+`OPT_OUT_INSTRUMENTATION=true`. The self-review was skipped; the submission page calls it optional and its row was already ticked.
+Plugin skills are namespaced `plugin:skill`, not bare. A local Claude Code session started with **auto mode on** and offered to scan
+shell history; both were declined.
+
+### TWO THINGS TO FIX ABOUT OUR OWN SETUP
+
+* **`/Users/andrewgibbs/dev/relayshield/CLAUDE.md` is over Claude Code's 150k-char limit (793k chars)**, so a local session on his
+  Mac probably reads only a fraction of this file, including the rules written for him. This file needs splitting or trimming.
+* `claude-plugins-official` is the same directory FD-12 (our own plugin) is waiting on; Shopify's toolkit is listed there.
+
+### TODOS FOR THE NEXT SESSION, IN ORDER
+
+1. **Read any Shopify review email, word for word, and answer fast.** No deploys to the Worker until a decision. Leave both dev
+   stores and the app installed.
+2. After the decision: prove the tag and note write (fixture for the fresh store), and decide the banner (reinstall the old store).
+3. Fix `tools/recover_live_worker.sh` to ignore keep-names strings and the two helper identifiers, with a test.
+4. Split or trim `CLAUDE.md`.
+5. Push `main` and merge this branch (CLAUDE.md conflicts keep both sides). Unmerged: the x401 pack and grant tool, the Shopify
+   Worker change is already deployed.
+6. Carried from the 10-17 first session, unchanged: x401 `VERIFIER_NONCE_TABLE`, the Proof form and Muse summary, the whole
+   2026-10-12 WAFR/FTR list, root key deletion (due from 2026-10-16), the first real MCP candidate `--approve`, CS Mobile v1.7.0
+   behind a missing JDK, `tools/backfill_first_seen.py --apply`.
+
+## WHERE 2026-10-18 LEFT THINGS. THE DRIFT CHECK NO LONGER CRIES WOLF, AND CLAUDE.md IS SPLIT SO IT CAN BE READ.
+
+**Both cleanups owed from 2026-10-17 are done. Branch `claude/bold-goldberg-9m0c9b`, pushed, NOT merged.**
+
+### `tools/recover_live_worker.sh` (commit `2cb3138`)
+
+* **The 10-17 note blamed esbuild's `--keep-names` helper alone. That was half the cause.** Reproduced with
+  esbuild 0.25.0 on `shopify/worker.js`: 2 identifiers and 50 strings (the 10-17 paste said 47; the gap is
+  unexplained and is probably the esbuild version wrangler bundles with). After stripping `__name(...)` only,
+  7 strings were still reported, and bundling EVERY Worker in the repo showed why: the string extractor was
+  a regex with the 4-character minimum inside the pattern, so one short string such as `"raw"` put every later
+  quote on the line out of step, differently in the two files. It also read apostrophes in comments and
+  regex literals as strings, compared strings as written instead of as values (esbuild re-quotes and writes
+  non-ASCII as `\uXXXX`), and did not know esbuild folds `"a " + "b"` into one literal.
+* **Fix:** a balanced-paren scan cuts only the trailing name string of each `__name(...)` call; a small lexer
+  replaces the regex; JS escapes are decoded on both sides; only strings joined by `+` are folded. 18 tests
+  in `test_recover_live_worker.py`, each guard proven by reintroducing its defect (three survivors were found
+  and tightened: comment-skipping, division-versus-regex and unicode-in-identifiers).
+* **Measured:** 18 of 19 Workers now compare clean against their own esbuild bundle, and a planted
+  exfiltration function in a real Worker is still reported (5 identifiers, 2 strings).
+  `cloudflare_worker_blog.js` is the exception and it is not drift: the bundle inlines `blog_posts.js` and two
+  image modules, and the script compares one file. Documented in the script header. `cloudflare_worker_checkemail.js`
+  only bundles with `--external:cloudflare:email`.
+* **UNVERIFIED, and the cheapest next check:** this was proven against esbuild 0.25.0 output, not against
+  what the Workers API actually returns for a Worker wrangler deployed. When Andrew next runs
+  `sh tools/recover_live_worker.sh relayshield-order-screening shopify/worker.js` the expected last line is
+  `NOTHING IS DEPLOYED THAT THE REPO DOES NOT HAVE`. Anything else, send the list.
+
+### CLAUDE.md split (this commit)
+
+* 802,620 characters in 212 sections became: `CLAUDE.md` 87,349 (27 standing-rule sections moved verbatim, plus
+  the new organising section), `docs/claude_memory/LOG_CURRENT.md` (recent records, 10 sections), nine
+  `archive_NN.md` volumes, and a generated `INDEX.md`. **The split is lossless**: all 212 section bodies
+  reassemble byte-identically to the old file (checked, not assumed).
+* `tools/claude_memory.py --check | --index | --rotate` and `test_claude_md_size.py` (19 tests, 8 guards proven
+  by mutation) hold the caps: CLAUDE.md 120,000, LOG_CURRENT.md 90,000. A session that appends its record to
+  CLAUDE.md instead of the log now fails the test.
+* **150,000 is Andrew's figure and is not verified against Claude Code's documentation.** If his client still
+  warns about the size of CLAUDE.md, the next step is replacing the longest standing-rule sections
+  (`COMMANDS HANDED TO ANDREW` 17.8k, `THREE INSTRUCTIONS` 9.7k) with digests. Deliberately NOT done now: it
+  rewrites rules rather than moving them.
+* **The old record says "this file" in many places** (WHERE THE CURRENT WORK LIST LIVES, the merge-block rule A).
+  The organising section says to read it as `LOG_CURRENT.md`. `grep` the INDEX for any section a code comment
+  names; most of the lessons now live in the archive.
+* Stale `.pyc` lied again during the mutation proofs (a same-size edit restored within a second). The trap is
+  already recorded on 2026-10-06. `rm -rf __pycache__ tools/__pycache__` between proof steps.
+
+### Facts checked against `origin/main` this session (7795b96)
+
+The x401 announcement pack, `tools/grant_verifier_table_access.py` and the Shopify Worker change ARE on
+`origin/main`. The 10-17 item "merge and push the branch's unmerged pieces" is closed. Still open from 10-17,
+unchanged: the Shopify review email, the tag-and-note write proof, the "deprecated offline token" banner,
+x401 `VERIFIER_NONCE_TABLE`, the Proof form and the Muse summary.
+
+## WHERE 2026-10-18 (SECOND SESSION) LEFT THINGS. THE FTR IS READY FOR ANDREW'S CONSOLE STEPS; THREE CORRECTIONS FROM HIM.
+
+**Andrew merged the split cleanly (fast-forward, `OK` on the size check, 18 tests).** Branch
+`claude/bold-goldberg-9m0c9b`, new commits unmerged.
+
+### Corrections from Andrew, recorded as he gave them (not independently verified)
+
+* **TWILIO IS SETTLED. The "1,407 calls in an hour" thread above is closed, and the 10-12 advice to rotate the auth token
+  is withdrawn.** He says a recent session traced the spend to the SIM swap check frequency, and the cadence went from
+  hourly to once every 12 hours (the schedule rule reads `rate(12 hours)`, confirmed in the 10-12 record). My 10-18
+  summary listed Twilio as open because I read the stale 10-12 text, which is the "a doc recording an open item is a
+  lead, not a fact" rule in the direction it is least expected.
+* **Shopify: nothing to do.** The app is submitted and waiting on the App Store. The tag-and-note proof and the banner
+  both depend on the response, so they stay parked.
+* **AWS FTR: "finish now".**
+
+### What was built for the FTR (commit follows this entry)
+
+* `assets/marketplace/consumption_security_architecture.{html,png}`: the architecture diagram for
+  `prod-kkvurtspreofy`, named by its listing name so no internal bundle name appears in an upload. Every box is read
+  from code (`relayshield_bundle_fulfillment.py`, the metering calls in `relayshield_api.py` and
+  `relayshield_agentic_api.py`, `hf-space-mcp-server/app.py`). It shows the Hugging Face MCP endpoint, Cloudflare and the
+  data providers as OUTSIDE AWS. **Omitted deliberately: SNS** (the fulfillment module says events do not arrive until
+  the subscription exists with this product's real topic ARN, and nothing records that), per-function IAM roles, key
+  types, log redaction, vendor names, account number, counts.
+* **A real defect found and fixed on the way:** the Bundle B architecture description and diagram footer claimed
+  "every Lambda runs under its own least-privilege IAM role", "AWS-managed keys" and "identifiers hashed before they are
+  written". All three are untrue (dozens of Lambdas share one role, two customer-managed KMS keys exist, some handlers log
+  values readably). Nothing had been submitted with them, because the Bundle B form was one radio button. Corrected in
+  `bundle_b_architecture_details_2026-09-20.md` and the Bundle B diagram was re-rendered. No other customer-facing
+  surface carries the claim (grepped).
+* `ftr_finish_2026-10-18.md`: the ordered finish list, the nine Notes that went stale (concurrency 10 to 1,000, the
+  October init outages, the twelve-hour cadence), a Dave Shapiro email draft, and what Andrew sends back.
+
+### Needed from Andrew, in this order
+
+1. The four read-only AWS outputs (account concurrency, budget limit, SIM swap schedule, SNS subscriptions on
+   `bundle-fulfillment`). Every Note that cites a number waits on them.
+2. The pillar and number of the one unanswered WAFR question. All 57 have drafted answers, so which one is open cannot be
+   told from the repository. The OPS and SEC answers were given in chat and not saved.
+3. What THIS product's Architecture details tab in the Marketplace Management Portal currently says. For Bundle B the
+   honest answer was "None of the above" (not considered deployed on AWS) because endpoints depend on third-party data
+   providers. If the FTR needs an AWS-hosted product, that is the one thing that could stop validation. Read it, do not
+   change it in the same sitting.
+4. Any FTR checklist item he cannot answer. The FTR Guide is egress-blocked from the container and has never been read.
+
+**Unchanged and still open:** the root access key (ends `N2XZ`) deletion, due on or after 2026-10-16; API alarm; badge
+table; x401 `VERIFIER_NONCE_TABLE`, Proof form and Muse summary; CS Mobile v1.7.0 behind a missing JDK.
+
+## 2026-10-19: THE WEEKLY REPORT'S "ALL-TIME" INDICATOR COUNT WAS A MONITOR-ONLY LOG. IT NOW MEASURES THE CORPUS. AZURE: LET IT EXPIRE, WITH CHECKS.
+
+**Weekly metrics. Read from Andrew's own inbox (Gmail connector), not recalled.** The 2026-10-19 email
+printed `Unique indicators (all-time, distinct) | 256,779`, and the 2026-10-12 email `255,580`. Two facts
+follow from that and neither was in the repo:
+
+* **The live Lambda is still the 2026-09-28 build.** Its label is `all-time, distinct`; the repo's label has
+  said `cumulative, all-time` since 2026-10-11 and has carried the new-this-week, backfilled and red
+  `NOT ALL-TIME` rows since 2026-10-12. None of those rows is in the live email. So none of the
+  2026-10-06 / 08 / 11 / 12 changes to `relayshield_weekly_metrics.py` has reached AWS (it is in neither
+  `deploy_lambdas.yml` nor `lambda_drift_check.yml`; a hand `update-function-code` is the only route).
+* **The figure was never going to be cumulative, even after `backfill_first_seen.py --apply`.** Only
+  `relayshield_intel_monitor._record_first_seen` writes `relayshield_intel_first_seen`.
+  `relayshield_intel_feed._write_ioc`, which writes the public-feed sightings that are most new indicators,
+  never does. Evidence: +1,199 in a week against a corpus that grows by tens of thousands a week
+  (687,011 distinct on 2026-10-08, 661,609 on 09-30). A backfill fixes the past and nothing after it.
+  This corrects the 2026-10-08 entry's "a small figure means the table was under-seeded": true, and
+  incomplete, because the table is structurally monitor-only.
+
+**Built (`relayshield_weekly_metrics.py`, 67 tests pass, `test_weekly_metrics.py`):**
+`_measure_corpus` scans `relayshield_intel_iocs` in 8 parallel segments and collapses to distinct
+indicators, same definition as `tools/ti_demo_metrics.py --distinct` (email, phone, `_control` excluded). The
+email now leads with `Distinct indicators in corpus (cumulative)`, one week ago, net change, and the split
+between RelayShield-channel collection and public feeds (MEASUREMENT DOCTRINE: the split is what is
+defensible). The old row is relabelled `Telegram-monitor first-seen log (cumulative since 2026-08-27, never
+expires)` and keeps its own red warning. **It runs LAST in the metrics dict and inside the Lambda's remaining
+time. If it cannot finish it prints `NOT MEASURED` with the reason and the manual command; it never prints a
+partial count and never falls back to the first-seen figure.** Each of three reintroduced defects (no dedup,
+failed segment ignored, a segment skipped) was caught by tests.
+
+**Retention caveat, printed in the email itself:** sightings expire (feeds 365 days, Telegram 90), so this
+counts indicators still inside retention and can fall. It is the same population `--distinct` measures. A true
+forever-count needs the feed writers to record first-seen too: PutItem on `relayshield_intel_first_seen` for
+the feed Lambda's role (an IAM change on a full shared role, so a customer-managed policy) plus a conditional
+write per new indicator. NOT built, because it touches ingestion; it is the correct long-term fix.
+
+**NOT DEPLOYED, and UNVERIFIED whether the Lambda can afford it.** The scan loop is ~4.8 us/row in a sandbox
+benchmark (~45s of compute for 9.5M rows at full CPU). Not measurable from here: botocore's response parsing,
+and the Lambda's memory and timeout, which decide how much CPU it gets. The function's configuration has to be
+READ first. If it cannot finish, the first email says `NOT MEASURED: time budget exhausted` and nothing breaks.
+
+**Azure.** Andrew's portal screenshot: signed in as the work account `andrew@relayshieldad...` in
+DEFAULT DIRECTORY, showing "Don't have a subscription?". That reproduces the archive_01 note (no subscription
+visible to this identity) and does not contradict the expiry notice: "Azure subscription 1" belongs to the
+`relayshieldadmin@gmail.com` login. Nothing in production depends on Azure (no workflow, Lambda or deploy path
+calls it); the only Azure resource was the throwaway Sentinel QA workspace, whose teardown MS-1b already
+called for. Recommendation given: let it expire. Open checks handed to Andrew: which resource groups exist,
+Entra app registrations and the Tenant ID (the tenant, the Power Platform connector and the Partner Center
+account sit outside the subscription), and the `sentinel_qa` API key still to revoke. **Not yet confirmed
+by anyone: that the tenant survives the subscription's deletion.**
+
+**2026-10-19, same day, two corrections against my own work.**
+* **`ti_demo_metrics.py --distinct` was the wrong command to hand over.** It holds every sighting row in one
+  list (`_scan_live`), so a ~9.5M-row table needs several GB. On Andrew's Mac it printed its "FULL SCAN"
+  warning and returned to the prompt with no result. I recommended it without reading its memory profile.
+  Replaced by `tools/corpus_distinct.py`: one 8-byte hash per indicator (~60 MB), a heartbeat every 10 seconds,
+  an account guard, and it runs the SAME `_measure_corpus` the Lambda runs, so its timing is the evidence for
+  whether the Lambda can do this. (The backfill's dry run, `backfill_first_seen.py` without `--apply`, is the
+  other tool that produced 687,011 on 2026-10-08, but it is the same file that writes with `--apply`.)
+* **The live `relayshield-weekly-metrics` is Timeout 120 s, Memory 256 MB** (read by Andrew, last modified
+  2026-09-28). At that size the in-Lambda scan cannot run: the guard needs 45 s plus a 60 s reserve and the
+  report's existing scans already use most of 120 s, so the email would print `NOT MEASURED`. 256 MB is also
+  ~0.14 vCPU, and the scan is CPU-bound on response parsing. Do not deploy it onto that config and expect a
+  number. Drift read the same day: live is byte-identical to commit `a56ee4ad` (stale, nothing to recover).
+* **THIRD CORRECTION, SAME DAY: `tools/corpus_distinct.py` failed on its first real run** with
+  `'str' object has no attribute 'get'` on all 8 segments, after 1.7 s. Cause: `_measure_corpus` parses
+  low-level `{"S": "..."}` items, but both the tool and the Lambda path passed `dynamodb.meta.client`, the
+  RESOURCE's client, which has the type conversion wired in and returns plain Python values. Proven with real
+  boto3 1.43 and `botocore.stub.Stubber` (`resource.meta.client` -> `{'ioc_value': 'a.example'}`;
+  `boto3.client('dynamodb')` -> `{'ioc_value': {'S': 'a.example'}}`). **Why 67 green tests did not catch it:
+  the fake client returned the shape my code wanted, so it tested my assumption against itself.** Fixed:
+  `_lowlevel_client()` returns a plain `boto3.client("dynamodb")`, the tool builds its own, and a client that
+  returns deserialised items now fails with "pass boto3.client('dynamodb'), not resource.meta.client".
+  Verified this time by running the REAL module against real boto3 with Stubber's response validation (a
+  throwaway venv in the scratchpad, not part of the repo suite: the repo's tests stub boto3 out). **Lesson:
+  when code parses another library's wire format, the test needs that library's real output, not a hand-built
+  stand-in.** It was still not run against real DynamoDB; the next run on Andrew's Mac is that test.
+
+**MEASURED 2026-10-19/20 on Andrew's Mac, `tools/corpus_distinct.py` (real DynamoDB, first working run):**
+**723,810 distinct indicators** (697,502 a week earlier, **+26,308**), of which **15,765 collected by RelayShield
+channels** and 708,045 ingested from public feeds. 9,538,567 sightings scanned in **284.2 s** (~33.6K rows/s,
+CPU-bound on response parsing). It reconciles with the 2026-10-08 measurement (687,011) at ~+26K/week. Andrew's
+reaction, verbatim in substance: this is the row he wants in the weekly report. That figure is the evidence for
+the Lambda sizing: a Mac core did it in under five minutes, so `relayshield-weekly-metrics` (Timeout 120 s,
+Memory 256 MB, last modified 2026-09-28) needs Timeout 900 s and Memory 1769 MB (one full vCPU) before the
+in-Lambda scan can finish. Rollback is those two values back to 120/256 and the 2026-09-28 file (`a56ee4ad`).
+
+## 2026-10-20: THE FEED NOW NOTES FIRST-SEEN (OFF BY DEFAULT); THE BACKFILL WAS A TWO-HOUR SILENCE; AZURE IS EMPTY.
+
+**Deployed by Andrew's own paste (read, not assumed):** `relayshield-weekly-metrics` is now **Timeout 900 s,
+Memory 1769 MB**, code modified 2026-10-20T00:24:53Z, 24,481 bytes. The corpus row has NOT yet been seen in an
+email: Andrew still has to invoke it, and the first email's `Measured from N sightings in Ns` line is the
+real in-Lambda timing.
+
+**Azure, settled by Andrew's screenshots 2026-10-20.** Subscription `c2a7909e-923e-4282-b883-90886c36a6f7`
+("Azure subscription 1"): Status **Disabled**, "Your free credit has expired", current cost 0.00, Owner is the
+`relayshieldadmin@gmail.com` login, **no resource groups, no resources**. Entra tenant `Default Directory`,
+**Tenant ID `4abf9bc4-9257-4c71-8b6b-a8afc934b4a5`**, primary domain `relayshieldadmingmail.onmicrosoft.com`,
+Entra ID Free, **2 users, 0 groups, 0 applications, 0 devices**. So nothing was lost to the subscription
+expiring, and there is no Entra application registration for MS-3 to depend on (it must be created fresh if
+Security Store is ever pursued). Not confirmed by anyone: that the tenant survives the subscription's deletion
+(it has users and no subscription dependency, so it should). Still open: revoke the `sentinel_qa` API key.
+
+**Feed first-seen (Andrew approved: "I'm ok to make the Lambda record first-seen too").**
+`relayshield_intel_feed.py` now NOTES each ingested indicator in memory (`_write_ioc`, `_batch_write_iocs`,
+after a clean flush only) and runs ONE parallel conditional-put flush (`_flush_first_seen`, 16 workers) just
+before the Telegram summary, inside the Lambda's remaining time minus 90 s. Fail-open; an AccessDenied stops the
+flush after one warning and names the grant. **OFF BY DEFAULT: it only records when `FIRST_SEEN_FEED_ENABLED=1`.**
+Reason, and it is the whole point of the flag: the writes are conditional and first writer wins, so a feed
+that records an old indicator BEFORE `tools/backfill_first_seen.py --apply` has run stamps it with today's date
+permanently and the backfill can never correct it. Turn it on only after the backfill finished. Verified against
+real boto3 with Stubber (the resource client takes plain Python values; a real conditional failure counts as
+known; a real AccessDeniedException is recognised). 18 tests in `test_intel_feed_first_seen.py`, each of three
+reintroduced defects caught.
+* **Why a flush and not a write per indicator:** several sources already call `_write_ioc` once per row inside a
+  900 s budget (see the AbuseIPDB comment), so a second round trip per call would have doubled their cost.
+* **Which role the feed runs under is NOT established.** `relayshield-intel-feed` is absent from the shared
+  role's `functions_using_this_role`, so it probably has its own role and needs `dynamodb:PutItem` on
+  `relayshield_intel_first_seen`. Read it with `iam simulate-principal-policy` before enabling.
+* **Not covered:** `relayshield_intel_kev.py` and `relayshield_intel_substack.py` also write sightings and do not
+  record first-seen. Both are low volume and run on the shared role, which already has PutItem on the table.
+
+**`tools/backfill_first_seen.py` fixed.** Its `--apply` wrote ~470,000 rows ONE AT A TIME with no output, about two
+hours of silence from a laptop, and was apparently never run to completion (the live table held ~257K rows against
+~724K distinct). Now 32 parallel conditional writers with a heartbeat, and it refuses to run against account
+`620534471984` (it had no account guard and it WRITES). 7 tests in `test_backfill_first_seen.py`. The scan phase
+is unchanged (sequential, resource layer, several minutes).
+
+**Sequence, enforced where it can be:** (1) invoke the weekly report and read the email, (2) run the backfill with
+`--apply`, (3) read the feed role's PutItem decision and grant if denied, (4) push `main` (CI deploys the feed
+with the flag off, so the deploy is inert), (5) set `FIRST_SEEN_FEED_ENABLED=1` through `lambda_env_set.yml`,
+(6) then relabel the weekly report's first-seen row, which stops being "Telegram-monitor" only at that point.
+
+**2026-10-20 (later): FIRST REAL WEEKLY EMAIL WITH THE CORPUS ROW, AND WHAT IT SHOWED.** Andrew's screenshot of the
+9:01 PM report: `Distinct indicators in corpus (cumulative) 723,787`, one week ago 697,479, **net +26,308**,
+15,742 collected by RelayShield channels, 708,045 from public feeds, **measured from 9,538,540 sightings in
+494.1 s inside the Lambda** (Timeout 900, Memory 1769). The corpus row works.
+* **He still said "the unique indicators is still incremental".** The row he was reading was almost certainly the
+  first-seen log beneath it (257,696, +1,399 this week, 194,987 seeded), which was labelled "(cumulative since
+  2026-08-27, never expires)" and so looked like a competing total. It is 36% of the corpus. **Demoted:** it is now
+  a muted diagnostic, "First-seen log (diagnostic, not the total above)", showing its size as a percentage of the
+  measured corpus, and its note says it is still being seeded. A test makes exactly ONE row in the section call itself
+  cumulative, proven by relabelling the log row. Needs a hand redeploy of the weekly Lambda (same zip block).
+* **194,987 pre-2026-08-27 rows already existed in the first-seen table**, i.e. an earlier `backfill_first_seen.py
+  --apply` had been started and stopped partway (consistent with it being a two-hour serial silence). The new
+  backfill skips those and writes the rest.
+* **GROWTH WARNING, so it is not rediscovered as a failure.** The sightings table grows ~430K rows a week (9,108,658
+  to 9,537,878 between 10-12 and 10-19) and will keep growing until retention (feeds 365 days) starts expiring
+  rows, around June 2027. The in-Lambda scan time scales with rows: 494 s now, and the guard's budget is roughly
+  Timeout minus the other metrics minus 60 s reserve, so it will hit `NOT MEASURED: time budget exhausted` in
+  roughly 10 to 12 weeks (around the new year). That degrades gracefully, it does not break the email. **The
+  durable fix is the first-seen log itself:** once the backfill has completed and the feed recorder is on, its
+  row COUNT is a cheap, never-expiring, forever-cumulative figure, and the headline should switch to it.
+* **The feed's role cannot write the table yet.** `relayshield-intel-feed` runs under
+  `arn:aws:iam::239677749008:role/relayshield-intel-feed-role` and `simulate-principal-policy` returned
+  `implicitDeny` for PutItem on `relayshield_intel_first_seen`. `tools/grant_feed_first_seen_write.py` reads the
+  decision and, with `--apply`, adds ONE new inline policy `relayshield-first-seen-put` (PutItem on that table only),
+  refusing if a policy of that name exists, if the role is the full shared role, or if the account is wrong.
+  8 tests, and the real tool was run against real botocore clients under Stubber to validate every request.
+

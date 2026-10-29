@@ -1195,6 +1195,24 @@ never zeroed: a lookup that scores 0 reads as clean. The AWS MCP server is limit
 `tools/marketplace_update_offer_prices.py`). Code comments that say Bundle D is "same product, same price, two doors" predate that and are wrong. Never change the
 AWS rate card by any other route: a change set replaces the whole card.
 
+## THE WAFR / FTR THREAD: WHERE IT LIVES, AND THE FIVE RULES THAT HOLD IT TOGETHER
+
+**Added 2026-10-29, at Andrew's request, after a session told him the Security high-risk list "was never saved" when it was on an unmerged
+branch.** The gate is ZERO High-risk issues in Security, Operational Excellence and Reliability (24 questions High on 2026-10-29: 5 OPS, 9 SEC,
+10 REL). Current state is the last "WHERE ... LEFT THINGS" section of `LOG_CURRENT.md`; the per-practice checklist is
+`wafr_practice_map_2026-10-29.md`; the three High-risk practice lists (SEC 36, OPS 11, REL 37) are in `LOG_CURRENT.md`, verbatim.
+
+1. **Before saying a WAFR fact was never recorded: `git fetch --all --prune`, then `git log --all -S "<string>"` with no pathspec.** A record on
+   an unmerged branch is invisible to a session on another branch, and the handoff must name every unmerged branch that holds one.
+2. **Building a control is not closing a finding. Tick a practice only with evidence cited in the Note**, and only when the control exists in
+   AWS, not in a branch. Ticking is Andrew's console action; Claude has no AWS credentials and cannot dispatch workflows.
+3. **Every AWS-writing tool here is dry-run by default, refuses the wrong account, and is checked against the real boto3 service models with
+   botocore Stubber plus planted bugs.** `tools/wafr_hardening.py` and `tools/wafr_observability.py` are the pattern.
+4. **No paid service is proposed without saying how many High questions it closes.** GuardDuty closes none and is NOT to be bought for this
+   purpose; WAF could move SEC5 at most and is deferred (decided 2026-10-29). Both reopen only on new evidence.
+5. **A document is not evidence until it is adopted.** The DR plan, game day plan, availability target and operating model under `docs/` are
+   DRAFT with CONFIRM items only Andrew can answer. The same goes for any RTO, RPO or availability number: a proposal is not a commitment.
+
 ## Writing conventions
 
 - **No em-dashes** in published copy. Applies to the short syndication versions too.

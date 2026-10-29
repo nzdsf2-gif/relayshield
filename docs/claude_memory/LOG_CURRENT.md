@@ -935,3 +935,64 @@ The chart counts HIGH-RISK QUESTIONS. The Security "issues by improvement plan i
 **REL, page 4 (received 2026-10-29, the last page; REL total is 37 practices):** Test resiliency using chaos engineering; Conduct game days regularly; Define recovery objectives for downtime and data loss; Use defined recovery strategies to meet the recovery objectives; Test disaster recovery implementation to validate the implementation; Manage configuration drift at the DR site or Region; Automate recovery.
 
 **Observations, mine, not yet acted on:** (1) REL network practices (private connectivity, subnets, hub-and-spoke, non-overlapping ranges) assume a VPC; this workload has none, so the WA Tool's "question does not apply to this workload" with a Note may be the honest answer, Andrew's call. (2) "Implement distributed tracing" (OPS) and "Monitor end-to-end tracing" (REL) are ONE control: X-Ray active tracing on Lambda and API Gateway. (3) "Create support plans for production workloads" is a paid AWS Support plan, a spend decision for Andrew; price UNVERIFIED. (4) Several OPS practices are team-and-people practices on a one-person company; tick only what is true, otherwise write the gap or document the single-owner model.
+
+## WHERE 2026-10-29 (BUILD SESSION) LEFT THINGS. WAFR/FTR: CONTROLS BUILT, TESTED AND PUSHED TO `claude/sharp-bohr-72o23p`. NOT MERGED. NOTHING APPLIED TO AWS. READ THIS FIRST.
+
+**Supersedes the "WHERE 2026-10-29 LEFT THINGS" section above for the TODO order** (that one is the pre-build state; its decisions still stand). The branch is pushed; "deployed" would be false: Claude has no AWS credentials, and workflow dispatch is 403 for Claude. Every AWS-touching tool below was checked against the REAL boto3 service models with botocore Stubber and by planting bugs; none has run against AWS.
+
+### Built this session (all on `claude/sharp-bohr-72o23p`)
+| What | Files | Evidence it works, and what is NOT proven |
+|---|---|---|
+| **Observability tool**: X-Ray tracing on 4 Lambdas and the API stage, stage default throttle, CloudWatch dashboard plus 5 saved Logs Insights queries, account-concurrency quota alarm | `tools/wafr_observability.py`, `tools/wafr_observability_spec.json`, `test_wafr_observability.py` (31 tests) | Stubber over lambda, iam, apigateway, cloudwatch, logs, service-quotas models; 11 planted bugs all caught. **NOT proven:** that AWS accepts the dashboard body (the tool prints AWS's validation messages and exits 1 if any), that `update_stage` `replace` creates a missing throttle setting, that the profile may call `iam:SimulatePrincipalPolicy`. Throttle 100 rps / burst 200 is MY PROPOSAL |
+| **Deploy test gate**: `deploy_lambdas.yml` now `needs: tests` (calls `tests.yml`); a manual run bypasses it and prints a notice | `.github/workflows/deploy_lambdas.yml`, `.github/workflows/tests.yml` (`workflow_call`) | `test_deploy_versions.py` parses it and 8 planted bugs are caught. **NOT proven:** `tests.yml` has NEVER run on GitHub. If it is red for an environment reason, every push deploy is blocked until fixed (use manual dispatch meanwhile) |
+| **Version + alias publishing** after the import probe, never fails the deploy, warns loudly | same workflow; `iam_github_deploy_versions.json`; `tools/apply_deploy_versions_policy.sh` | The step's script was run against a stubbed `aws` in all three modes (ok, no alias yet, denied). **The deploy role does NOT yet have the permissions**; until the policy script runs, deploys succeed and print a "Versioning incomplete" warning. **The `live` alias is NOT what serves traffic**: API Gateway still invokes the unqualified function |
+| **Rollback workflow** (restores a version's CODE, probes, moves the alias) | `.github/workflows/rollback_lambda.yml` | Target-selection script run against a stub for previous / number / unpublished / garbage / injection input. Never run on GitHub; needs at least 2 published versions |
+| **Four DRAFT documents**, none adopted | `docs/reliability/recovery_objectives_and_dr_plan.md`, `game_day_plan.md`, `availability_target_and_load_test_plan.md`, `docs/ops/operating_model.md` | Written from repo facts. RTO/RPO, 99.5% target, and the load-test profile are PROPOSALS. Each has CONFIRM items only Andrew can answer. Nothing is a test result |
+| **Practice-to-evidence map** | `wafr_practice_map_2026-10-29.md` | Every OPS (11) and REL (37) High practice with its backing and status. The re-tick checklist |
+
+### Verified merge procedure (run in a clean copy, 2026-10-29)
+origin/main is BEHIND Andrew's local main (his holds `755dc6f`, the 10-28 handoff, unpushed). Merging this branch conflicts ONLY in `docs/claude_memory/LOG_CURRENT.md` (an append conflict); `tools/resolve_md_conflict.py` keeps both sides; the index regenerates; `--rotate --write` then brings the log from 113,656 to 59,031 characters. **Do NOT merge `claude/kind-fermi-2y6dhb`**: its useful content (the SEC list) is already copied into this log, and its log rotation conflicts. Its unique commits are otherwise Bundle D / handoff records already represented here.
+
+### TODO, IN ORDER
+1. **ANDREW: merge this branch** (block below), run `python3 test_workflows_parse.py`, push `main`. First push to main is the first real run of `tests.yml` and the deploy gate. Expect green with 13 known failures; if red for an environment reason, fix that before anything else.
+2. **ANDREW: dry runs, read them, then apply one step at a time.** `tools/wafr_hardening.py` (concurrency, alarm: READ the `notifies:` line, retention) then `tools/wafr_observability.py` (tracing, throttle, dashboard, quota). Python is `~/.rsvenv/bin/python` (needs boto3). Tracing may print BLOCKED if the shared role already has 10 managed policies: then the IAM role split (`iam_role_split.md`) is the prerequisite, not a failure of the tool.
+3. **ANDREW: `sh tools/apply_deploy_versions_policy.sh`**, then trigger one deploy and check the "Publish a version" step reads ✅ and not a warning. Then `AWS_PROFILE=relayshield sh tools/protect_dynamodb_tables.sh` (dry run first; its run status is unknown).
+4. **ANDREW decides:** buy an AWS Support plan (search summary: Business Support+ from $29/month; UNVERIFIED; older plans end 2027-01-01); throttle 100/200; reserved concurrency 100/10/10; whether the WA Tool's REL 2 was answered "none of these" instead of "question does not apply" (no VPC), which alone could take 4 practices off the list.
+5. **ANDREW: read the four DRAFT documents, answer the CONFIRM items, replace each STATUS line with "ADOPTED <date>" or edit.** A document that is not adopted is not evidence.
+6. **CLAUDE, next build:** async retry limits and DLQs (`MaximumRetryAttempts`, `MaximumEventAge`, needs an SQS grant: the shared role's inline budget is full, so a customer-managed policy or the role split), AWS Backup plan (needs a service role), DynamoDB and EventBridge alarms, API integration through the `live` alias (needs `lambda:InvokeFunction` permission on the alias for API Gateway), Service Quotas automatic management (not investigated).
+7. **SECURITY (9 High questions, 36 practices) is untouched this session.** Check whether `relayshield_incident_response_plan.md` (v1.0, May 2026, owner Andrew) already supports SEC10 before drafting a new one; it may need a forensics section and a test record rather than a rewrite. Then written plans (threat model, data classification, secure-development, emergency access), the IAM split (SEC3), root user MFA and key check (SEC1).
+8. **Hold game day 1** (PITR restore and bulkhead test) once steps 2 and 3 are done. It converts four DRAFT rows into evidence.
+9. **Only then re-tick in the WA Tool, with evidence cited in each Note**, save a milestone, PDF under 3 MB, request validation. Dave Shapiro only after the FTR passes.
+
+### ANDREW RUNS THIS: the merge (every line verified in a clean copy; the push is not)
+```zsh
+cd ~/dev/relayshield
+git checkout main
+git --no-pager fetch origin claude/sharp-bohr-72o23p
+git stash push --include-untracked -m "pre-merge untracked"
+git -c pull.rebase=false merge --no-edit FETCH_HEAD
+```
+EXPECT: "CONFLICT (content): Merge conflict in docs/claude_memory/LOG_CURRENT.md" and no other conflict. (If it merges cleanly, skip the next block.)
+STOP IF: a conflict in any `.py`, `.yml` or `.json`: another session edited the same code; send the `git status` output.
+
+Only if it conflicted, then:
+```zsh
+cd ~/dev/relayshield
+python3 tools/resolve_md_conflict.py docs/claude_memory/LOG_CURRENT.md --write
+python3 tools/claude_memory.py --index --write
+git add docs/claude_memory
+git commit --no-edit
+python3 tools/claude_memory.py --rotate --write
+python3 tools/claude_memory.py --index --write
+git add docs/claude_memory
+git commit -m "Rotate LOG_CURRENT after merge"
+python3 test_workflows_parse.py
+```
+EXPECT: "All 26 workflows parse and define jobs." (verified on this branch 2026-10-29) and `claude_memory.py --check` reporting both files under their caps.
+STOP IF: "unresolved" markers remain (`grep -c '^<<<<<<<' docs/claude_memory/LOG_CURRENT.md` must print 0).
+
+### Standing lessons from this session
+* **A record on an unmerged branch is invisible to the next session.** The SEC list sat on `kind-fermi` for two days and a session reported it "never saved". Fix at the source: a session that writes a record must say which branch holds it, and the handoff must name unmerged branches (this one does, above).
+* **Ask for the console list in the first reply, not the third.** The OPS and REL High lists were never read until Andrew was asked a pointed question. The ask costs him ten minutes and unblocks all the mapping.
+* **A paid control that closes zero High questions is not a control worth buying.** GuardDuty was ruled out on that basis (decision above); apply the same test to every purchase this thread proposes, the support plan included.
+* **Building the control is not closing the finding.** 48 practices are mapped; none is ticked; most are UNRUN or DRAFT. The `wafr_practice_map_2026-10-29.md` statuses are the honest count.

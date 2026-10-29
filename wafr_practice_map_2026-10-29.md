@@ -34,16 +34,16 @@ and states why in the Note.
 | Monitor and manage quotas | `tools/wafr_observability.py --step quota` (account concurrency alarm from the real quota); quota already raised to 1,000 on 2026-10-12 | UNRUN |
 | Automate quota management | Service Quotas automatic management not investigated | NOT BUILT |
 | Sufficient gap between quotas and maximum usage for failover | no failover site | N/A? |
-| Redundant private connectivity to on-premises | no VPC | N/A? (the question, not four practices: mark it not applicable in the Tool; it is already High with the Note written, so check how it was answered) |
-| IP subnet allocation for expansion | no VPC | N/A? |
-| Prefer hub-and-spoke over mesh | no VPC | N/A? |
-| Non-overlapping private IP ranges | no VPC | N/A? |
+| Redundant private connectivity to on-premises | no VPC | DONE IN THE TOOL 2026-10-29: REL 2 marked "Question does not apply" (reason Out of scope, no-VPC Notes); Reliability High 10 to 9 |
+| IP subnet allocation for expansion | no VPC | DONE IN THE TOOL 2026-10-29: REL 2 marked "Question does not apply" (reason Out of scope, no-VPC Notes); Reliability High 10 to 9 |
+| Prefer hub-and-spoke over mesh | no VPC | DONE IN THE TOOL 2026-10-29: REL 2 marked "Question does not apply" (reason Out of scope, no-VPC Notes); Reliability High 10 to 9 |
+| Non-overlapping private IP ranges | no VPC | DONE IN THE TOOL 2026-10-29: REL 2 marked "Question does not apply" (reason Out of scope, no-VPC Notes); Reliability High 10 to 9 |
 | Implement loosely coupled dependencies | scheduled EventBridge jobs are decoupled; the request path is synchronous | NOT BUILT |
 | Do constant work | scheduled polling is constant by design; not assessed | review Note |
-| Control and limit retry calls | async retry limits (`MaximumRetryAttempts`, `MaximumEventAge`) not set | NOT BUILT |
-| Fail fast and limit queues | DLQs, timeouts not configured | NOT BUILT |
+| Control and limit retry calls | `tools/wafr_async_failures.py --step retry`: retries 1 and max event age 3600 s on every function that is the target of an ENABLED EventBridge rule (read from AWS). Synchronous API retries are the caller's, not covered | UNRUN |
+| Fail fast and limit queues | `tools/wafr_async_failures.py` (queue, access, retry, alarm): failed and expired async events go to one encrypted failure queue with an alarm. Client timeouts and queue-depth limits elsewhere not assessed | UNRUN, PARTIAL |
 | Define and calculate metrics (aggregation) | dashboard `relayshield-service-health`, error-rate metric math (`--step dashboard`) | UNRUN |
-| Send notifications (real-time processing and alarming) | `tools/wafr_hardening.py --step alarm` plus quota alarm; path test in game day 4 | UNRUN |
+| Send notifications (real-time processing and alarming) | `tools/wafr_hardening.py --step alarm`, the quota alarm, and the failure-queue-not-empty alarm (`wafr_async_failures.py --step alarm`); path test in game day 4 | UNRUN |
 | Automate responses (real-time processing and alarming) | nothing automated responds to an alarm | NOT BUILT |
 | Analyze logs | five saved Logs Insights queries (`--step dashboard`) | UNRUN |
 | Monitor end-to-end tracing of requests | `--step tracing` | UNRUN |

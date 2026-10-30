@@ -439,3 +439,64 @@ Andrew said: "Rel4: Im ok to put Stripe webhook behind a queue." Design, chosen 
 **FOUND, NOT FIXED (separate task queued): `relayshield_stripe_webhook.py` Telegram flow uses `subscription_tier` before it is defined** (`resolved_tier = pre_payment.get("subscription_tier") or subscription_tier`; pyflakes reports it, and it is identical on the original). A Telegram checkout whose pre-payment record has no tier raises NameError and Stripe retries forever. **ALSO PRE-EXISTING, same family:** processing is not atomic (user record created, then a 500 on Twilio credentials; the retry finds the user and skips, so the welcome message is never sent). A queue with redrive does not make that worse and does not fix it.
 
 **REL 4 status:** "Implement loosely coupled dependencies" can be ticked only after `--step enable` has run and a checkout has been seen going through, and the Note must say only the Stripe webhook is decoupled. "Do constant work" is a review-and-Note item (scheduled polling is constant by design). The Tool decides whether the question leaves High.
+
+## WHERE 2026-10-29/30 (WAFR BUILD SESSION 2) LEFT THINGS. PR 54 OPEN, CI GREEN, NOT MERGED. NOTHING APPLIED TO AWS. READ THIS FIRST FOR THE WAFR THREAD.
+
+**Supersedes the TODO order in "WHERE 2026-10-29 (BUILD SESSION) LEFT THINGS" and the 2026-10-29 count.** Written at Andrew's request before he rebooted his Mac. Everything below is pushed; nothing lives only on his machine or in the container.
+
+### State
+* **[PR 54](https://github.com/nzdsf2-gif/relayshield/pull/54)** `claude/happy-ptolemy-ygtv0n` into `main`, head `67f2301` plus the commit carrying this section. CI was green at `67f2301` (Run test suite, Run Security Checks, GitGuardian), mergeable clean, no reviews. **Andrew merges it on 2026-10-30.** It carries: the whole `claude/sharp-bohr-72o23p` WAFR build branch (merged with no conflict), the log rotation (`archive_10.md`), `tools/wafr_async_failures.py` (REL 5), the Stripe webhook queue mode and `tools/wafr_stripe_queue.py` (REL 4), the updated practice map, and one line removed from `tests_known_failing.txt` (`test_claude_md_size.py` passes now).
+* **Merging PR 54 DEPLOYS `relayshield_stripe_webhook.py` to production** (the flag `STRIPE_EVENT_QUEUE_URL` is unset, so behaviour is identical; 15 pinned tests back that) and is the **first real run of the deploy test gate** (`deploy_lambdas.yml` needs `tests.yml`). `tests.yml` itself already ran green on the PR. If the first push deploy is red for an environment reason, use a manual dispatch meanwhile and fix that before anything else.
+* **Gate count: 23 High questions (OPS 5, SEC 9, REL 9).** Andrew marked REL 2 "Question does not apply" in the Tool (reason Out of scope, no-VPC Notes), screenshot: Reliability High 9, Medium 2, No improvements identified 1, Not Applicable 1, Unanswered 0, 13/13 answered. **That proved the Tool recalculates on save.**
+* **On Andrew's Mac:** he ran the merge block BEFORE PR 54 was merged, so `main` had nothing new and `tools/wafr_async_failures.py` was "No such file". His `git stash push --include-untracked` DID save something as "pre-merge untracked" (the output also said "Ignoring path developers-agent-toolkit/" and "gemini-relayshield-scam-checker/", which are nested repos git cannot stash). `git stash list` shows it; `git stash pop` restores it if it was his own work. Unknown content.
+* **Queued, not started:** a suggested task card "Fix undefined subscription_tier in Stripe Telegram flow" (a latent NameError in `relayshield_stripe_webhook.py`, present on the original; Andrew has not started it).
+
+### ANDREW RUNS THIS after merging PR 54 (dry run only, writes nothing; UNVERIFIED against AWS)
+```zsh
+cd ~/dev/relayshield
+git checkout main
+git stash push --include-untracked -m "pre-merge untracked"
+git -c pull.rebase=false pull --no-edit origin main
+AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/wafr_async_failures.py
+```
+EXPECT: `N asynchronously invoked function(s) found from ENABLED EventBridge rules`, sections `== queue`, `== access`, `== retry`, `== alarm`, ending `Dry run only.` STOP IF: file missing (PR not merged); a `BLOCKED` line saying "role split" (the shared role has 10 managed policies: X-Ray, the async-failures policy and the Stripe queue policy all need a slot, so `iam_role_split.md` is the prerequisite); a conflict in `LOG_CURRENT.md` (`python3 tools/resolve_md_conflict.py docs/claude_memory/LOG_CURRENT.md --write`).
+
+### TODO, IN ORDER
+1. **ANDREW:** merge PR 54; watch the first `deploy_lambdas.yml` run on `main`; run the block above and send the output.
+2. **ANDREW, each as a dry run first, read it, then one `--apply` at a time (all `AWS_PROFILE=relayshield ~/.rsvenv/bin/python`):** `tools/wafr_hardening.py` (`--step concurrency`, then `--step alarm`, READ the `notifies:` line, then `--step retention`), `tools/wafr_observability.py` (tracing, throttle, dashboard, quota; tracing may print BLOCKED if the role has 10 managed policies), `sh tools/apply_deploy_versions_policy.sh` then one deploy and check "Publish a version" reads ✅, `AWS_PROFILE=relayshield sh tools/protect_dynamodb_tables.sh` (run status unknown), then `tools/wafr_async_failures.py` (`--step queue`, `access`, `retry`, `alarm`).
+3. **ANDREW, Stripe queue (REL 4), strictly in this order:** (a) the deploy of PR 54 has run; (b) `tools/wafr_stripe_queue.py` dry run, then `--apply` (queues, access, consumer; the flag stays OFF); (c) ONLY THEN `--step enable --apply`, which refuses unless the consumer works and the DEPLOYED code contains queue mode; (d) watch one real checkout go through; (e) rollback is `--step disable --apply`. Do not enable before (a) and (b).
+4. **ANDREW decides:** AWS Support plan (search summary: Business Support+ from $29 per month, UNVERIFIED; older plans end 2027-01-01); throttle 100/200; reserved concurrency 100/10/10; async retries 1 and max event age 3600 s (mine, unmeasured); read the four DRAFT documents under `docs/` and mark each ADOPTED or edit it.
+5. **CLAUDE, next build:** the 9 SECURITY questions are UNTOUCHED (check whether `relayshield_incident_response_plan.md` v1.0 already supports SEC10 before drafting; then threat model, data classification, secure-development, emergency access, the IAM split for SEC3, root user MFA and key check for SEC1); AWS Backup plan, DynamoDB and EventBridge alarms, API through the `live` alias, Service Quotas automatic management; the REL 4 "Do constant work" Note.
+6. **ANDREW re-ticks in the Tool, with evidence cited in each Note, one question at a time (table below), saves a milestone, PDF under 3 MB (unverified), requests validation.** Dave Shapiro only after the FTR passes.
+
+### HOW TO RE-TICK: the exact console path, and the per-question table (this was chat-only until now)
+**Path:** `https://console.aws.amazon.com/wellarchitected/` (region where the workload was created; the REL answers file says us-east-1, UNVERIFIED) > Workloads > RelayShield API > Lenses: AWS Well-Architected Framework > Continue reviewing > pillar > question title > Edit > tick only what is TRUE > Notes (evidence) > Save and exit > read the risk badge. If a question is hard to find, the dashboard table "issues by improvement plan item" names the question for each practice. Notes never change the score. Do NOT tick the "do not tick yet" list.
+
+REL question numbers are VERIFIED against `wafr_answers_reliability_2026-10-11.md` and reproduce the counts (REL 1, 2, 4, 5, 6, 8, 10, 11, 12, 13 are the 10 High questions; REL 3, 7, 9 are not). **OPS question numbers are from MEMORY of the lens** (the OPS answers were never saved): match by the practice name shown inside each question.
+
+| Question | Practices to tick (names as in the Tool) | Only after | Cite |
+|---|---|---|---|
+| OPS 1 | Evaluate internal customer needs | `docs/ops/operating_model.md` section 6 adopted | the adopted doc |
+| OPS 2 | Mechanisms exist to manage responsibilities and ownership; Mechanisms exist to request additions, changes, and exceptions; Responsibilities between teams are predefined or negotiated | operating model sections 1 and 2 adopted | the adopted doc |
+| OPS 3 | Escalation is encouraged; Communications are timely, clear, and actionable; Team members are encouraged to maintain and grow their skill sets; Resource teams appropriately | operating model sections 3 to 5 adopted; tick only what is true | doc, alarm names |
+| OPS 4 | Implement distributed tracing | `wafr_observability.py --step tracing --apply` | tool output |
+| OPS 7 | Ensure personnel capability; Create support plans for production workloads | section 5 adopted; a paid Support plan bought | doc; Support plan page |
+| REL 1 | Monitor and manage quotas; Accommodate fixed service quotas and constraints through architecture | `wafr_observability.py --step quota --apply` | alarm name |
+| REL 2 | DONE 2026-10-29 (does not apply) | | |
+| REL 4 | Implement loosely coupled dependencies (Note: ONLY the Stripe webhook is decoupled); Do constant work (a review Note) | Stripe `--step enable` run and one checkout seen through the queue | tool output |
+| REL 5 | Control and limit retry calls; Fail fast and limit queues (PARTIAL: client timeouts not assessed, say so) | `wafr_async_failures.py` all four steps applied | tool output |
+| REL 6 | Define and calculate metrics; Send notifications; Analyze logs; Monitor end-to-end tracing of requests | `wafr_hardening.py --step alarm` and `wafr_observability.py` (dashboard, tracing) applied | tool output |
+| REL 8 | Integrate functional testing as part of your deployment; Deploy using immutable infrastructure | PR 54 merged and deploy green; `apply_deploy_versions_policy.sh` run; one deploy shows "Publish a version" ✅ | run URL |
+| REL 10 | Use bulkhead architectures to limit scope of impact | `wafr_hardening.py --step concurrency --apply` | tool output |
+| REL 11 | Send notifications when events impact availability; Architect your product to meet availability targets and SLAs | alarms applied; `docs/reliability/availability_target_and_load_test_plan.md` adopted | alarm name, doc |
+| REL 12 | Test scalability and performance requirements; Test resiliency using chaos engineering; Conduct game days regularly | load test run and game day 1 held | game day record |
+| REL 13 | Define recovery objectives; Use defined recovery strategies; Test disaster recovery implementation; Manage configuration drift at the DR site or Region | DR plan adopted; PITR applied; one restore done | restore record |
+
+**DO NOT TICK YET (nothing built):** REL 1 Automate quota management; REL 6 Automate responses; REL 10 Automate recovery for components constrained to a single location; REL 11 Rely on the data plane and not the control plane during recovery, Use static stability to prevent bimodal behavior; REL 13 Automate recovery. **Realistic outcome, MINE and unverifiable because the Tool's per-question thresholds are not visible:** after everything above is applied, roughly 4 to 8 of the 23 could clear; Security (9) needs its own session.
+
+### STANDING LESSONS FROM THIS SESSION (the first two are now rules in CLAUDE.md, WAFR section, rules 6 and 7)
+* "Does not apply" is a real lever but only where every unmet practice assumes something the workload lacks.
+* A payment path with no tests gets pinned first and new behaviour ships dark behind a flag, with the switch as its own step.
+* **I handed Andrew a block that depended on an unmerged PR and he ran it before merging.** I did say to merge first, but the block itself did not stop him. A block that needs a merge must fail loudly on its own: when the next block depends on a PR, say "STOP: run this only after the PR shows Merged" as its first line, and include `git --no-pager log --oneline -1 -- <file>` so the missing file is self-explaining.
+* botocore Stubber rejected my own made-up test data (a 3-character UUID) and a wrong call order; both were test mistakes that the real model caught, which is what it is for. The tool's broad `except Exception` on reads turns a stub mismatch into "blocked", so a Stubber test that fails with "responses remaining" usually means the call order differs from what the tool does (it plans every queue first, then creates).
+* Only a CI event whose `head_sha` equals the PR head means the latest commit is green: an event for an older commit arrived while the newer run was still in progress, and checking the check runs directly caught it.

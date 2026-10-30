@@ -4,599 +4,6 @@
      'WHERE ... LEFT THINGS' section supersedes the ones above it. When this passes
      90,000 characters run: python3 tools/claude_memory.py --rotate --write -->
 
-## WHERE 2026-10-17 (SECOND SESSION) LEFT THINGS. THE SHOPIFY APP IS SUBMITTED FOR REVIEW.
-
-**2026-10-17, "RelayShield Order Screening", Partner dashboard App Store review page: Submitted, "We're assigning a
-reviewer to your submission".** Review emails go to `relayshieldadmin@gmail.com`. The Submit button was greyed for ten days on
-the two Embedded app checks and went live the same afternoon. This supersedes the "SHOPIFY ORDER SCREENING: THE EMBEDDED APP
-CHECKS ARE STUCK" section of the 10-17 first-session record (that one lives on `claude/ecstatic-davinci-wh8xxr`).
-
-### WHAT UNBLOCKED THE CHECKS, AND WHAT IS NOT PROVEN
-
-* Andrew opened the app in a NEW Chrome profile with no extensions, reloaded it a few times and cancelled one order. About two
-  hours later the Embedded app checks row was ticked. **The cause is not proven:** it could be the clean profile (Shopify staff
-  advice, read only from forum snippets) or ordinary telemetry lag of up to two days. Nothing in our code changed between the
-  stuck state and the pass. I told him the two-hour wait would probably flip it with no basis for saying so, and he caught it.
-  **Do not repeat the claim that a clean profile fixes this; it is a hypothesis that happened to be followed by the result.**
-* The console evidence, from the clean profile, before the check turned: `[RelayShield] App Bridge session token acquired`
-  then `[RelayShield] session auth check: 200`. So App Bridge initialised and our backend saw the Bearer header. The code was
-  right all along, which is why waiting and escalating, not rebuilding, was the correct response.
-* **Do not post to the Shopify community forum.** Andrew's account was suspended on a first post and a repost was closed by a
-  moderator. The support ticket was the channel used; no reply from a person is recorded.
-* Chrome DevTools renamed the setting: it is **"Keep log on navigation"** (Console) and **"Keep log"** (Network), not "Preserve log".
-
-### THE DRIFT READ WAS A FALSE ALARM, THE SAME ONE AS THE PRIVACY WORKER. THE SCRIPT STILL CRIES WOLF.
-
-`sh tools/recover_live_worker.sh relayshield-order-screening shopify/worker.js` printed THEY DIFFER with 2 live-only identifiers
-(`configurable`, `target`) and 47 live-only strings (`hmacSha256`, `handleCallback`, `buildTimelineNote` and so on). Every one is
-esbuild's keep-names helper: wrangler bundles with `__name(fn, "fn")`, which writes each function name as a string, and the
-helper definition carries those two identifiers. **Reproduced, not assumed:** `esbuild --bundle --format=esm --keep-names` on the
-repo file, fed to the script's own comparison, gives exactly 2 and 47, and its opening lines match the live paste. Live was 26,076
-bytes against 25,905 for that build, the gap being the multipart wrapper. So live equalled the repo copy, comments aside.
-**The script does not filter `__name(...)` strings or those two identifiers yet.** Fix when convenient; it changes nothing about
-the Shopify submission. A "THEY DIFFER" from it on any wrangler-deployed Worker should be tested this way before it is believed.
-
-### WHAT WAS DEPLOYED, AND HOW TO REPEAT IT
-
-* `relayshield-order-screening`, version `eab0bfb6-ec2e-42ad-9255-f3be5f6057f2`, from the merged branch (token exchange for
-  managed installation). Tests first, on the merge: `node shopify/test_worker_session.mjs` (5 pass) and
-  `python3 test_shopify_worker.py`, against stubs only.
-* The KV namespace for the `RS_KV` binding is `d95c371db8754acd9e8e791e0a558915`, the only namespace titled `RS_KV`.
-  `shopify/wrangler.toml` on main still holds the placeholder; the id goes into the LOCAL copy only, then
-  `git checkout -- shopify/wrangler.toml`. `APP_URL` in that file is unused; the Worker reads only `RS_KV`, `SHOPIFY_API_KEY`,
-  `SHOPIFY_API_SECRET`.
-* **Deploy with `--keep-vars`.** A deploy replaces dashboard-set plain variables with the toml's; the flag keeps them.
-* **`wrangler kv key list` reads a LOCAL copy by default and printed `[]` for a namespace with data.** Every `wrangler kv`
-  read needs `--remote`. A read that is empty because it asked the wrong store looks exactly like a wrong id.
-* Rollback if needed: `npx wrangler rollback` from `shopify/`.
-* The local merge of `claude/ecstatic-davinci-wh8xxr` into Andrew's `main` was NOT pushed. Pushing `main` can trigger the Lambda
-  deploy workflow, so it is a separate decision.
-
-### THE FRESH-INSTALL TEST PASSED, WITH ONE HOLE
-
-Dev store `relayshield-fresh-test`, installed after the deploy and opened once BEFORE any order. `shop:relayshield-fresh-test...`
-appeared in KV (the token exchange stored a token), then order #1001 produced `screenings:relayshield-fresh-test...` (the webhook
-was registered and the Worker screened it; verdict `unknown`, 15/100). Under managed installation `/auth` is never called, so
-before the deploy a fresh install would have stored nothing; that was the reviewer-path risk and it is closed.
-
-**Not proven: the tag and timeline-note write with an exchanged token.** `verdictActions('unknown')` returns no tags and no note,
-so an `unknown` order never writes anything. The built-in fixture (`fixture-high-...@relayshield.net`) only fires on
-`relayshield-test.myshopify.com`. The screening service graded `@testsafebrowsing.appspot.com`, `@mailinator.com` and
-`@relayshield.net` all `unknown`, since the Worker sends only the buyer email and the shop URL. A reviewer's test orders will be
-`unknown` too, so they cannot reach that path either. The write failing would be logged and swallowed, not break the app. To prove
-it: allow the fresh store in the fixture, deploy, place a `fixture-high-` order, check the tag. **Do not deploy during review.**
-The scopes were granted on the install screen ("View and edit store data: Orders").
-
-### THE "DEPRECATED OFFLINE TOKEN" BANNER
-
-Dev Dashboard Overview shows a red banner, "Deprecated offline token · Fix overdue · Last detected October 3, 2026". After the
-fresh install it was unchanged and Installs read 2, so the new install is not being flagged. It is probably the old
-`relayshield-test` token, installed under the legacy flow. The deployed code sends `expiring: "1"` and refreshes the token.
-If a reviewer raises it, uninstall and reinstall the app on `relayshield-test`. Reinstalling may wipe that store's screenings
-record, which holds the listing screenshots' data, so look first.
-
-### WHERE THE SHOPIFY UI ACTUALLY IS. THIS COST THREE ROUNDS BECAUSE I GUESSED.
-
-* Creating a dev store: Partner dashboard (`partners.shopify.com`), not the store Admin. Name, plan **Basic**, tick
-  "Generate test data", leave "Test a feature preview" off.
-* Installing an unpublished app: **Dev Dashboard** (`dev.shopify.com/dashboard`), the app's Overview, **Install app** top right.
-  The store Admin's "Add apps" lists only published App Store apps. Seeing "Create app" means the wrong organisation or login,
-  and creating one would mint a different Client ID. Never create a second app.
-* I cannot reach any shopify.com page from the container, so I gave menu paths from memory twice and both were wrong. When a
-  vendor UI is unreachable, ask for a screenshot of where he is before naming a button.
-
-### THE SHOPIFY AI TOOLKIT HAS NO APP STORE REVIEW COMMAND IN THE VERSION INSTALLED
-
-`claude plugin install shopify-ai-toolkit@claude-plugins-official` installed 2.1.2 (the plugin's manifest on GitHub says 2.2.0).
-`/shopify-app-store-review` is unknown; the plugin shows 2 skills (the general `shopify-plugin:shopify` and a UCP shopping
-skill), and those run shell commands. Its manifest says scripts send usage telemetry to shopify.dev unless
-`OPT_OUT_INSTRUMENTATION=true`. The self-review was skipped; the submission page calls it optional and its row was already ticked.
-Plugin skills are namespaced `plugin:skill`, not bare. A local Claude Code session started with **auto mode on** and offered to scan
-shell history; both were declined.
-
-### TWO THINGS TO FIX ABOUT OUR OWN SETUP
-
-* **`/Users/andrewgibbs/dev/relayshield/CLAUDE.md` is over Claude Code's 150k-char limit (793k chars)**, so a local session on his
-  Mac probably reads only a fraction of this file, including the rules written for him. This file needs splitting or trimming.
-* `claude-plugins-official` is the same directory FD-12 (our own plugin) is waiting on; Shopify's toolkit is listed there.
-
-### TODOS FOR THE NEXT SESSION, IN ORDER
-
-1. **Read any Shopify review email, word for word, and answer fast.** No deploys to the Worker until a decision. Leave both dev
-   stores and the app installed.
-2. After the decision: prove the tag and note write (fixture for the fresh store), and decide the banner (reinstall the old store).
-3. Fix `tools/recover_live_worker.sh` to ignore keep-names strings and the two helper identifiers, with a test.
-4. Split or trim `CLAUDE.md`.
-5. Push `main` and merge this branch (CLAUDE.md conflicts keep both sides). Unmerged: the x401 pack and grant tool, the Shopify
-   Worker change is already deployed.
-6. Carried from the 10-17 first session, unchanged: x401 `VERIFIER_NONCE_TABLE`, the Proof form and Muse summary, the whole
-   2026-10-12 WAFR/FTR list, root key deletion (due from 2026-10-16), the first real MCP candidate `--approve`, CS Mobile v1.7.0
-   behind a missing JDK, `tools/backfill_first_seen.py --apply`.
-
-## WHERE 2026-10-18 LEFT THINGS. THE DRIFT CHECK NO LONGER CRIES WOLF, AND CLAUDE.md IS SPLIT SO IT CAN BE READ.
-
-**Both cleanups owed from 2026-10-17 are done. Branch `claude/bold-goldberg-9m0c9b`, pushed, NOT merged.**
-
-### `tools/recover_live_worker.sh` (commit `2cb3138`)
-
-* **The 10-17 note blamed esbuild's `--keep-names` helper alone. That was half the cause.** Reproduced with
-  esbuild 0.25.0 on `shopify/worker.js`: 2 identifiers and 50 strings (the 10-17 paste said 47; the gap is
-  unexplained and is probably the esbuild version wrangler bundles with). After stripping `__name(...)` only,
-  7 strings were still reported, and bundling EVERY Worker in the repo showed why: the string extractor was
-  a regex with the 4-character minimum inside the pattern, so one short string such as `"raw"` put every later
-  quote on the line out of step, differently in the two files. It also read apostrophes in comments and
-  regex literals as strings, compared strings as written instead of as values (esbuild re-quotes and writes
-  non-ASCII as `\uXXXX`), and did not know esbuild folds `"a " + "b"` into one literal.
-* **Fix:** a balanced-paren scan cuts only the trailing name string of each `__name(...)` call; a small lexer
-  replaces the regex; JS escapes are decoded on both sides; only strings joined by `+` are folded. 18 tests
-  in `test_recover_live_worker.py`, each guard proven by reintroducing its defect (three survivors were found
-  and tightened: comment-skipping, division-versus-regex and unicode-in-identifiers).
-* **Measured:** 18 of 19 Workers now compare clean against their own esbuild bundle, and a planted
-  exfiltration function in a real Worker is still reported (5 identifiers, 2 strings).
-  `cloudflare_worker_blog.js` is the exception and it is not drift: the bundle inlines `blog_posts.js` and two
-  image modules, and the script compares one file. Documented in the script header. `cloudflare_worker_checkemail.js`
-  only bundles with `--external:cloudflare:email`.
-* **UNVERIFIED, and the cheapest next check:** this was proven against esbuild 0.25.0 output, not against
-  what the Workers API actually returns for a Worker wrangler deployed. When Andrew next runs
-  `sh tools/recover_live_worker.sh relayshield-order-screening shopify/worker.js` the expected last line is
-  `NOTHING IS DEPLOYED THAT THE REPO DOES NOT HAVE`. Anything else, send the list.
-
-### CLAUDE.md split (this commit)
-
-* 802,620 characters in 212 sections became: `CLAUDE.md` 87,349 (27 standing-rule sections moved verbatim, plus
-  the new organising section), `docs/claude_memory/LOG_CURRENT.md` (recent records, 10 sections), nine
-  `archive_NN.md` volumes, and a generated `INDEX.md`. **The split is lossless**: all 212 section bodies
-  reassemble byte-identically to the old file (checked, not assumed).
-* `tools/claude_memory.py --check | --index | --rotate` and `test_claude_md_size.py` (19 tests, 8 guards proven
-  by mutation) hold the caps: CLAUDE.md 120,000, LOG_CURRENT.md 90,000. A session that appends its record to
-  CLAUDE.md instead of the log now fails the test.
-* **150,000 is Andrew's figure and is not verified against Claude Code's documentation.** If his client still
-  warns about the size of CLAUDE.md, the next step is replacing the longest standing-rule sections
-  (`COMMANDS HANDED TO ANDREW` 17.8k, `THREE INSTRUCTIONS` 9.7k) with digests. Deliberately NOT done now: it
-  rewrites rules rather than moving them.
-* **The old record says "this file" in many places** (WHERE THE CURRENT WORK LIST LIVES, the merge-block rule A).
-  The organising section says to read it as `LOG_CURRENT.md`. `grep` the INDEX for any section a code comment
-  names; most of the lessons now live in the archive.
-* Stale `.pyc` lied again during the mutation proofs (a same-size edit restored within a second). The trap is
-  already recorded on 2026-10-06. `rm -rf __pycache__ tools/__pycache__` between proof steps.
-
-### Facts checked against `origin/main` this session (7795b96)
-
-The x401 announcement pack, `tools/grant_verifier_table_access.py` and the Shopify Worker change ARE on
-`origin/main`. The 10-17 item "merge and push the branch's unmerged pieces" is closed. Still open from 10-17,
-unchanged: the Shopify review email, the tag-and-note write proof, the "deprecated offline token" banner,
-x401 `VERIFIER_NONCE_TABLE`, the Proof form and the Muse summary.
-
-## WHERE 2026-10-18 (SECOND SESSION) LEFT THINGS. THE FTR IS READY FOR ANDREW'S CONSOLE STEPS; THREE CORRECTIONS FROM HIM.
-
-**Andrew merged the split cleanly (fast-forward, `OK` on the size check, 18 tests).** Branch
-`claude/bold-goldberg-9m0c9b`, new commits unmerged.
-
-### Corrections from Andrew, recorded as he gave them (not independently verified)
-
-* **TWILIO IS SETTLED. The "1,407 calls in an hour" thread above is closed, and the 10-12 advice to rotate the auth token
-  is withdrawn.** He says a recent session traced the spend to the SIM swap check frequency, and the cadence went from
-  hourly to once every 12 hours (the schedule rule reads `rate(12 hours)`, confirmed in the 10-12 record). My 10-18
-  summary listed Twilio as open because I read the stale 10-12 text, which is the "a doc recording an open item is a
-  lead, not a fact" rule in the direction it is least expected.
-* **Shopify: nothing to do.** The app is submitted and waiting on the App Store. The tag-and-note proof and the banner
-  both depend on the response, so they stay parked.
-* **AWS FTR: "finish now".**
-
-### What was built for the FTR (commit follows this entry)
-
-* `assets/marketplace/consumption_security_architecture.{html,png}`: the architecture diagram for
-  `prod-kkvurtspreofy`, named by its listing name so no internal bundle name appears in an upload. Every box is read
-  from code (`relayshield_bundle_fulfillment.py`, the metering calls in `relayshield_api.py` and
-  `relayshield_agentic_api.py`, `hf-space-mcp-server/app.py`). It shows the Hugging Face MCP endpoint, Cloudflare and the
-  data providers as OUTSIDE AWS. **Omitted deliberately: SNS** (the fulfillment module says events do not arrive until
-  the subscription exists with this product's real topic ARN, and nothing records that), per-function IAM roles, key
-  types, log redaction, vendor names, account number, counts.
-* **A real defect found and fixed on the way:** the Bundle B architecture description and diagram footer claimed
-  "every Lambda runs under its own least-privilege IAM role", "AWS-managed keys" and "identifiers hashed before they are
-  written". All three are untrue (dozens of Lambdas share one role, two customer-managed KMS keys exist, some handlers log
-  values readably). Nothing had been submitted with them, because the Bundle B form was one radio button. Corrected in
-  `bundle_b_architecture_details_2026-09-20.md` and the Bundle B diagram was re-rendered. No other customer-facing
-  surface carries the claim (grepped).
-* `ftr_finish_2026-10-18.md`: the ordered finish list, the nine Notes that went stale (concurrency 10 to 1,000, the
-  October init outages, the twelve-hour cadence), a Dave Shapiro email draft, and what Andrew sends back.
-
-### Needed from Andrew, in this order
-
-1. The four read-only AWS outputs (account concurrency, budget limit, SIM swap schedule, SNS subscriptions on
-   `bundle-fulfillment`). Every Note that cites a number waits on them.
-2. The pillar and number of the one unanswered WAFR question. All 57 have drafted answers, so which one is open cannot be
-   told from the repository. The OPS and SEC answers were given in chat and not saved.
-3. What THIS product's Architecture details tab in the Marketplace Management Portal currently says. For Bundle B the
-   honest answer was "None of the above" (not considered deployed on AWS) because endpoints depend on third-party data
-   providers. If the FTR needs an AWS-hosted product, that is the one thing that could stop validation. Read it, do not
-   change it in the same sitting.
-4. Any FTR checklist item he cannot answer. The FTR Guide is egress-blocked from the container and has never been read.
-
-**Unchanged and still open:** the root access key (ends `N2XZ`) deletion, due on or after 2026-10-16; API alarm; badge
-table; x401 `VERIFIER_NONCE_TABLE`, Proof form and Muse summary; CS Mobile v1.7.0 behind a missing JDK.
-
-## 2026-10-19: THE WEEKLY REPORT'S "ALL-TIME" INDICATOR COUNT WAS A MONITOR-ONLY LOG. IT NOW MEASURES THE CORPUS. AZURE: LET IT EXPIRE, WITH CHECKS.
-
-**Weekly metrics. Read from Andrew's own inbox (Gmail connector), not recalled.** The 2026-10-19 email
-printed `Unique indicators (all-time, distinct) | 256,779`, and the 2026-10-12 email `255,580`. Two facts
-follow from that and neither was in the repo:
-
-* **The live Lambda is still the 2026-09-28 build.** Its label is `all-time, distinct`; the repo's label has
-  said `cumulative, all-time` since 2026-10-11 and has carried the new-this-week, backfilled and red
-  `NOT ALL-TIME` rows since 2026-10-12. None of those rows is in the live email. So none of the
-  2026-10-06 / 08 / 11 / 12 changes to `relayshield_weekly_metrics.py` has reached AWS (it is in neither
-  `deploy_lambdas.yml` nor `lambda_drift_check.yml`; a hand `update-function-code` is the only route).
-* **The figure was never going to be cumulative, even after `backfill_first_seen.py --apply`.** Only
-  `relayshield_intel_monitor._record_first_seen` writes `relayshield_intel_first_seen`.
-  `relayshield_intel_feed._write_ioc`, which writes the public-feed sightings that are most new indicators,
-  never does. Evidence: +1,199 in a week against a corpus that grows by tens of thousands a week
-  (687,011 distinct on 2026-10-08, 661,609 on 09-30). A backfill fixes the past and nothing after it.
-  This corrects the 2026-10-08 entry's "a small figure means the table was under-seeded": true, and
-  incomplete, because the table is structurally monitor-only.
-
-**Built (`relayshield_weekly_metrics.py`, 67 tests pass, `test_weekly_metrics.py`):**
-`_measure_corpus` scans `relayshield_intel_iocs` in 8 parallel segments and collapses to distinct
-indicators, same definition as `tools/ti_demo_metrics.py --distinct` (email, phone, `_control` excluded). The
-email now leads with `Distinct indicators in corpus (cumulative)`, one week ago, net change, and the split
-between RelayShield-channel collection and public feeds (MEASUREMENT DOCTRINE: the split is what is
-defensible). The old row is relabelled `Telegram-monitor first-seen log (cumulative since 2026-08-27, never
-expires)` and keeps its own red warning. **It runs LAST in the metrics dict and inside the Lambda's remaining
-time. If it cannot finish it prints `NOT MEASURED` with the reason and the manual command; it never prints a
-partial count and never falls back to the first-seen figure.** Each of three reintroduced defects (no dedup,
-failed segment ignored, a segment skipped) was caught by tests.
-
-**Retention caveat, printed in the email itself:** sightings expire (feeds 365 days, Telegram 90), so this
-counts indicators still inside retention and can fall. It is the same population `--distinct` measures. A true
-forever-count needs the feed writers to record first-seen too: PutItem on `relayshield_intel_first_seen` for
-the feed Lambda's role (an IAM change on a full shared role, so a customer-managed policy) plus a conditional
-write per new indicator. NOT built, because it touches ingestion; it is the correct long-term fix.
-
-**NOT DEPLOYED, and UNVERIFIED whether the Lambda can afford it.** The scan loop is ~4.8 us/row in a sandbox
-benchmark (~45s of compute for 9.5M rows at full CPU). Not measurable from here: botocore's response parsing,
-and the Lambda's memory and timeout, which decide how much CPU it gets. The function's configuration has to be
-READ first. If it cannot finish, the first email says `NOT MEASURED: time budget exhausted` and nothing breaks.
-
-**Azure.** Andrew's portal screenshot: signed in as the work account `andrew@relayshieldad...` in
-DEFAULT DIRECTORY, showing "Don't have a subscription?". That reproduces the archive_01 note (no subscription
-visible to this identity) and does not contradict the expiry notice: "Azure subscription 1" belongs to the
-`relayshieldadmin@gmail.com` login. Nothing in production depends on Azure (no workflow, Lambda or deploy path
-calls it); the only Azure resource was the throwaway Sentinel QA workspace, whose teardown MS-1b already
-called for. Recommendation given: let it expire. Open checks handed to Andrew: which resource groups exist,
-Entra app registrations and the Tenant ID (the tenant, the Power Platform connector and the Partner Center
-account sit outside the subscription), and the `sentinel_qa` API key still to revoke. **Not yet confirmed
-by anyone: that the tenant survives the subscription's deletion.**
-
-**2026-10-19, same day, two corrections against my own work.**
-* **`ti_demo_metrics.py --distinct` was the wrong command to hand over.** It holds every sighting row in one
-  list (`_scan_live`), so a ~9.5M-row table needs several GB. On Andrew's Mac it printed its "FULL SCAN"
-  warning and returned to the prompt with no result. I recommended it without reading its memory profile.
-  Replaced by `tools/corpus_distinct.py`: one 8-byte hash per indicator (~60 MB), a heartbeat every 10 seconds,
-  an account guard, and it runs the SAME `_measure_corpus` the Lambda runs, so its timing is the evidence for
-  whether the Lambda can do this. (The backfill's dry run, `backfill_first_seen.py` without `--apply`, is the
-  other tool that produced 687,011 on 2026-10-08, but it is the same file that writes with `--apply`.)
-* **The live `relayshield-weekly-metrics` is Timeout 120 s, Memory 256 MB** (read by Andrew, last modified
-  2026-09-28). At that size the in-Lambda scan cannot run: the guard needs 45 s plus a 60 s reserve and the
-  report's existing scans already use most of 120 s, so the email would print `NOT MEASURED`. 256 MB is also
-  ~0.14 vCPU, and the scan is CPU-bound on response parsing. Do not deploy it onto that config and expect a
-  number. Drift read the same day: live is byte-identical to commit `a56ee4ad` (stale, nothing to recover).
-* **THIRD CORRECTION, SAME DAY: `tools/corpus_distinct.py` failed on its first real run** with
-  `'str' object has no attribute 'get'` on all 8 segments, after 1.7 s. Cause: `_measure_corpus` parses
-  low-level `{"S": "..."}` items, but both the tool and the Lambda path passed `dynamodb.meta.client`, the
-  RESOURCE's client, which has the type conversion wired in and returns plain Python values. Proven with real
-  boto3 1.43 and `botocore.stub.Stubber` (`resource.meta.client` -> `{'ioc_value': 'a.example'}`;
-  `boto3.client('dynamodb')` -> `{'ioc_value': {'S': 'a.example'}}`). **Why 67 green tests did not catch it:
-  the fake client returned the shape my code wanted, so it tested my assumption against itself.** Fixed:
-  `_lowlevel_client()` returns a plain `boto3.client("dynamodb")`, the tool builds its own, and a client that
-  returns deserialised items now fails with "pass boto3.client('dynamodb'), not resource.meta.client".
-  Verified this time by running the REAL module against real boto3 with Stubber's response validation (a
-  throwaway venv in the scratchpad, not part of the repo suite: the repo's tests stub boto3 out). **Lesson:
-  when code parses another library's wire format, the test needs that library's real output, not a hand-built
-  stand-in.** It was still not run against real DynamoDB; the next run on Andrew's Mac is that test.
-
-**MEASURED 2026-10-19/20 on Andrew's Mac, `tools/corpus_distinct.py` (real DynamoDB, first working run):**
-**723,810 distinct indicators** (697,502 a week earlier, **+26,308**), of which **15,765 collected by RelayShield
-channels** and 708,045 ingested from public feeds. 9,538,567 sightings scanned in **284.2 s** (~33.6K rows/s,
-CPU-bound on response parsing). It reconciles with the 2026-10-08 measurement (687,011) at ~+26K/week. Andrew's
-reaction, verbatim in substance: this is the row he wants in the weekly report. That figure is the evidence for
-the Lambda sizing: a Mac core did it in under five minutes, so `relayshield-weekly-metrics` (Timeout 120 s,
-Memory 256 MB, last modified 2026-09-28) needs Timeout 900 s and Memory 1769 MB (one full vCPU) before the
-in-Lambda scan can finish. Rollback is those two values back to 120/256 and the 2026-09-28 file (`a56ee4ad`).
-
-## 2026-10-20: THE FEED NOW NOTES FIRST-SEEN (OFF BY DEFAULT); THE BACKFILL WAS A TWO-HOUR SILENCE; AZURE IS EMPTY.
-
-**Deployed by Andrew's own paste (read, not assumed):** `relayshield-weekly-metrics` is now **Timeout 900 s,
-Memory 1769 MB**, code modified 2026-10-20T00:24:53Z, 24,481 bytes. The corpus row has NOT yet been seen in an
-email: Andrew still has to invoke it, and the first email's `Measured from N sightings in Ns` line is the
-real in-Lambda timing.
-
-**Azure, settled by Andrew's screenshots 2026-10-20.** Subscription `c2a7909e-923e-4282-b883-90886c36a6f7`
-("Azure subscription 1"): Status **Disabled**, "Your free credit has expired", current cost 0.00, Owner is the
-`relayshieldadmin@gmail.com` login, **no resource groups, no resources**. Entra tenant `Default Directory`,
-**Tenant ID `4abf9bc4-9257-4c71-8b6b-a8afc934b4a5`**, primary domain `relayshieldadmingmail.onmicrosoft.com`,
-Entra ID Free, **2 users, 0 groups, 0 applications, 0 devices**. So nothing was lost to the subscription
-expiring, and there is no Entra application registration for MS-3 to depend on (it must be created fresh if
-Security Store is ever pursued). Not confirmed by anyone: that the tenant survives the subscription's deletion
-(it has users and no subscription dependency, so it should). Still open: revoke the `sentinel_qa` API key.
-
-**Feed first-seen (Andrew approved: "I'm ok to make the Lambda record first-seen too").**
-`relayshield_intel_feed.py` now NOTES each ingested indicator in memory (`_write_ioc`, `_batch_write_iocs`,
-after a clean flush only) and runs ONE parallel conditional-put flush (`_flush_first_seen`, 16 workers) just
-before the Telegram summary, inside the Lambda's remaining time minus 90 s. Fail-open; an AccessDenied stops the
-flush after one warning and names the grant. **OFF BY DEFAULT: it only records when `FIRST_SEEN_FEED_ENABLED=1`.**
-Reason, and it is the whole point of the flag: the writes are conditional and first writer wins, so a feed
-that records an old indicator BEFORE `tools/backfill_first_seen.py --apply` has run stamps it with today's date
-permanently and the backfill can never correct it. Turn it on only after the backfill finished. Verified against
-real boto3 with Stubber (the resource client takes plain Python values; a real conditional failure counts as
-known; a real AccessDeniedException is recognised). 18 tests in `test_intel_feed_first_seen.py`, each of three
-reintroduced defects caught.
-* **Why a flush and not a write per indicator:** several sources already call `_write_ioc` once per row inside a
-  900 s budget (see the AbuseIPDB comment), so a second round trip per call would have doubled their cost.
-* **Which role the feed runs under is NOT established.** `relayshield-intel-feed` is absent from the shared
-  role's `functions_using_this_role`, so it probably has its own role and needs `dynamodb:PutItem` on
-  `relayshield_intel_first_seen`. Read it with `iam simulate-principal-policy` before enabling.
-* **Not covered:** `relayshield_intel_kev.py` and `relayshield_intel_substack.py` also write sightings and do not
-  record first-seen. Both are low volume and run on the shared role, which already has PutItem on the table.
-
-**`tools/backfill_first_seen.py` fixed.** Its `--apply` wrote ~470,000 rows ONE AT A TIME with no output, about two
-hours of silence from a laptop, and was apparently never run to completion (the live table held ~257K rows against
-~724K distinct). Now 32 parallel conditional writers with a heartbeat, and it refuses to run against account
-`620534471984` (it had no account guard and it WRITES). 7 tests in `test_backfill_first_seen.py`. The scan phase
-is unchanged (sequential, resource layer, several minutes).
-
-**Sequence, enforced where it can be:** (1) invoke the weekly report and read the email, (2) run the backfill with
-`--apply`, (3) read the feed role's PutItem decision and grant if denied, (4) push `main` (CI deploys the feed
-with the flag off, so the deploy is inert), (5) set `FIRST_SEEN_FEED_ENABLED=1` through `lambda_env_set.yml`,
-(6) then relabel the weekly report's first-seen row, which stops being "Telegram-monitor" only at that point.
-
-**2026-10-20 (later): FIRST REAL WEEKLY EMAIL WITH THE CORPUS ROW, AND WHAT IT SHOWED.** Andrew's screenshot of the
-9:01 PM report: `Distinct indicators in corpus (cumulative) 723,787`, one week ago 697,479, **net +26,308**,
-15,742 collected by RelayShield channels, 708,045 from public feeds, **measured from 9,538,540 sightings in
-494.1 s inside the Lambda** (Timeout 900, Memory 1769). The corpus row works.
-* **He still said "the unique indicators is still incremental".** The row he was reading was almost certainly the
-  first-seen log beneath it (257,696, +1,399 this week, 194,987 seeded), which was labelled "(cumulative since
-  2026-08-27, never expires)" and so looked like a competing total. It is 36% of the corpus. **Demoted:** it is now
-  a muted diagnostic, "First-seen log (diagnostic, not the total above)", showing its size as a percentage of the
-  measured corpus, and its note says it is still being seeded. A test makes exactly ONE row in the section call itself
-  cumulative, proven by relabelling the log row. Needs a hand redeploy of the weekly Lambda (same zip block).
-* **194,987 pre-2026-08-27 rows already existed in the first-seen table**, i.e. an earlier `backfill_first_seen.py
-  --apply` had been started and stopped partway (consistent with it being a two-hour serial silence). The new
-  backfill skips those and writes the rest.
-* **GROWTH WARNING, so it is not rediscovered as a failure.** The sightings table grows ~430K rows a week (9,108,658
-  to 9,537,878 between 10-12 and 10-19) and will keep growing until retention (feeds 365 days) starts expiring
-  rows, around June 2027. The in-Lambda scan time scales with rows: 494 s now, and the guard's budget is roughly
-  Timeout minus the other metrics minus 60 s reserve, so it will hit `NOT MEASURED: time budget exhausted` in
-  roughly 10 to 12 weeks (around the new year). That degrades gracefully, it does not break the email. **The
-  durable fix is the first-seen log itself:** once the backfill has completed and the feed recorder is on, its
-  row COUNT is a cheap, never-expiring, forever-cumulative figure, and the headline should switch to it.
-* **The feed's role cannot write the table yet.** `relayshield-intel-feed` runs under
-  `arn:aws:iam::239677749008:role/relayshield-intel-feed-role` and `simulate-principal-policy` returned
-  `implicitDeny` for PutItem on `relayshield_intel_first_seen`. `tools/grant_feed_first_seen_write.py` reads the
-  decision and, with `--apply`, adds ONE new inline policy `relayshield-first-seen-put` (PutItem on that table only),
-  refusing if a policy of that name exists, if the role is the full shared role, or if the account is wrong.
-  8 tests, and the real tool was run against real botocore clients under Stubber to validate every request.
-
-## WHERE 2026-10-20 LEFT THINGS. THE INDICATOR REPORT IS DONE; THE FIRST-SEEN SEQUENCE IS HALF RUN; THE WAFR IS THE NEXT BIG THREAD. READ THIS FIRST.
-
-**This section supersedes the earlier "WHERE ... LEFT THINGS" lists. Where a line carries an earlier item, it says so.**
-
-### Where each thread stands, from Andrew's own pastes (read, not assumed)
-
-* **Weekly metrics: DONE and deployed.** `relayshield-weekly-metrics` is Timeout 900 s, Memory 1769 MB. The 9:01 PM email on
-  2026-10-19 showed `Distinct indicators in corpus (cumulative) 723,787`, one week ago 697,479, **+26,308**, in 494 s inside
-  the Lambda. **Andrew: "The updated Weekly metrics report is exactly what I want to see updated every week."** Still to
-  deploy: the 587ebf5 change that demotes the first-seen row to a muted diagnostic (he read it as the cumulative total).
-* **First-seen backfill: RUN, NOT CONFIRMED COMPLETE.** `tools/backfill_first_seen.py --apply` scanned 9,538,515 sightings,
-  **726,875 distinct**, first-seen range 2026-06-21 to 2026-10-19, then wrote at ~360 rows/s with 0 failures. The paste ended at
-  466 s with 167,246 of 726,875 done (wrote 14,955, already present 152,291). **The early "already present" rate is explained,
-  not a fault:** an earlier serial `--apply` had written the first ~195K rows in the same deterministic scan order. No final
-  `wrote N, skipped M ... failure(s)` line was pasted. Re-running is safe (conditional writes), about 35 minutes.
-* **Feed first-seen: BUILT, NOT DEPLOYED, FLAG OFF.** `relayshield_intel_feed.py` notes indicators in memory and flushes once,
-  gated by `FIRST_SEEN_FEED_ENABLED=1`. **The feed role cannot write the table yet:** `tools/grant_feed_first_seen_write.py`
-  printed `implicitDeny` for `relayshield-intel-feed-role` and the policy it would add; Andrew has NOT yet run it with `--apply`.
-* **Azure: nothing to do.** Subscription Disabled, no resources, Entra tenant `4abf9bc4-9257-4c71-8b6b-a8afc934b4a5` with 0
-  applications. Only the `sentinel_qa` API key revocation remains.
-* **Branch state:** work is on `claude/tender-wozniak-b3zdhc` (pushed, 587ebf5 plus this entry). **Andrew's local `main` is ahead
-  of `origin/main`; nothing is on `origin/main`, so no CI deploy has fired.** Pushing `main` deploys `relayshield-intel-feed`
-  (flag off, so inert) and everything else on the branch that has a CI path.
-
-### The WAFR, as Andrew gave it on 2026-10-20 (NOT independently verified, and the findings themselves are NOT in this repo)
-
-**"The WAFR results were disappointing from Amazon, but it is probably worthwhile to stay the course and fix the issues
-preventing our Agentic Attack Surface bundle from passing their audit as being market ready, despite already being a released
-product."** DECISION: stay the course. I have not seen Amazon's response: there is no AWS result email in the connected
-Gmail, and nothing in the repo records it. **So everything under WAFR below is provisional until Andrew pastes the actual
-findings.** The product is `prod-kkvurtspreofy`, listed by Amazon as "RelayShield - Consumption Security API Bundles" (the old
-Bundle D); the FTR solution is `soln-aicwx4eiyofnm`. Nothing a buyer or AWS reviewer reads says "Bundle D".
-
-### TODOS FOR THE NEXT SESSION, IN ORDER
-
-**A. Finish the first-seen sequence (each step needs the one before it; the order is what protects the data).**
-1. **Paste the backfill's final line**, or re-run it: `AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/backfill_first_seen.py --apply`
-   after the merge block. Done means `wrote N, skipped M already present, 0 failure(s)`. Then the weekly report's
-   `First-seen log` row should read roughly 100% of the corpus.
-2. **Grant the feed role**: `tools/grant_feed_first_seen_write.py --apply`. Proof is `allowed` on the re-simulation.
-3. **Redeploy the weekly Lambda** (zip, `update-function-code`; config already 900 s / 1769 MB) so the demoted first-seen row ships.
-4. **Push `main`**; CI deploys the feed with the flag off. Then set `FIRST_SEEN_FEED_ENABLED=1` through the Actions workflow
-   "Set one Lambda env var" (function `relayshield-intel-feed`, key `FIRST_SEEN_FEED_ENABLED`, value `1`). **Never before 1 and
-   2**: recording before the backfill stamps today's date on old indicators permanently.
-5. **Read the feed's first Telegram summary** for the `First-seen: N new indicators, M already known` line.
-6. **Once coverage is ~100%, switch the report headline to the first-seen row count** (cheap, never expires), and keep the
-   corpus scan as a cross-check. **The scan has about 10 to 12 weeks of headroom** (494 s of a ~740 s budget, table growing
-   ~430K rows a week), so do this before about the new year or the row starts printing `NOT MEASURED`.
-7. **Put `relayshield_weekly_metrics.py` on a CI deploy path and in `lambda_drift_check.yml`.** It was stale in AWS for three weeks
-   and nothing said so. This is also a WAFR OPS finding with evidence. The map entry must ship in a push that touches the `.py`.
-8. **Fix `relayshield-signup-api` in the deploy-invoke policy**: `python3 tools/check_deploy_invoke_policy.py --write`, then
-   `sh tools/apply_deploy_invoke_policy.sh`. `test_workflows_parse.py` fails on it today (pre-existing).
-9. **Revoke the `sentinel_qa` API key.**
-
-**B. WAFR / FTR: stay the course (the main thread).**
-1. **Andrew pastes Amazon's response**: which items failed, whether highs block approval, what "market ready" means in their words,
-   and any reviewer comments. Until then, do not re-answer anything.
-2. **Work the known cause list from 2026-10-12, cheapest first** (the list above in "TODOS FOR THE NEXT SESSION" of that entry still
-   stands; whether Amazon cited each is unknown): the API alarm and a guard so a hand-deploy cannot replace a package the import
-   probe has not seen; the gas-monitor KMS grant (`tools/grant_gas_monitor_kms.sh`); the cost budget (`tools/create_cost_budget.sh`);
-   the badge route's missing table; **reserved concurrency (the 1,000 quota was APPROVED 2026-10-12)**; **one IAM role per Lambda
-   (`iam_role_split.md`; 41 functions share one role with 26 inline policies, the largest SEC finding)**; log retention on the 8
-   groups with none; tag standardisation; Lambda versions and aliases for rollback; tests in CI; a load test and tracing; arm64.
-3. **Check this product's Architecture details tab** in the Marketplace Management Portal. For Bundle B the honest answer was "None
-   of the above" because endpoints depend on third-party providers; **if the FTR needs an AWS-hosted product that is the one
-   thing that could stop validation.** Read it, do not change it in the same sitting.
-4. **Re-verify every claim in the WAFR Notes and the listing against code.** On 2026-10-18 the Bundle B description claimed
-   per-Lambda least-privilege roles, AWS-managed keys and hashed identifiers, all untrue; this repo has the habit of writing
-   the aspiration. Nine Notes also went stale (concurrency, October outages, twelve-hour SIM cadence): `ftr_finish_2026-10-18.md`.
-5. **Then**: re-tick and re-word the WAFR, Save milestone, PDF under 3 MB, request FTR validation again, email Dave Shapiro.
-6. **Read the FTR Guide in Partner Central**: it has never been read (docs.aws.amazon.com is egress-blocked from the container).
-
-**C. Carried, unchanged.** Root access key (ends `N2XZ`) deletion was due on or after 2026-10-16 and is now overdue if nothing broke;
-x401 `VERIFIER_NONCE_TABLE`, Proof form and Muse summary; CS Mobile v1.7.0 build behind a missing JDK; read the Hudson Rock terms
-before promoting the free check; first real MCP candidate `--approve`; Shopify is parked on the App Store response.
-
-### Lessons from this session (the standing one is in CLAUDE.md)
-* **Before committing, run `git branch --show-current`.** I committed the feed change while sitting on local `main` (left there
-  after merging the branch in to read files), then pushed the stale feature branch and told Andrew it was pushed. The stop hook
-  caught it. After a read-only merge into `main`, `git checkout` back before any commit.
-* **Standing rule added to `CLAUDE.md`:** a test that builds the input it expects proves nothing; check parsing code against the
-  library's real output (botocore `Stubber`). Three of today's defects were found that way and none by the fakes.
-
-## 2026-10-20 (later): FIRST-SEEN STEPS A1 TO A3 DONE; THE FLAG IS STILL OFF. main ALREADY CARRIED THE CODE UNDER REBASED HASHES.
-
-From Andrew's own pastes (read, not assumed):
-
-* **A1 DONE.** `backfill_first_seen.py --apply` finished: `wrote 471322, skipped 255553 already present, 0 failure(s)`. Total 726,875 rows, scan range to 2026-10-19 21:50 UTC.
-* **A2 DONE.** `grant_feed_first_seen_write.py --apply` added `relayshield-first-seen-put` to `relayshield-intel-feed-role`; re-simulation: `allowed`.
-* **A3 DONE.** `relayshield-weekly-metrics` redeployed by zip from the working tree: LastModified 2026-10-20T23:26:31Z, 24,985 bytes, handler `relayshield_weekly_metrics.lambda_handler`, 900 s, 1769 MB. The file is byte-identical (blob 33d3b84) on `origin/main` and on `claude/tender-wozniak-b3zdhc`, so it carries the demoted first-seen row.
-* **A4 HALF DONE.** `origin/main` already held the feed, weekly-metrics, backfill and grant-tool changes as commits 984d1c9 / 84061e2 (same content as 452437e / 587ebf5, different hashes, so a rebase-style landing). Andrew's push said `Everything up-to-date` and Deploy Lambdas was green. **`FIRST_SEEN_FEED_ENABLED` is NOT yet set.** That is the last step and nothing records first-seen from the feed until it is.
-* **The merge that conflicted was not a real conflict.** Merging `claude/tender-wozniak-b3zdhc` into a `main` that already had the same changes under other hashes conflicted in `INDEX.md` and `LOG_CURRENT.md` only. Code files were identical. The branch's three doc files (CLAUDE.md, INDEX.md, LOG_CURRENT.md) were a strict superset of main's (no deletions), so they were applied onto main on `claude/exciting-bell-t98uu8` instead of resolving by hand.
-* **Lesson.** Before handing a merge block, compare `git --no-pager diff --stat origin/main origin/<branch>` first. When main has already absorbed a branch under new hashes, the merge block is wrong and the move is to take the branch's doc files onto main.
-* **Gap, small:** the backfill scan stopped at 2026-10-19 21:50 UTC. An indicator first seen after that and before the flag goes on will carry the date the feed first records it. At most a day or two off.
-
-## 2026-10-20 (night): THE intel-monitor ALARM. THE CI IMPORT PROBE RAN A FULL TELEGRAM POLL. CAUSE OF THE ERRORS DATAPOINT NOT YET ESTABLISHED.
-
-* **Alarm:** `relayshield-intel-monitor-errors`, OK to ALARM at 2026-10-20 23:41:56 UTC, datapoint 23:31.
-* **What was found (Actions run 209 job log, and Andrew's CloudWatch read):** Andrew dispatched Deploy Changed Lambdas by hand at 23:27:57 (a dispatch deploys ALL 27 mapped functions). `relayshield-intel-monitor` was redeployed at 23:30:07. The import probe invoked it at 23:33:01 and it took until 23:35:04 (123 s; every other function ~2 s) because `relayshield_intel_monitor.lambda_handler` did not recognise `ci.import-probe`, unlike intel_feed and intel_kev, so it ran a full channel poll on the live Telethon session, holding the single-flight lock. The only ERROR line in 3 h was `@cti_vn` private/banned, caught per channel, which does not raise and does not count as a Lambda Errors datapoint.
-* **Fixed:** the probe guard is now the first thing in `lambda_handler`, before the lock. `test_relayshield_intel_monitor_contract.py::ImportProbeGuard` checks it precedes `_acquire_lock()` and does no work; proven by changing the string and watching it fail. Deploys with the next push to main that touches the file.
-* **NOT established:** which invocation produced the Errors datapoint at 23:31. The first read filtered on `ERROR/Traceback/Runtime/Task timed out` and showed no failing invocation. Next read: the `REPORT RequestId` lines (Status, Duration, Max Memory) for 23:25 to 23:45.
-* **Side finding:** `@cti_vn` is private or the account is banned from it. It will log an ERROR every run until removed from `relayshield_intel_channels`.
-
-## 2026-10-25: "DEPLOYED ON AWS: NO" ON `prod-szi2wdww3obry` IS THE 2026-09-20 CHOICE, NOT A WAFR SIDE EFFECT. READ FROM THE PORTAL, NOT RECALLED.
-
-Andrew reported the listing "was deployed on AWS and something in our WAFR submission changed the status". **Not supported by any record.**
-Read from his screenshots of the Management Portal (SaaS products, then the Public row):
-
-* The product's **Architecture details** tab reads `AWS hosting pattern of your application: None of the above.` and the
-  Assessment reads `Deployed on AWS: No, this product is not fully deployed on AWS. Contact us for details.` That is the answer
-  chosen 2026-09-20 (`bundle_b_architecture_details_2026-09-20.md`), because the supply-chain endpoint depends on a paid third-party
-  API and secret-scan on six public registries.
-* **Portal SaaS products list:** three rows titled "Attack Surface & Supply Chain API". The **Public** one (last modified Sep 22) is the
-  real listing `prod-szi2wdww3obry`. The two **Restricted** ones (Sep 23) are the withdrawn duplicates `prod-v5nr5gjtdnofi` and
-  `prod-p3ei5nmgufnnq`. Never open or edit those two; the ids differ only by a random suffix.
-* **Gmail (own inbox) has no AWS message** about a status change, the WAFR result or architecture details. The only recent AWS mail
-  on this listing is the 2026-10-23 "AI Insights" notice.
-* **Not established:** whether the field was ever Yes, and what a WAFR/FTR does to it. The buyer-side "Manage subscriptions" page
-  is NOT where listings live; sellers use the Management Portal, SaaS products tab (the Server products tab is empty).
-* **Do not select "The product runs entirely on AWS"** until AWS says outbound calls to public APIs are not "3rd party dependencies".
-  Today it would be a public claim a reviewer can check, and it would be false.
-
-**Next:** Andrew sends the Requests log tab (shows any change request against this product), and opens a Contact us case asking whether
-the field was ever Yes and what restores it. Nothing is changed on the tab in the same sitting.
-
-## 2026-10-25 (later): THE FTR IS BLOCKED BY TWO PREREQUISITES, NOT BY THE WAFR. READ FROM PARTNER CENTRAL SCREENSHOTS.
-
-Partner Central, solution `soln-aicwx4eiyofnm`, Validation details: **FTR status Blocked; "Request validation" is greyed out.**
-Prerequisites, in AWS's sequence: linked to exactly one Marketplace product **Complete**; no non-Marketplace products **Complete**;
-software product **Complete**; **"AWS Marketplace product is deployed on AWS" INCOMPLETE** (banner: "FTR validation requires your product
-to be hosted on AWS"); **"Partner Revenue Measurement (PRM) enabled" INCOMPLETE** (needs one of Resource Tagging, User Agent String or
-Marketplace Metering; the dashboard takes up to 7 days to reflect it, so it is the long pole).
-
-* **CORRECTION OF MY OWN EARLIER STATEMENT:** I told Andrew the console did not tie the FTR to "Deployed on AWS". It does. The repo had flagged
-  this on 2026-10-18 (`ftr_finish_2026-10-18.md` section 6) and I under-weighted it.
-* The linked product is `prod-kkvurtspreofy`; its Architecture details tab also reads "Deployed on AWS: No" (product last modified Aug 5).
-  `prod-szi2wdww3obry` is NOT what the FTR judges. Neither product was changed by the WAFR.
-* Well-Architected Tool workload "RelayShield API": 57/57 answered, **37 High, 15 Medium** (last updated 2026-10-18). That is the
-  "disappointing" result. It is not what blocks the request; the two prerequisites do.
-* **AWS rule, SECONDARY (search summary of the SaaS guidelines; docs.aws.amazon.com is unreachable from the container, WebFetch too):**
-  "deployed on AWS" needs the application AND control planes entirely on AWS; third-party services that transmit, store or process
-  application data must also run on AWS (CDN, DNS and corporate IdP exempt); agents/gateways may sit outside if they send data only to AWS.
-* **Likely causes in `prod-kkvurtspreofy`, from code:** the declared MCP endpoint is the Hugging Face Space (`hf-space-mcp-server/app.py`,
-  outside AWS, receives callers' keys and queried domains); `relayshield_agentic_api.py` calls `rdap.org`. NOT checked: the other Bundle D
-  endpoints' outbound calls. The authoritative answer is the "Contact us for details" case on the tab's Assessment panel.
-* **PRM:** metering already exists (`BatchMeterUsage`) but secondary sources say PRM metering covers AMI/ML, so Resource Tagging
-  (`aws-apn-id`) is the safer route for SaaS. Needs the exact tag value from Partner Central; do not guess it.
-
-## 2026-10-25 (build): AWS-HOSTED MCP ENDPOINT WRITTEN AND TESTED; NOT DEPLOYED, LISTING NOT CHANGED.
-
-Why: the FTR prerequisite "product is deployed on AWS" fails for `prod-kkvurtspreofy` (AWS's own assistant read its hosting architecture as
-Control Plane and Application Plane both `UNSPECIFIED`, i.e. the "None of the above" answer), and the listing's registered MCP endpoint is the
-`-aws` Hugging Face Space. Repo evidence that only Bundle D registers that Space: Bundle A and B entity JSON are plain `SaaSUrlDeliveryOptionDetails`;
-`hf-space-mcp-server/app.py` says the `-aws` Space is "registered as Bundle D's MCP endpoint". The TI product (`prod-kb3ftelx44wlk`) is not in the repo,
-so it is unconfirmed. The Spaces are NOT retired.
-
-* `relayshield_mcp_http.py`: the same 13 tools, MCP Streamable HTTP (POST JSON-RPC), stdlib only, Lambda handler. Same result shapes, AWS-mode scrub always on.
-* `test_relayshield_mcp_http.py` (28 tests): runs every tool through BOTH `app.py` (gradio and requests stubbed, `AWS_MARKETPLACE_MODE=true`) and the
-  new module against identical fake upstream answers, plus the JSON-RPC transport, plus the real `_http_request` against a real local HTTP server
-  (200, 401, 500, timeout, refused). Proven by mutation: changed scope text, swapped severity order, a third-party import, a non-RelayShield host and a leaked
-  signup link each fail it.
-* `tools/create_mcp_http_lambda.sh`: dedicated logs-only role, function, `/mcp` on API `atq6wtkp6k` (ANY of POST/GET/OPTIONS), stage redeploy, proof over the
-  execute-api host AND `https://api.relayshield.net/mcp`. UNVERIFIED against AWS (no credentials here); `sh -n` clean and the demo-key extraction checked.
-* **Not done, in order:** (1) run the script; (2) map in `deploy_lambdas.yml`, `lambda_drift_check.yml`, `iam_github_deploy_invoke.json`; (3) a guarded
-  listing change set moving the registered MCP endpoint (a change set REPLACES what it is given; the 2026-07-27 rate-card rollback is the precedent);
-  (4) only then resubmit Architecture details as "runs entirely on AWS". Submitting it earlier would be a false public claim.
-* **Known limits:** API Gateway REST cuts a response at 29 s while `check_agent_risk_summary` can chain three 15 s calls; `X-RS-Source` stays
-  `hf-mcp-space` so usage still lands in the weekly report (both dispatchers match that exact string); `rdap.org` is still called by the backend and AWS may
-  count it as a third-party dependency. NOT checked: the other Bundle D endpoints' outbound calls.
-* **PRM:** AWS's assistant says User Agent String `APN_1.1/pc_46y72j0d99w7lyqkiqrakpc5k$`, management-plane calls only, one per resource per month. That
-  guidance is written for products that call into customer accounts; ours does not. Ask what the prerequisite actually detects before adding it anywhere.
-
-## 2026-10-25 (later): THE LIVE ENTITY READ; MOVING THE MCP ENDPOINT ALONE DOES NOT MAKE `prod-kkvurtspreofy` "ENTIRELY ON AWS".
-
-Read from Actions run 40201513798 (`marketplace_read_product.yml`, entity `prod-kkvurtspreofy`, full), not recalled:
-* Delivery option `do-f5mvr663dvomi` (version `version-baq5najnqgsam`): `Type: ApiRegistration`, `ApiType: MCP_SERVER`, ONE endpoint,
-  `EndpointUrl` = the `-aws` Hugging Face Space, `AuthorizationTypes: [API_KEY]`. `HostingArchitecture.Platforms` = CONTROL_PLANE and
-  APPLICATION_PLANE, both `Provider: UNSPECIFIED`, `EnvironmentOwner: UNSPECIFIED`; **`ArchitectureDiagramUrl: ""`** (no diagram on the listing).
-  So the endpoint AND the architecture declaration are fields on the same delivery option.
-* **The public LongDescription and Highlights still quote "5.0M+ IOCs, 3,750+ malware families, 85+ Telegram marketplaces"**, which MEASUREMENT
-  DOCTRINE forbids. `tools/marketplace_add_dimension.py --with-copy` is the route; it is one change set per product at a time, so batch it.
-* **Third-party calls reachable from the five endpoints on this product (traced by AST, not grepped):** `prompt-injection-breach` and
-  `llm-credential-exposure` call nothing outside AWS. `mcp-registry-risk` calls RDAP (optional enrichment, best-effort). `tech-stack-cve` calls GitHub for a
-  public-PoC signal (optional, returns None on failure). **`bulk-identity-risk` calls TWO live third-party APIs in `_domain_risk_fast` (a paid breach
-  API for D1 and an infostealer API for D2) plus the breach API again in `_agent_risk`.** Both are the endpoint's data, and customer domains and emails go to them.
-  The form's own text for "runs entirely on AWS" requires any 3rd party dependencies to run on AWS, so declaring it today would be a false public claim.
-* The AWS-hosted MCP server exposes all 13 tools (parity with the Space), so it also fronts the HIBP/GitHub-backed tools of other bundles. The listing
-  advertises only 5. Restricting the AWS listing's toolset to those 5 is a small follow-up.
-* `assets/marketplace/consumption_security_architecture.{html,png}` now shows the MCP endpoint as API Gateway `/mcp` to Lambda, and no Hugging Face box.
-  It still lists "third-party data providers" outside AWS, which is TRUE today. It must be re-rendered if the dependencies are removed.
-* **Do not shut down the `-aws` Space:** existing subscribers' MCP clients are configured with its URL.
-
-## 2026-10-25 (decision + build): ANDREW CHOSE TO DILUTE BUNDLE D ON THE AWS PATH ONLY. BUILT, TESTED, NOT DEPLOYED.
-
-**Decision, in his words:** discovery is the bind ("buyers are not finding my licenses"), the FTR is "another potential discovery surface and a reason to message
-Dave Shapiro" (it does NOT guarantee a sales resource), and Bundle D stays the FTR product because it is the most timely for AWS enterprise buyers. He accepted
-that this makes the bundle sold through AWS differ from the one sold on the developers site and Stripe. I had recommended parking the FTR, then recommended tracing
-the TI listing instead; both were overruled. Evidence from the 2026-10-20 weekly report, for the record: AWS Marketplace 0 active subscribers, $0 YTD; Bundle D
-endpoints 0 Stripe-metered calls last week; x402 `bulk-identity-risk` 1 call ever. The TI listing's feed handlers (TAXII, MISP, actor, cve, trending) make NO outbound
-calls (AST trace); only `/v1/intel/telegram` enriches via an IP-geolocation and a registration-age lookup. That route stays available if Bundle D proves too costly.
-
-**What changed (AWS-licensed keys only, marker = `key_record["aws_customer_id"]`, set in BOTH dispatchers and never read from the request):**
-* `bulk-identity-risk`: the domain score skips the external breach-history and external infostealer lookups, the agent score skips both again; what remains
-  (IOC corpus, ransomware victims, stolen sessions, CVEs) is RESCALED to 0-100 (`_FIRST_PARTY_DOMAIN_MAX = 75`, `_FIRST_PARTY_AGENT_MAX = 40`). Without the rescale an
-  agent could never exceed 40 and the "a CRITICAL agent elevates the org" rule could never fire. The response carries `data_path: first_party`, `signals_not_run`, and a note.
-* `tech-stack-cve`: no public-exploit lookup; `poc_available` is ABSENT (not False). `mcp-registry-risk`: no registration-age lookup; `signals_not_run` names it.
-* Stripe-direct, x402 and free-tier callers keep every lookup and the exact old response shape (asserted).
-* The AWS-hosted MCP server is narrowed by `RS_MCP_TOOLS` to the five tools the listing sells plus status (six). `tools/create_mcp_http_lambda.sh` sets it
-  and, on re-run, re-sends BOTH env vars (update-function-configuration replaces the block).
-* `test_aws_first_party_path.py` (21 tests): no outbound call is made on the AWS path (urlopen replaced by a function that fails the test), rescaling, marker
-  cannot be forged or suppressed, both real dispatchers executed. `test_relayshield_mcp_http.py` 35 tests. Both proven by mutation (six defects reintroduced each).
-* The architecture diagram now says "Public data sources: read by the scheduled collectors; no customer query data is sent to them".
-
-**Known limits, stated so nobody rediscovers them:** an AWS-licensed key that also has a Stripe customer can still call other metered endpoints (supply-chain, secret-scan)
-and those still call third parties; they are not part of the listed product. 14 other test files fail in this container and fail identically on the commit before this
-work (x402 manifest count 36 != 38, bundle_b_gating, day3, weekly_metrics and others); none were touched. Listing copy still quotes the retired corpus counts.
-
-**NEXT, in order:** merge this branch; CI deploys `relayshield-api` and `relayshield-agentic-api` (check the run is green AND the import probe passes); re-run
-`tools/create_mcp_http_lambda.sh` (it now sets the toolset); prove an AWS-licensed key's bulk-identity-risk response says `first_party`; THEN the listing change set (endpoint +
-copy) and the Architecture details resubmission with the new diagram. The PRM prerequisite is still open: ask what Partner Central detects before adding a User Agent string anywhere.
-
 ## 2026-10-25 (pricing + copy): THE AWS EDITION OF BUNDLE D IS PRICED 5-10% BELOW STRIPE-DIRECT. TOOLS BUILT, NOTHING SUBMITTED.
 
 **Decided by Andrew, in his words:** *"if we ever [have AWS subscribers], it should be at a 5-10% discount off the Stripe price which includes more. I'm ok to state the scores come
@@ -861,3 +268,235 @@ Target is 24 High (5 OPS, 9 SEC, 10 REL). The earlier "UNVERIFIED" on the pillar
 Steps `concurrency`, `alarm`, `retention`; dry run default; spec `tools/wafr_hardening_spec.json` (api 100, bundle-fulfillment 10, stripe-webhook 10 reserved; those numbers are MY PROPOSAL, not measured). `test_wafr_hardening.py` 13 tests: fakes for decisions,
 botocore Stubber over the real service models for request/response shapes, six planted bugs all caught. Retention DELETES events older than 90 days on groups that had none; the dry run lists size and age first. The alarm step copies the AlarmActions
 of the existing Lambda Errors alarms (found by reading them) and blocks if there are none. NEXT: Andrew runs the dry run, reads it, then `--apply` per step. After apply, REL 1/7/10 Notes and ticks can change (reserved concurrency exists; alarm exists), with evidence = the tool's output.
+
+## 2026-10-29: CORRECTION. THE WAFR SECURITY HIGH-RISK LIST WAS SAVED (ON AN UNMERGED BRANCH). I WRONGLY REPEATED "NEVER SAVED". THE OPS HIGH-RISK LIST WAS NEVER READ.
+
+The gap plan (section 5) and the 2026-10-28 handoff said the OPS and SEC answers "were given in chat and never saved". That was inherited and unchecked. Found by `git fetch --all --prune` then `git log --all -S` with no pathspec:
+* **SEC high-risk list: SAVED** in commit `77ec256` on `origin/claude/kind-fermi-2y6dhb` (never merged to main), section "2026-10-27 (WAFR SECURITY HIGH-RISK LIST ...)". Copied below verbatim.
+* **OPS high-risk list: NEVER READ.** That same commit says "Operational Excellence and Reliability high-risk lists NOT yet read". Only the COUNT (5 High) was ever recorded. Andrew has not been asked for it in a way that reached a saved record; it needs the console filter Operational Excellence + High risk.
+* **The 2026-10-10 per-question OPS 1-11 / SEC 1-11 ANSWER TEXTS** (archive_08.md ~L520) really were chat-only. That is a different thing from the HRI lists.
+* The dashboard unit is a best practice not met (36 rows in SEC); the FTR gate counts HIGH-RISK QUESTIONS (9 SEC). A question stops being High when enough of its practices are genuinely met, not when one is.
+
+Dashboard list "issues by improvement plan item", filter Security + High risk, 36 rows (the dashboard's unit is a best practice not met, NOT a question; the lens counted 37 high-risk QUESTIONS in total across all six pillars; how many of those are Security was not shown).
+**SEC1 operate:** Separate workloads using accounts; Secure account root user and properties; Identify and prioritize risks using a threat model; Evaluate and implement new security services and features regularly.
+**SEC2 identities:** Use temporary credentials; Rely on a centralized identity provider; Employ user groups and attributes.
+**SEC3 permissions:** Grant least privilege access; Define permission guardrails for your organization; Manage access based on lifecycle; Establish emergency access process; Reduce permissions continuously; Analyze public and cross account access.
+**SEC5 network:** Create network layers; Implement inspection-based protection; Automate network protection.
+**SEC6 compute:** Provision compute from hardened images; Reduce manual management and interactive access; Automate compute protection.
+**SEC7 data classification:** Understand your data classification scheme; Automate identification and classification.
+**SEC8 data at rest:** Automate data at rest protection; Enforce access control.
+**SEC10 incident response:** Identify key personnel and external resources; Develop incident management plans; Prepare forensic capabilities; Develop and test security incident response playbooks; Pre-provision access; Run simulations.
+**SEC11 application security:** Perform regular penetration testing; Regularly assess security properties of the pipelines; Train for application security; Automate testing throughout the development and release lifecycle; Conduct code reviews; Centralize services for packages and dependencies; Build a program that embeds security ownership in workload teams.
+**Not in the list (so not HRI): SEC4 detect and investigate (logging, central analysis, response automation) and SEC9 data in transit.**
+Triage proposed to Andrew: (A) written plans and processes (threat model, incident plan, playbooks, forensic plan, key personnel, emergency access, data classification, security review cadence, training, ownership): drafted by Claude from the repo, true only once adopted; (B) cheap AWS configuration (root user MFA and key deletion, IAM Access Analyzer, GuardDuty/Security Hub/Inspector, Identity Center, WAF on the API, KMS/encryption defaults); (C) structural (separate accounts and SCP guardrails via AWS Organizations; one IAM role per Lambda per `iam_role_split.md`).
+
+## WHERE 2026-10-29 LEFT THINGS. WAFR/FTR THREAD: 24 HIGH RISKS TO CLEAR. DECISION: NO GUARDDUTY, WAF DEFERRED. READ THIS FIRST FOR THE WAFR THREAD.
+
+**Supersedes the WAFR parts of every earlier "WHERE ... LEFT THINGS" list, including the 2026-10-28 one (commit `755dc6f` on `origin/claude/laughing-meitner-m54bli`, not on this branch).** Branches holding WAFR facts that are NOT merged together: `claude/kind-fermi-2y6dhb` (SEC list), `claude/laughing-meitner-m54bli` (2026-10-28 handoff, hardening tool notes). Before claiming any WAFR fact is missing: `git fetch --all --prune && git log --all --oneline -S "<string>"`, no pathspec. Merge with `tools/resolve_md_conflict.py docs/claude_memory/LOG_CURRENT.md --write`.
+
+### The gate, CONFIRMED from AWS's page (Andrew, 2026-10-28)
+Zero High-risk issues in Security, Operational Excellence and Reliability; report under 1 year old; workload name/description names the solution (saved); reviewer owner field "Andrew Gibbs - andrew@relayshield.net" (saved). Perf, Cost, Sustainability do not gate.
+
+### Counts, from Andrew's dashboard screenshot 2026-10-29 (the chart, unchanged since 10-28)
+| Pillar | High | Medium | Gates |
+|---|---|---|---|
+| Operational Excellence | 5 | 5 | yes |
+| Security | 9 | 1 | yes |
+| Reliability | 10 | 2 | yes |
+| Performance Efficiency | 4 | 1 | no |
+| Cost Optimization | 9 | 0 | no |
+| Sustainability | 0 | 6 | no |
+The chart counts HIGH-RISK QUESTIONS. The Security "issues by improvement plan item" table counts unmet PRACTICES (36 in Security). A question leaves High only when enough of its practices are genuinely met.
+
+### Which High items are KNOWN and which are NOT
+* **SEC (9 questions, 36 practices): KNOWN**, recorded verbatim in the section "2026-10-29: CORRECTION" above. High questions are SEC1, 2, 3, 5, 6, 7, 8, 10, 11. SEC4 and SEC9 are not High.
+* **OPS (5 High): the questions are NOT KNOWN.** Never read. Andrew filters the dashboard "issues by improvement plan item" table to Operational Excellence + High risk and pastes the rows. **Save them here the moment they arrive.**
+* **REL (10 High of 13 questions): WHICH 10 is NOT KNOWN.** The answers are in `wafr_answers_reliability_2026-10-11.md` but the Tool's High/Medium result per question was never recorded. Same filter, Reliability + High risk.
+* The 2026-10-10 answer TEXTS for OPS 1-11 and SEC 1-11 were chat-only and are lost; they are not needed, the High lists are.
+
+### DECISIONS, 2026-10-29, Andrew's, do not re-open without new evidence
+* **NO GuardDuty now or near-term.** It closes no High question on its own: detection is SEC4, which is not High. Its only links are SEC1 "evaluate new security services" and weakly SEC6 "automate compute protection".
+* **WAF is DEFERRED, not rejected.** It could move SEC5 (network protection) from High to Medium at best, and only if "Create network layers" can honestly be ticked as not applicable (no VPC). Weak justification for about $10-12 per month plus $0.60 per million requests (UNVERIFIED: aws.amazon.com is egress-blocked, prices came from search summaries). Reopen only if SEC5 is the last High left, or after the FTR.
+* The Security count is driven by WRITTEN PLANS (SEC10 incident response, SEC11 application security, SEC7 data classification, SEC1 threat model and root user) and the one-role-per-Lambda IAM split (SEC3), not by paid services.
+
+### Built, not yet applied to AWS
+* `tools/wafr_hardening.py` (REL 1/6/7/10): dry run on Andrew's Mac was clean 2026-10-28; nothing applied. Reserved concurrency values (api 100, fulfillment 10, stripe 10) are my proposal, unmeasured. Apply order: `--step concurrency`, then `--step alarm` (READ the `notifies:` line first), then `--step retention`, each with `AWS_PROFILE=relayshield` and `--apply`.
+* `.github/workflows/tests.yml`: has never run on GitHub (main not pushed).
+
+### TODO, IN ORDER
+1. Andrew pastes the OPS High rows and the REL High rows. Claude saves them in this file the same turn.
+2. Claude builds, dry-run-default, with botocore Stubber checks: Lambda versions plus alias deploy change, AWS Backup plan, DLQs, tracing, API Gateway throttling and access logging, tag script, weekly-metrics CI deploy path (needs an IAM grant first). Claude drafts the written plans (incident response, forensics, playbooks, data classification, threat model, secure-development, DR and test plans) from the repo, marked draft until Andrew adopts them.
+3. Andrew runs, in stages: the REL hardening tool; `tools/protect_dynamodb_tables.sh` (PITR, run status unknown); IAM snapshot then `iam_split_roles.py` per function.
+4. Re-tick in the WA Tool WITH EVIDENCE only; save a milestone; PDF under 3 MB; request validation.
+5. Dave Shapiro is contacted only after the FTR passes.
+
+## 2026-10-29: OPS AND REL HIGH-RISK LISTS, READ FROM ANDREW'S SCREENSHOTS OF THE DASHBOARD TABLE "issues by improvement plan item" (filter pillar + High risk). VERBATIM. ALL THREE LISTS NOW COMPLETE (SEC 36, OPS 11, REL 37 practices).
+
+**These are unmet PRACTICES, not questions.** OPS: 5 High questions, 11 practices (2 pages, complete). REL: 10 High questions, 37 practices over 4 pages, ALL CAPTURED. SEC list is in the section "2026-10-29: CORRECTION" above (36 practices, complete).
+
+**OPS, 11 High practices (complete):** Evaluate internal customer needs; Mechanisms exist to manage responsibilities and ownership; Mechanisms exist to request additions, changes, and exceptions; Responsibilities between teams are predefined or negotiated; Escalation is encouraged; Communications are timely, clear, and actionable; Team members are encouraged to maintain and grow their skill sets; Resource teams appropriately; Implement distributed tracing; Ensure personnel capability; Create support plans for production workloads.
+
+**REL, page 1:** Manage service quotas across accounts and Regions; Accommodate fixed service quotas and constraints through architecture; Monitor and manage quotas; Automate quota management; Ensure that a sufficient gap exists between the current quotas and the maximum usage to accommodate failover; Provision redundant connectivity between private networks in the cloud and on-premises environments; Ensure IP subnet allocation accounts for expansion and availability; Prefer hub-and-spoke topologies over many-to-many mesh; Enforce non-overlapping private IP address ranges in all private address spaces where they are connected; Implement loosely coupled dependencies.
+**REL, page 2:** Do constant work; Control and limit retry calls; Fail fast and limit queues; Define and calculate metrics (Aggregation); Send notifications (Real-time processing and alarming); Automate responses (Real-time processing and alarming); Analyze logs; Monitor end-to-end tracing of requests through your system; Integrate functional testing as part of your deployment; Integrate resiliency testing as part of your deployment.
+**REL, page 3:** Deploy using immutable infrastructure; Use bulkhead architectures to limit scope of impact; Automate recovery for components constrained to a single location; Monitor all components of the workload to detect failures; Fail over to healthy resources; Rely on the data plane and not the control plane during recovery; Use static stability to prevent bimodal behavior; Send notifications when events impact availability; Architect your product to meet availability targets and uptime service level agreements (SLAs); Test scalability and performance requirements.
+**REL, page 4 (received 2026-10-29, the last page; REL total is 37 practices):** Test resiliency using chaos engineering; Conduct game days regularly; Define recovery objectives for downtime and data loss; Use defined recovery strategies to meet the recovery objectives; Test disaster recovery implementation to validate the implementation; Manage configuration drift at the DR site or Region; Automate recovery.
+
+**Observations, mine, not yet acted on:** (1) REL network practices (private connectivity, subnets, hub-and-spoke, non-overlapping ranges) assume a VPC; this workload has none, so the WA Tool's "question does not apply to this workload" with a Note may be the honest answer, Andrew's call. (2) "Implement distributed tracing" (OPS) and "Monitor end-to-end tracing" (REL) are ONE control: X-Ray active tracing on Lambda and API Gateway. (3) "Create support plans for production workloads" is a paid AWS Support plan, a spend decision for Andrew; price UNVERIFIED. (4) Several OPS practices are team-and-people practices on a one-person company; tick only what is true, otherwise write the gap or document the single-owner model.
+
+## WHERE 2026-10-29 (BUILD SESSION) LEFT THINGS. WAFR/FTR: CONTROLS BUILT, TESTED AND PUSHED TO `claude/sharp-bohr-72o23p`. NOT MERGED. NOTHING APPLIED TO AWS. READ THIS FIRST.
+
+**Supersedes the "WHERE 2026-10-29 LEFT THINGS" section above for the TODO order** (that one is the pre-build state; its decisions still stand). The branch is pushed; "deployed" would be false: Claude has no AWS credentials, and workflow dispatch is 403 for Claude. Every AWS-touching tool below was checked against the REAL boto3 service models with botocore Stubber and by planting bugs; none has run against AWS.
+
+### Built this session (all on `claude/sharp-bohr-72o23p`)
+| What | Files | Evidence it works, and what is NOT proven |
+|---|---|---|
+| **Observability tool**: X-Ray tracing on 4 Lambdas and the API stage, stage default throttle, CloudWatch dashboard plus 5 saved Logs Insights queries, account-concurrency quota alarm | `tools/wafr_observability.py`, `tools/wafr_observability_spec.json`, `test_wafr_observability.py` (31 tests) | Stubber over lambda, iam, apigateway, cloudwatch, logs, service-quotas models; 11 planted bugs all caught. **NOT proven:** that AWS accepts the dashboard body (the tool prints AWS's validation messages and exits 1 if any), that `update_stage` `replace` creates a missing throttle setting, that the profile may call `iam:SimulatePrincipalPolicy`. Throttle 100 rps / burst 200 is MY PROPOSAL |
+| **Deploy test gate**: `deploy_lambdas.yml` now `needs: tests` (calls `tests.yml`); a manual run bypasses it and prints a notice | `.github/workflows/deploy_lambdas.yml`, `.github/workflows/tests.yml` (`workflow_call`) | `test_deploy_versions.py` parses it and 8 planted bugs are caught. **NOT proven:** `tests.yml` has NEVER run on GitHub. If it is red for an environment reason, every push deploy is blocked until fixed (use manual dispatch meanwhile) |
+| **Version + alias publishing** after the import probe, never fails the deploy, warns loudly | same workflow; `iam_github_deploy_versions.json`; `tools/apply_deploy_versions_policy.sh` | The step's script was run against a stubbed `aws` in all three modes (ok, no alias yet, denied). **The deploy role does NOT yet have the permissions**; until the policy script runs, deploys succeed and print a "Versioning incomplete" warning. **The `live` alias is NOT what serves traffic**: API Gateway still invokes the unqualified function |
+| **Rollback workflow** (restores a version's CODE, probes, moves the alias) | `.github/workflows/rollback_lambda.yml` | Target-selection script run against a stub for previous / number / unpublished / garbage / injection input. Never run on GitHub; needs at least 2 published versions |
+| **Four DRAFT documents**, none adopted | `docs/reliability/recovery_objectives_and_dr_plan.md`, `game_day_plan.md`, `availability_target_and_load_test_plan.md`, `docs/ops/operating_model.md` | Written from repo facts. RTO/RPO, 99.5% target, and the load-test profile are PROPOSALS. Each has CONFIRM items only Andrew can answer. Nothing is a test result |
+| **Practice-to-evidence map** | `wafr_practice_map_2026-10-29.md` | Every OPS (11) and REL (37) High practice with its backing and status. The re-tick checklist |
+
+### Verified merge procedure (run in a clean copy, 2026-10-29)
+origin/main is BEHIND Andrew's local main (his holds `755dc6f`, the 10-28 handoff, unpushed). Merging this branch conflicts ONLY in `docs/claude_memory/LOG_CURRENT.md` (an append conflict); `tools/resolve_md_conflict.py` keeps both sides; the index regenerates; `--rotate --write` then brings the log from 113,656 to 59,031 characters. **Do NOT merge `claude/kind-fermi-2y6dhb`**: its useful content (the SEC list) is already copied into this log, and its log rotation conflicts. Its unique commits are otherwise Bundle D / handoff records already represented here.
+
+### TODO, IN ORDER
+1. **ANDREW: merge this branch** (block below), run `python3 test_workflows_parse.py`, push `main`. First push to main is the first real run of `tests.yml` and the deploy gate. Expect green with 13 known failures; if red for an environment reason, fix that before anything else.
+2. **ANDREW: dry runs, read them, then apply one step at a time.** `tools/wafr_hardening.py` (concurrency, alarm: READ the `notifies:` line, retention) then `tools/wafr_observability.py` (tracing, throttle, dashboard, quota). Python is `~/.rsvenv/bin/python` (needs boto3). Tracing may print BLOCKED if the shared role already has 10 managed policies: then the IAM role split (`iam_role_split.md`) is the prerequisite, not a failure of the tool.
+3. **ANDREW: `sh tools/apply_deploy_versions_policy.sh`**, then trigger one deploy and check the "Publish a version" step reads ✅ and not a warning. Then `AWS_PROFILE=relayshield sh tools/protect_dynamodb_tables.sh` (dry run first; its run status is unknown).
+4. **ANDREW decides:** buy an AWS Support plan (search summary: Business Support+ from $29/month; UNVERIFIED; older plans end 2027-01-01); throttle 100/200; reserved concurrency 100/10/10; whether the WA Tool's REL 2 was answered "none of these" instead of "question does not apply" (no VPC), which alone could take 4 practices off the list.
+5. **ANDREW: read the four DRAFT documents, answer the CONFIRM items, replace each STATUS line with "ADOPTED <date>" or edit.** A document that is not adopted is not evidence.
+6. **CLAUDE, next build:** async retry limits and DLQs (`MaximumRetryAttempts`, `MaximumEventAge`, needs an SQS grant: the shared role's inline budget is full, so a customer-managed policy or the role split), AWS Backup plan (needs a service role), DynamoDB and EventBridge alarms, API integration through the `live` alias (needs `lambda:InvokeFunction` permission on the alias for API Gateway), Service Quotas automatic management (not investigated).
+7. **SECURITY (9 High questions, 36 practices) is untouched this session.** Check whether `relayshield_incident_response_plan.md` (v1.0, May 2026, owner Andrew) already supports SEC10 before drafting a new one; it may need a forensics section and a test record rather than a rewrite. Then written plans (threat model, data classification, secure-development, emergency access), the IAM split (SEC3), root user MFA and key check (SEC1).
+8. **Hold game day 1** (PITR restore and bulkhead test) once steps 2 and 3 are done. It converts four DRAFT rows into evidence.
+9. **Only then re-tick in the WA Tool, with evidence cited in each Note**, save a milestone, PDF under 3 MB, request validation. Dave Shapiro only after the FTR passes.
+
+### ANDREW RUNS THIS: the merge (every line verified in a clean copy; the push is not)
+```zsh
+cd ~/dev/relayshield
+git checkout main
+git --no-pager fetch origin claude/sharp-bohr-72o23p
+git stash push --include-untracked -m "pre-merge untracked"
+git -c pull.rebase=false merge --no-edit FETCH_HEAD
+```
+EXPECT: "CONFLICT (content): Merge conflict in docs/claude_memory/LOG_CURRENT.md" and no other conflict. (If it merges cleanly, skip the next block.)
+STOP IF: a conflict in any `.py`, `.yml` or `.json`: another session edited the same code; send the `git status` output.
+
+Only if it conflicted, then:
+```zsh
+cd ~/dev/relayshield
+python3 tools/resolve_md_conflict.py docs/claude_memory/LOG_CURRENT.md --write
+python3 tools/claude_memory.py --index --write
+git add docs/claude_memory
+git commit --no-edit
+python3 tools/claude_memory.py --rotate --write
+python3 tools/claude_memory.py --index --write
+git add docs/claude_memory
+git commit -m "Rotate LOG_CURRENT after merge"
+python3 test_workflows_parse.py
+```
+EXPECT: "All 26 workflows parse and define jobs." (verified on this branch 2026-10-29) and `claude_memory.py --check` reporting both files under their caps.
+STOP IF: "unresolved" markers remain (`grep -c '^<<<<<<<' docs/claude_memory/LOG_CURRENT.md` must print 0).
+
+### Standing lessons from this session
+* **A record on an unmerged branch is invisible to the next session.** The SEC list sat on `kind-fermi` for two days and a session reported it "never saved". Fix at the source: a session that writes a record must say which branch holds it, and the handoff must name unmerged branches (this one does, above).
+* **Ask for the console list in the first reply, not the third.** The OPS and REL High lists were never read until Andrew was asked a pointed question. The ask costs him ten minutes and unblocks all the mapping.
+* **A paid control that closes zero High questions is not a control worth buying.** GuardDuty was ruled out on that basis (decision above); apply the same test to every purchase this thread proposes, the support plan included.
+* **Building the control is not closing the finding.** 48 practices are mapped; none is ticked; most are UNRUN or DRAFT. The `wafr_practice_map_2026-10-29.md` statuses are the honest count.
+
+## 2026-10-29 (merge + rotate session): `claude/sharp-bohr-72o23p` MERGED INTO `claude/happy-ptolemy-ygtv0n`, LOG ROTATED. NOT ON `main`. NOTHING APPLIED TO AWS.
+
+The WAFR/FTR build branch merged with NO conflict (main had already absorbed the 10-28 handoff). `--rotate --write` took LOG_CURRENT from 118,349 to about 60,000 characters (new `archive_10.md`); `--check`, `test_claude_md_size.py` and `test_workflows_parse.py` pass. The TODO order in "WHERE 2026-10-29 (BUILD SESSION) LEFT THINGS" stands unchanged. The count: the FTR gate is 24 High-risk QUESTIONS (OPS 5, SEC 9, REL 10); the practice lists behind them are OPS 11, SEC 36, REL 37 = 84 unmet practices. The branch addresses OPS and REL only (SEC untouched), and every control is UNRUN against AWS.
+
+## 2026-10-29 (WA Tool, Andrew's console): REL 2 MARKED "QUESTION DOES NOT APPLY". RELIABILITY HIGH 10 -> 9. GATE TOTAL NOW 23 (OPS 5, SEC 9, REL 9).
+
+Done by Andrew in the console, reason "Out of scope" with the no-VPC Notes (no Lambda is VPC-attached, evidence script 2026-10-11; only network surface is the API Gateway regional endpoint). Reliability pillar overview after saving, from his screenshot: 13/13 answered, High 9, Medium 2, No improvements identified 1, Not Applicable 1, Unanswered 0. **This proves the Tool recalculates the pillar count on save, and that a "does not apply" answer removes the question from the High count.** It was legitimate only because REL 2's four unmet practices all assume a VPC and there is none; it is not a route for any question whose practices apply (SEC5 was considered on 2026-10-29 and the decision to defer stands, because the public API Gateway endpoint is a network surface). REL 2 is no longer on the re-tick list. The per-question table of what to tick and after which step was given in chat this session and matches `wafr_practice_map_2026-10-29.md`; REL 4 and REL 5 have no controls built yet and cannot clear.
+
+## 2026-10-29 (build, REL 5): `tools/wafr_async_failures.py` WRITTEN AND TESTED. NOT RUN AGAINST AWS. REL 4 STILL HAS NOTHING BUILT.
+
+Backs REL 5 "Control and limit retry calls" and "Fail fast and limit queues". Four steps, dry run by default, spec `tools/wafr_async_spec.json`: **queue** (one SQS standard queue `relayshield-async-failures`, SSE-SQS, 14 days), **access** (each execution role must be allowed `sqs:SendMessage` on that one queue, checked with the IAM simulator; if not, ONE customer-managed policy `relayshield-async-failures-send` is created and attached, only where the role has room under the 10-managed-policy limit, else BLOCKED), **retry** (Lambda async invoke config: retries 1, max event age 3600 s, queue as on-failure destination, on every function that is the Lambda target of an ENABLED EventBridge rule, discovered from AWS), **alarm** (queue not empty, notifies the same targets the existing Lambda error alarms use). Retries 1 and age 3600 are MY PROPOSAL, unmeasured; Lambda's own limits are 0 to 2 and 60 to 21600 and the tool refuses anything outside them.
+
+**Safety decisions, each with a test that fails if reversed:** `put_function_event_invoke_config` REPLACES a whole config (including an OnSuccess destination), so it is called only where none exists and a different existing config is reported as CONFLICT and kept. A destination is never set for a role that cannot write to it (a silent drop is worse than no destination). Access is granted BEFORE the destination is set, and a permission-shaped refusal from Lambda is retried for about a minute for IAM propagation. A function called by something other than EventBridge (S3, SNS) is not discovered; list it under `async.extra_functions`. The public API is invoked synchronously and has no async config.
+
+**Evidence, and its limits.** 39 tests: fakes for the decisions plus botocore Stubber over the REAL lambda, iam, sqs, events and cloudwatch models (boto3 1.43.121). 12 planted bugs (disabled rules included, put over an existing config, destination set for a role that cannot send, attach before create, unencrypted queue, over-broad action, no-room check removed, alias dropped, alarm with nobody to tell, wrong account, propagation retry removed, conflict overwritten) each turned the suite red; one real bug was found by the tests first (sorting a function seen with and without an alias). **NOT proven:** that Lambda accepts the destination the instant the policy is attached (hence the retry), that the simulator answers for the shared role, and the real SQS error code for a missing queue (older botocore says `AWS.SimpleQueueService.NonExistentQueue`, 1.43 says `QueueDoesNotExist`; both are handled and both are tested). Full suite with the CI dependency set: no new failures; `test_claude_md_size.py` now passes (the rotation fixed it) so its line was removed from `tests_known_failing.txt`, which is the ratchet working.
+
+**Needs a managed-policy slot on the shared role, like the X-Ray policy in `wafr_observability.py --step tracing`.** If the shared role already has 10, BOTH are blocked and the IAM role split (`iam_role_split.md`) is the prerequisite for REL 5 and for tracing. The dry run says which.
+
+**Next, in order.** (1) Andrew merges PR 54, then runs the dry run of this tool and reads it. (2) Apply `--step queue`, then `--step access` (read the policy line), then `--step retry`, then `--step alarm`. (3) After apply, REL 5 "Control and limit retry calls" may be ticked citing the tool output; "Fail fast and limit queues" is PARTIAL (client timeouts not assessed), so tick it only if the Note says what is and is not covered. (4) REL 4 (loosely coupled dependencies, constant work) still has NOTHING built; "Do constant work" may honestly be a review-and-Note item for scheduled polling, "Implement loosely coupled dependencies" needs a real change (e.g. the Stripe webhook or fulfillment path via a queue) and is a design decision for Andrew. The practice map is updated for REL 2 (N/A in the Tool), REL 5 and the REL 6 notifications row.
+
+## 2026-10-29 (build, REL 4): STRIPE WEBHOOK QUEUE MODE + `tools/wafr_stripe_queue.py`. CODE WRITTEN AND TESTED, FLAG OFF, NOTHING APPLIED TO AWS. ANDREW APPROVED THE DESIGN IN CHAT.
+
+Andrew said: "Rel4: Im ok to put Stripe webhook behind a queue." Design, chosen to keep the payment path safe: **the same function does both jobs.** `relayshield_stripe_webhook.py` gained a queue mode that is OFF unless the Lambda env var `STRIPE_EVENT_QUEUE_URL` is set. On HTTP it still verifies the Stripe signature (the 5-minute tolerance only makes sense at the door), and for a `checkout.session.completed` it puts the event on the queue and returns 200; other event types are acknowledged without queueing; an enqueue failure returns **500 so Stripe retries for up to three days and nothing is processed inline** (an inline second attempt could onboard the customer twice). Invoked by SQS (`event["Records"]`, which API Gateway cannot produce because it fixes the top-level keys), it processes the event through `process_checkout_event`, the old handler body MOVED, not rewritten. The consumer accepts only `aws:sqs` records whose ARN ends `:relayshield-stripe-events`, does not re-check the signature age, and RAISES on any failure so SQS retries and then redrives to the DLQ (returning normally deletes the message). Deploying this code changes nothing by itself: flag off is the old behaviour.
+
+**The webhook had NO tests before this.** `test_stripe_webhook_queue_mode.py` first pinned today's behaviour (15 tests, run against the UNCHANGED handler and passing), then added queue mode (16 tests that failed before the change, pass after). `test_day3.py` still passes with a region set on both the original and the new handler.
+
+**Infra tool `tools/wafr_stripe_queue.py`** (spec `tools/wafr_stripe_queue_spec.json`), dry run by default. Default run = `queues` (DLQ first, then the main queue, SSE-SQS, 14 days, redrive after 5 receives, visibility timeout = 6 x the function's own timeout read from the function), `access` (one customer-managed policy, four sqs actions on the one queue, attached only if the role has room), `consumer` (SQS event source mapping, batch size 1, max concurrency 2). **`enable` and `disable` are separate steps, never in the default run.** `enable` MERGES the flag into the existing Lambda environment (`update_function_configuration` replaces the whole Environment, which would delete `DAY3_LAMBDA_ARN` and `DAY3_SCHEDULER_ROLE_ARN`) and refuses unless the consumer mapping is enabled, the role can use the queue, and the DEPLOYED code (downloaded from Lambda, not read from git) contains queue mode. `disable` removes only its own variable and the consumer keeps draining.
+
+**Evidence and limits.** 48 tests for the tool (fakes for decisions, Stubber over the real lambda, iam and sqs models; the real model rejected a made-up UUID in my own test data, which is the kind of thing it is there for) plus 31 for the handler. 22 planted bugs (14 in the tool, 8 in the handler: wrong create order, environment replaced, code check skipped, consumer check skipped, disable removes everything, default run includes enable, one allowed action enough, conflict overwritten, mapping for a role that cannot use the queue, visibility ignores the multiplier, unreadable environment overwritten, wrong account, no-room check removed, marker in a non-py file; consumer swallows a 500, any queue accepted, enqueue failure answers 200, flag ignored, queues AND processes inline, any event source accepted, signature check removed, non-checkout events queued) each turned its suite red. Full suite with the CI dependency set: no new failures. **NOT proven:** that SQS delivers the documented record shape to this function (fields used: eventSource, eventSourceARN, body), that Lambda accepts the mapping the instant the policy is attached (the tool retries a permission-shaped refusal for about a minute), that the simulator answers for this role, and that the presigned code URL downloads.
+
+**ORDER MATTERS, and the enable step enforces it:** (1) merge, let `deploy_lambdas.yml` deploy the new handler (flag off, behaviour unchanged); (2) dry run then `--apply` of the default steps; (3) only then `--step enable --apply`; (4) watch one real checkout go through; (5) to go back, `--step disable --apply`. Needs ANOTHER managed-policy slot on the shared role if the stripe-webhook role is the shared one (X-Ray, the async-failures policy and this one are three): if the role is full, the IAM role split is the prerequisite for all of them.
+
+**FOUND, NOT FIXED (separate task queued): `relayshield_stripe_webhook.py` Telegram flow uses `subscription_tier` before it is defined** (`resolved_tier = pre_payment.get("subscription_tier") or subscription_tier`; pyflakes reports it, and it is identical on the original). A Telegram checkout whose pre-payment record has no tier raises NameError and Stripe retries forever. **ALSO PRE-EXISTING, same family:** processing is not atomic (user record created, then a 500 on Twilio credentials; the retry finds the user and skips, so the welcome message is never sent). A queue with redrive does not make that worse and does not fix it.
+
+**REL 4 status:** "Implement loosely coupled dependencies" can be ticked only after `--step enable` has run and a checkout has been seen going through, and the Note must say only the Stripe webhook is decoupled. "Do constant work" is a review-and-Note item (scheduled polling is constant by design). The Tool decides whether the question leaves High.
+
+## WHERE 2026-10-29/30 (WAFR BUILD SESSION 2) LEFT THINGS. PR 54 OPEN, CI GREEN, NOT MERGED. NOTHING APPLIED TO AWS. READ THIS FIRST FOR THE WAFR THREAD.
+
+**Supersedes the TODO order in "WHERE 2026-10-29 (BUILD SESSION) LEFT THINGS" and the 2026-10-29 count.** Written at Andrew's request before he rebooted his Mac. Everything below is pushed; nothing lives only on his machine or in the container.
+
+### State
+* **[PR 54](https://github.com/nzdsf2-gif/relayshield/pull/54)** `claude/happy-ptolemy-ygtv0n` into `main`, head `67f2301` plus the commit carrying this section. CI was green at `67f2301` (Run test suite, Run Security Checks, GitGuardian), mergeable clean, no reviews. **Andrew merges it on 2026-10-30.** It carries: the whole `claude/sharp-bohr-72o23p` WAFR build branch (merged with no conflict), the log rotation (`archive_10.md`), `tools/wafr_async_failures.py` (REL 5), the Stripe webhook queue mode and `tools/wafr_stripe_queue.py` (REL 4), the updated practice map, and one line removed from `tests_known_failing.txt` (`test_claude_md_size.py` passes now).
+* **Merging PR 54 DEPLOYS `relayshield_stripe_webhook.py` to production** (the flag `STRIPE_EVENT_QUEUE_URL` is unset, so behaviour is identical; 15 pinned tests back that) and is the **first real run of the deploy test gate** (`deploy_lambdas.yml` needs `tests.yml`). `tests.yml` itself already ran green on the PR. If the first push deploy is red for an environment reason, use a manual dispatch meanwhile and fix that before anything else.
+* **Gate count: 23 High questions (OPS 5, SEC 9, REL 9).** Andrew marked REL 2 "Question does not apply" in the Tool (reason Out of scope, no-VPC Notes), screenshot: Reliability High 9, Medium 2, No improvements identified 1, Not Applicable 1, Unanswered 0, 13/13 answered. **That proved the Tool recalculates on save.**
+* **On Andrew's Mac:** he ran the merge block BEFORE PR 54 was merged, so `main` had nothing new and `tools/wafr_async_failures.py` was "No such file". His `git stash push --include-untracked` DID save something as "pre-merge untracked" (the output also said "Ignoring path developers-agent-toolkit/" and "gemini-relayshield-scam-checker/", which are nested repos git cannot stash). `git stash list` shows it; `git stash pop` restores it if it was his own work. Unknown content.
+* **Queued, not started:** a suggested task card "Fix undefined subscription_tier in Stripe Telegram flow" (a latent NameError in `relayshield_stripe_webhook.py`, present on the original; Andrew has not started it).
+
+### ANDREW RUNS THIS after merging PR 54 (dry run only, writes nothing; UNVERIFIED against AWS)
+```zsh
+cd ~/dev/relayshield
+git checkout main
+git stash push --include-untracked -m "pre-merge untracked"
+git -c pull.rebase=false pull --no-edit origin main
+AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/wafr_async_failures.py
+```
+EXPECT: `N asynchronously invoked function(s) found from ENABLED EventBridge rules`, sections `== queue`, `== access`, `== retry`, `== alarm`, ending `Dry run only.` STOP IF: file missing (PR not merged); a `BLOCKED` line saying "role split" (the shared role has 10 managed policies: X-Ray, the async-failures policy and the Stripe queue policy all need a slot, so `iam_role_split.md` is the prerequisite); a conflict in `LOG_CURRENT.md` (`python3 tools/resolve_md_conflict.py docs/claude_memory/LOG_CURRENT.md --write`).
+
+### TODO, IN ORDER
+1. **ANDREW:** merge PR 54; watch the first `deploy_lambdas.yml` run on `main`; run the block above and send the output.
+2. **ANDREW, each as a dry run first, read it, then one `--apply` at a time (all `AWS_PROFILE=relayshield ~/.rsvenv/bin/python`):** `tools/wafr_hardening.py` (`--step concurrency`, then `--step alarm`, READ the `notifies:` line, then `--step retention`), `tools/wafr_observability.py` (tracing, throttle, dashboard, quota; tracing may print BLOCKED if the role has 10 managed policies), `sh tools/apply_deploy_versions_policy.sh` then one deploy and check "Publish a version" reads ✅, `AWS_PROFILE=relayshield sh tools/protect_dynamodb_tables.sh` (run status unknown), then `tools/wafr_async_failures.py` (`--step queue`, `access`, `retry`, `alarm`).
+3. **ANDREW, Stripe queue (REL 4), strictly in this order:** (a) the deploy of PR 54 has run; (b) `tools/wafr_stripe_queue.py` dry run, then `--apply` (queues, access, consumer; the flag stays OFF); (c) ONLY THEN `--step enable --apply`, which refuses unless the consumer works and the DEPLOYED code contains queue mode; (d) watch one real checkout go through; (e) rollback is `--step disable --apply`. Do not enable before (a) and (b).
+4. **ANDREW decides:** AWS Support plan (search summary: Business Support+ from $29 per month, UNVERIFIED; older plans end 2027-01-01); throttle 100/200; reserved concurrency 100/10/10; async retries 1 and max event age 3600 s (mine, unmeasured); read the four DRAFT documents under `docs/` and mark each ADOPTED or edit it.
+5. **CLAUDE, next build:** the 9 SECURITY questions are UNTOUCHED (check whether `relayshield_incident_response_plan.md` v1.0 already supports SEC10 before drafting; then threat model, data classification, secure-development, emergency access, the IAM split for SEC3, root user MFA and key check for SEC1); AWS Backup plan, DynamoDB and EventBridge alarms, API through the `live` alias, Service Quotas automatic management; the REL 4 "Do constant work" Note.
+6. **ANDREW re-ticks in the Tool, with evidence cited in each Note, one question at a time (table below), saves a milestone, PDF under 3 MB (unverified), requests validation.** Dave Shapiro only after the FTR passes.
+
+### HOW TO RE-TICK: the exact console path, and the per-question table (this was chat-only until now)
+**Path:** `https://console.aws.amazon.com/wellarchitected/` (region where the workload was created; the REL answers file says us-east-1, UNVERIFIED) > Workloads > RelayShield API > Lenses: AWS Well-Architected Framework > Continue reviewing > pillar > question title > Edit > tick only what is TRUE > Notes (evidence) > Save and exit > read the risk badge. If a question is hard to find, the dashboard table "issues by improvement plan item" names the question for each practice. Notes never change the score. Do NOT tick the "do not tick yet" list.
+
+REL question numbers are VERIFIED against `wafr_answers_reliability_2026-10-11.md` and reproduce the counts (REL 1, 2, 4, 5, 6, 8, 10, 11, 12, 13 are the 10 High questions; REL 3, 7, 9 are not). **OPS question numbers are from MEMORY of the lens** (the OPS answers were never saved): match by the practice name shown inside each question.
+
+| Question | Practices to tick (names as in the Tool) | Only after | Cite |
+|---|---|---|---|
+| OPS 1 | Evaluate internal customer needs | `docs/ops/operating_model.md` section 6 adopted | the adopted doc |
+| OPS 2 | Mechanisms exist to manage responsibilities and ownership; Mechanisms exist to request additions, changes, and exceptions; Responsibilities between teams are predefined or negotiated | operating model sections 1 and 2 adopted | the adopted doc |
+| OPS 3 | Escalation is encouraged; Communications are timely, clear, and actionable; Team members are encouraged to maintain and grow their skill sets; Resource teams appropriately | operating model sections 3 to 5 adopted; tick only what is true | doc, alarm names |
+| OPS 4 | Implement distributed tracing | `wafr_observability.py --step tracing --apply` | tool output |
+| OPS 7 | Ensure personnel capability; Create support plans for production workloads | section 5 adopted; a paid Support plan bought | doc; Support plan page |
+| REL 1 | Monitor and manage quotas; Accommodate fixed service quotas and constraints through architecture | `wafr_observability.py --step quota --apply` | alarm name |
+| REL 2 | DONE 2026-10-29 (does not apply) | | |
+| REL 4 | Implement loosely coupled dependencies (Note: ONLY the Stripe webhook is decoupled); Do constant work (a review Note) | Stripe `--step enable` run and one checkout seen through the queue | tool output |
+| REL 5 | Control and limit retry calls; Fail fast and limit queues (PARTIAL: client timeouts not assessed, say so) | `wafr_async_failures.py` all four steps applied | tool output |
+| REL 6 | Define and calculate metrics; Send notifications; Analyze logs; Monitor end-to-end tracing of requests | `wafr_hardening.py --step alarm` and `wafr_observability.py` (dashboard, tracing) applied | tool output |
+| REL 8 | Integrate functional testing as part of your deployment; Deploy using immutable infrastructure | PR 54 merged and deploy green; `apply_deploy_versions_policy.sh` run; one deploy shows "Publish a version" ✅ | run URL |
+| REL 10 | Use bulkhead architectures to limit scope of impact | `wafr_hardening.py --step concurrency --apply` | tool output |
+| REL 11 | Send notifications when events impact availability; Architect your product to meet availability targets and SLAs | alarms applied; `docs/reliability/availability_target_and_load_test_plan.md` adopted | alarm name, doc |
+| REL 12 | Test scalability and performance requirements; Test resiliency using chaos engineering; Conduct game days regularly | load test run and game day 1 held | game day record |
+| REL 13 | Define recovery objectives; Use defined recovery strategies; Test disaster recovery implementation; Manage configuration drift at the DR site or Region | DR plan adopted; PITR applied; one restore done | restore record |
+
+**DO NOT TICK YET (nothing built):** REL 1 Automate quota management; REL 6 Automate responses; REL 10 Automate recovery for components constrained to a single location; REL 11 Rely on the data plane and not the control plane during recovery, Use static stability to prevent bimodal behavior; REL 13 Automate recovery. **Realistic outcome, MINE and unverifiable because the Tool's per-question thresholds are not visible:** after everything above is applied, roughly 4 to 8 of the 23 could clear; Security (9) needs its own session.
+
+### STANDING LESSONS FROM THIS SESSION (the first two are now rules in CLAUDE.md, WAFR section, rules 6 and 7)
+* "Does not apply" is a real lever but only where every unmet practice assumes something the workload lacks.
+* A payment path with no tests gets pinned first and new behaviour ships dark behind a flag, with the switch as its own step.
+* **I handed Andrew a block that depended on an unmerged PR and he ran it before merging.** I did say to merge first, but the block itself did not stop him. A block that needs a merge must fail loudly on its own: when the next block depends on a PR, say "STOP: run this only after the PR shows Merged" as its first line, and include `git --no-pager log --oneline -1 -- <file>` so the missing file is self-explaining.
+* botocore Stubber rejected my own made-up test data (a 3-character UUID) and a wrong call order; both were test mistakes that the real model caught, which is what it is for. The tool's broad `except Exception` on reads turns a stub mismatch into "blocked", so a Stubber test that fails with "responses remaining" usually means the call order differs from what the tool does (it plans every queue first, then creates).
+* Only a CI event whose `head_sha` equals the PR head means the latest commit is green: an event for an older commit arrived while the newer run was still in progress, and checking the check runs directly caught it.

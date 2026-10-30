@@ -4,7 +4,6 @@ test_agent_bait_skill.py
 test_blog_publish_hygiene.py
 test_bundle_b_changeset.py
 test_bundle_b_gating.py
-test_claude_md_size.py
 test_day3.py
 test_intent_binding.py
 test_intent_binding_integration.py

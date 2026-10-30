@@ -1195,11 +1195,11 @@ never zeroed: a lookup that scores 0 reads as clean. The AWS MCP server is limit
 `tools/marketplace_update_offer_prices.py`). Code comments that say Bundle D is "same product, same price, two doors" predate that and are wrong. Never change the
 AWS rate card by any other route: a change set replaces the whole card.
 
-## THE WAFR / FTR THREAD: WHERE IT LIVES, AND THE FIVE RULES THAT HOLD IT TOGETHER
+## THE WAFR / FTR THREAD: WHERE IT LIVES, AND THE SEVEN RULES THAT HOLD IT TOGETHER
 
 **Added 2026-10-29, at Andrew's request, after a session told him the Security high-risk list "was never saved" when it was on an unmerged
-branch.** The gate is ZERO High-risk issues in Security, Operational Excellence and Reliability (24 questions High on 2026-10-29: 5 OPS, 9 SEC,
-10 REL). Current state is the last "WHERE ... LEFT THINGS" section of `LOG_CURRENT.md`; the per-practice checklist is
+branch.** The gate is ZERO High-risk issues in Security, Operational Excellence and Reliability (23 questions High after REL 2 was marked not applicable on 2026-10-29: 5 OPS, 9 SEC,
+9 REL; it was 24 that morning). Current state is the last "WHERE ... LEFT THINGS" section of `LOG_CURRENT.md`; the per-practice checklist is
 `wafr_practice_map_2026-10-29.md`; the three High-risk practice lists (SEC 36, OPS 11, REL 37) are in `LOG_CURRENT.md`, verbatim.
 
 1. **Before saying a WAFR fact was never recorded: `git fetch --all --prune`, then `git log --all -S "<string>"` with no pathspec.** A record on
@@ -1212,6 +1212,14 @@ branch.** The gate is ZERO High-risk issues in Security, Operational Excellence 
    purpose; WAF could move SEC5 at most and is deferred (decided 2026-10-29). Both reopen only on new evidence.
 5. **A document is not evidence until it is adopted.** The DR plan, game day plan, availability target and operating model under `docs/` are
    DRAFT with CONFIRM items only Andrew can answer. The same goes for any RTO, RPO or availability number: a proposal is not a commitment.
+6. **"Question does not apply to this workload" removes a question from the High count the moment it is saved** (proved on REL 2, 2026-10-29,
+   Reliability High 10 to 9). It is honest ONLY where every unmet practice assumes something the workload does not have (REL 2: no VPC). Never
+   propose it for a question whose practices apply, and SEC5 is not such a case (the public API Gateway endpoint is a network surface).
+7. **A change to the Stripe webhook, or any other payment path, is pinned first and ships dark.** `relayshield_stripe_webhook.py` had no tests
+   until 2026-10-29: `test_stripe_webhook_queue_mode.py` class `Synchronous` pins today's behaviour and must stay green. New behaviour sits
+   behind a Lambda environment flag that is OFF on deploy, with its own separate `--step enable` and `--step disable` in the tool (never in the
+   default run), and enabling must MERGE into the existing environment because `update_function_configuration` replaces all of it.
+   Order: merge and let the deploy run, apply the plumbing, then enable. Detail: `LOG_CURRENT.md`, "REL 4".
 
 ## Writing conventions
 

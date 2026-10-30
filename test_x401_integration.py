@@ -389,8 +389,23 @@ class Telemetry(Base):
         self.assertEqual(row["verifier_type"], "x401")
         self.assertEqual(row["rejection_reason"], "mandate_exceeded")
         self.assertEqual(row["issuer_hash"], vt.hash_id(ISSUER))
-        self.assertNotIn("500", json.dumps(row, default=str))
+        # Compare field VALUES, never a substring of the serialised row: the row holds a random
+        # uuid and a timestamp, and "500" occurs inside those by chance (it failed the deploy
+        # gate on main, 2026-10-30).
+        self.assertNotIn(500, row.values())
+        self.assertNotIn("500", row.values())
         self.assertNotIn("shop.example", json.dumps(row, default=str))
+
+    def test_the_amount_check_is_not_fooled_by_digits_inside_a_random_id(self):
+        import uuid
+        fixed = uuid.UUID("ba1b2914-e91a-4d3e-8d91-96d534c50088")
+        with unittest.mock.patch.object(vt.uuid, "uuid4", lambda: fixed):
+            resp, written, _ = self._run(x401_request(transaction=tx(amount=500)))
+        self.assertEqual(resp["statusCode"], 403)
+        row = written[0]
+        self.assertIn("500", json.dumps(row, default=str))
+        self.assertNotIn(500, row.values())
+        self.assertNotIn("500", row.values())
 
     def test_an_accept_touches_no_table(self):
         resp, written, reads = self._run(x401_request())

@@ -114,8 +114,22 @@ on:
   workflow_dispatch:  # Allow manual trigger from GitHub UI
 
 jobs:
+  # Added 2026-10-29 (WAFR REL 8: integrate functional testing as part of your deployment). The same suite
+  # tests.yml runs on every pull request, run again here so a push to main cannot reach AWS without it.
+  # A manual run (workflow_dispatch) deliberately BYPASSES the gate: it is the emergency path, used when the
+  # suite itself is what is broken, and it prints a notice so the bypass is never silent.
+  tests:
+    name: Test suite (deploy gate)
+    if: github.event_name != 'workflow_dispatch'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/tests.yml
+
   deploy:
     name: Deploy to AWS Lambda
+    needs: tests
+    # always() so a SKIPPED gate (manual run) does not skip the deploy; a FAILED gate still does.
+    if: ${{ always() && (needs.tests.result == 'success' || (github.event_name == 'workflow_dispatch' && needs.tests.result == 'skipped')) }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write   # Required for OIDC
@@ -123,6 +137,11 @@ jobs:
 
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      # Functions that get an immutable published version and a 'live' alias after every deploy that passes the
+      # import probe (WAFR REL 8). Kept short on purpose: every version is stored code, and the deploy role needs
+      # an explicit grant per function (iam_github_deploy_versions.json). test_deploy_versions.py keeps this list,
+      # that file and rollback_lambda.yml in agreement.
+      VERSIONED_FUNCS: "relayshield-api relayshield-bundle-fulfillment relayshield-stripe-webhook relayshield-mcp-http"
 
     steps:
       - name: Checkout code
@@ -132,6 +151,11 @@ jobs:
           # single commit; the moment a merge lands, the base this job needs is
           # github.event.before, which can be any distance back.
           fetch-depth: 0
+
+      - name: Notice that the test gate was bypassed
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "::notice::Manual run: the test-suite gate was NOT run. Use this path only when the suite itself is what is broken."
 
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
@@ -405,6 +429,42 @@ jobs:
           if [ -n "$FAILED" ]; then
             echo "::error::Broken after deploy:$FAILED"
             exit 1
+          fi
+
+      # Added 2026-10-29. Runs only after the import probe above passed (a failed probe fails the job first), so
+      # a version is never cut from code that does not import. It NEVER fails the deploy: the code is already
+      # live, and a missing IAM grant must not turn a good deploy red. It does say so loudly, with the fix.
+      #
+      # WHAT THIS DOES NOT DO, stated so nobody ticks a practice it does not satisfy: API Gateway still invokes the
+      # unqualified function, so the 'live' alias is a record of what was deployed and not yet the thing serving
+      # traffic. The rollback that works today is rollback_lambda.yml, which restores a version's CODE to the
+      # function. Pointing the API integration at the alias is a separate, deliberate change.
+      - name: Publish a version and move the live alias
+        if: steps.changes.outputs.files != ''
+        run: |
+          [ -f deployed_funcs.txt ] || { echo "nothing deployed"; exit 0; }
+          SKIPPED=""
+          while read -r FUNC || [ -n "$FUNC" ]; do
+            [ -n "$FUNC" ] || continue
+            case " $VERSIONED_FUNCS " in *" $FUNC "*) ;; *) continue ;; esac
+            VER=$(aws lambda publish-version --function-name "$FUNC" --region us-east-1 \
+                    --description "$GITHUB_SHA" --query Version --output text 2>publish.err) || {
+              echo "::warning::$FUNC was deployed but NO VERSION was published: $(tr '\n' ' ' < publish.err)"
+              SKIPPED="$SKIPPED $FUNC"; continue; }
+            if aws lambda update-alias --function-name "$FUNC" --name live --function-version "$VER" \
+                 --region us-east-1 >/dev/null 2>alias.err; then
+              echo "✅ $FUNC version $VER, alias live -> $VER"
+            elif aws lambda create-alias --function-name "$FUNC" --name live --function-version "$VER" \
+                 --region us-east-1 >/dev/null 2>>alias.err; then
+              echo "✅ $FUNC version $VER, alias live created -> $VER"
+            else
+              echo "::warning::$FUNC version $VER published but the live alias could not be moved: $(tr '\n' ' ' < alias.err)"
+              SKIPPED="$SKIPPED $FUNC"
+            fi
+          done < deployed_funcs.txt
+          if [ -n "$SKIPPED" ]; then
+            echo "::warning::Versioning incomplete for:$SKIPPED. The deploys themselves succeeded. Likely cause: the deploy role lacks lambda:PublishVersion/CreateAlias/UpdateAlias. Fix: sh tools/apply_deploy_versions_policy.sh"
+            echo "### Versioning incomplete for:$SKIPPED" >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: No Lambda changes detected

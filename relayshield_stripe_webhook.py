@@ -48,8 +48,15 @@ secrets_client = boto3.client("secretsmanager")
 dynamodb = boto3.resource("dynamodb")
 scheduler_client = boto3.client("scheduler")
 kms_client = boto3.client("kms")
+sqs_client = boto3.client("sqs")
 
 USERS_TABLE = "relayshield_users"
+
+# Optional queue mode (WAFR REL 4, "Implement loosely coupled dependencies"). OFF unless the Lambda environment
+# variable STRIPE_EVENT_QUEUE_URL is set, so deploying this code changes nothing by itself. When on, a verified
+# checkout.session.completed is put on this queue and acknowledged with 200; this same function, invoked by SQS,
+# does the processing. Removing the variable restores the synchronous path, and the consumer keeps draining.
+STRIPE_EVENT_QUEUE_NAME = "relayshield-stripe-events"
 
 # KMS key alias for field-level phone encryption
 KMS_PHONE_KEY_ALIAS = "alias/relayshield-data-key"
@@ -743,15 +750,52 @@ def send_welcome_email_ses(to_email: str, subscription_tier: str) -> bool:
 # Lambda handler
 # ---------------------------------------------------------------------------
 
+def enqueue_checkout_event(queue_url: str, stripe_event: dict) -> dict:
+    """Queue mode, intake side. 200 once the event is durably queued; 500 if it is not, so Stripe retries
+    (it retries for up to three days). Nothing is processed here when queueing fails: a second, inline attempt
+    would risk onboarding the same customer twice."""
+    try:
+        sqs_client.send_message(
+            QueueUrl=queue_url,
+            MessageBody=json.dumps({"v": 1, "event_id": stripe_event.get("id", ""), "event": stripe_event}),
+        )
+    except Exception as exc:
+        logger.exception("Could not queue Stripe event %s: %s", stripe_event.get("id", ""), exc)
+        return {"statusCode": 500, "body": json.dumps({"error": "Could not queue event"})}
+    logger.info("Queued Stripe event %s for processing", stripe_event.get("id", ""))
+    return {"statusCode": 200, "body": json.dumps({"message": "Queued for processing"})}
+
+
+def process_queue_batch(event: dict) -> dict:
+    """Queue mode, consumer side. The signature was verified at the door and is NOT re-checked: its 5-minute
+    tolerance is meant for a request that has just arrived, not for a message that may have waited in a queue.
+    What authorises a record is where it came from, so only this queue's SQS records are accepted. Any failure
+    raises, which makes SQS retry the message and, after the redrive limit, move it to the dead-letter queue.
+    Returning normally deletes the message, so a failed message must never return."""
+    records = event.get("Records") or []
+    for record in records:
+        if record.get("eventSource") != "aws:sqs" or not str(record.get("eventSourceARN", "")).endswith(":" + STRIPE_EVENT_QUEUE_NAME):
+            raise ValueError("Refusing a record that did not come from the Stripe event queue")
+        stripe_event = json.loads(record["body"])["event"]
+        result = process_checkout_event(stripe_event)
+        if result.get("statusCode", 500) >= 500:
+            raise RuntimeError(f"Processing failed for message {record.get('messageId', '')}: {result.get('body', '')}")
+    return {"processed": len(records)}
+
+
 def lambda_handler(event, context):
     """
-    Entry point for API Gateway → Lambda invocation.
+    Entry point for API Gateway → Lambda invocation, and (queue mode) for SQS invocation.
 
     API Gateway passes:
       event["body"]            — raw request body (string, may be base64)
       event["headers"]         — HTTP headers dict
       event["isBase64Encoded"] — True if body is base64-encoded
+    SQS passes event["Records"]; API Gateway fixes the top-level keys of its event, so a caller cannot send one.
     """
+    if "Records" in event:
+        return process_queue_batch(event)
+
     # --- Decode raw body (needed for signature verification) ---
     raw_body = event.get("body") or ""
     if event.get("isBase64Encoded"):
@@ -809,6 +853,15 @@ def lambda_handler(event, context):
             "body": json.dumps({"message": f"Event type '{event_type}' acknowledged, not processed"}),
         }
 
+    queue_url = os.environ.get("STRIPE_EVENT_QUEUE_URL", "")
+    if queue_url:
+        return enqueue_checkout_event(queue_url, stripe_event)
+    return process_checkout_event(stripe_event)
+
+
+def process_checkout_event(stripe_event: dict) -> dict:
+    """Everything that happens to a verified checkout.session.completed. Unchanged from when it was inline in
+    lambda_handler; moved so the queue consumer can call it. Returns the HTTP-shaped response."""
     session = stripe_event.get("data", {}).get("object", {})
     session_id = session.get("id", "unknown")
     logger.info("Processing checkout.session.completed — session_id=%s", session_id)

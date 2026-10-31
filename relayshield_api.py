@@ -17958,6 +17958,31 @@ class _DynamoBindingStore:
                 return False
             raise
 
+    def record_verdict(self, binding_id, verdict, policy_action,
+                       system_outcome, verdict_id):
+        try:
+            self._table.update_item(
+                Key={"binding_id": binding_id},
+                UpdateExpression=(
+                    "SET last_verdict = :v, last_policy_action = :p, "
+                    "last_system_outcome = :s, last_verdict_id = :id, "
+                    "last_settled_at = :now"),
+                ConditionExpression="tenant_id = :tenant",
+                ExpressionAttributeValues={
+                    ":v": verdict,
+                    ":p": policy_action,
+                    ":s": system_outcome,
+                    ":id": verdict_id,
+                    ":tenant": self._tenant_id,
+                    ":now": int(time.time()),
+                },
+            )
+        except Exception as exc:
+            if _fx_cond_code(exc) == "ConditionalCheckFailedException":
+                return False
+            raise
+        return True
+
 
 def _corpus_screen_result(**kwargs):
     """Map relayshield_tap_ti.screen onto a library ScreenResult.
@@ -18299,6 +18324,32 @@ def _settle_core(params: dict, tenant_id: str) -> dict:
         # issuance; the rail reads it here and enforces satisfaction
         # before settling.
         data["step_up"] = binding.record.get("step_up") or {}
+    decision_text = str(decision.decision or "").lower()
+    reason_list = [str(r) for r in decision.reason_codes]
+    if decision_text == "allow":
+        verdict = "pass"
+        policy_action = "allow"
+        system_outcome = "completed"
+    elif any("ALREADY_CONSUMED" in r for r in reason_list):
+        verdict = "block"
+        policy_action = "block_call"
+        system_outcome = "not_completed"
+    else:
+        verdict = "block"
+        policy_action = "block_call"
+        system_outcome = "blocked"
+    data["verdict"] = verdict
+    data["policy_action"] = policy_action
+    data["system_outcome"] = system_outcome
+    data["verdict_id"] = "verdict_" + (decision.binding_id or binding_id)
+    try:
+        store = getattr(binder, "_store", None)
+        if store is not None and hasattr(store, "record_verdict"):
+            store.record_verdict(
+                decision.binding_id or binding_id, verdict,
+                policy_action, system_outcome, data["verdict_id"])
+    except Exception as exc:
+        logger.exception("intent verdict persistence failed: %s", exc)
     return _ok(data)
 
 

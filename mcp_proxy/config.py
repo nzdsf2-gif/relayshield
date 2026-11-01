@@ -13,6 +13,8 @@ class ProxyConfig:
         # Upstream MCP server to forward clean requests to.
         # For HTTP upstream: full URL e.g. https://example.com/mcp
         self.upstream_url = os.environ.get("MCP_PROXY_UPSTREAM", "")
+        _intent_mode = os.environ.get("MCP_PROXY_INTENT_BINDING_MODE", "off").strip().lower()
+        self.intent_binding_mode = _intent_mode if _intent_mode in ("off", "audit", "enforce") else "off"
 
         # Port the proxy listens on.
         self.listen_port = int(os.environ.get("MCP_PROXY_PORT", "8090"))

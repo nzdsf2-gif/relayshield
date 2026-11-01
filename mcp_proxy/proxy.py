@@ -46,7 +46,7 @@ def _forward_jsonrpc(upstream_url: str, payload: dict, timeout: float = 30.0) ->
     req = urllib.request.Request(
         upstream_url,
         data=data,
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"},
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:

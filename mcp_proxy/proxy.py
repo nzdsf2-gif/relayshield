@@ -1237,6 +1237,29 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         }))
             except Exception as exc:
                 log.error("kill-chain result hook error: %s", exc)
+        # V8 settle hook, false completion: upstream error plus a
+        # completion claim in the text that would be delivered.
+        # Delivering that claim would be a false completion, the
+        # central Eon failure mode. Block it, do not deliver it,
+        # and never consume a TAP binding on a post-call block.
+        if _is_false_completion(upstream_resp):
+            _corr_key = (corr or {}).get("session_key") if isinstance(corr, dict) else None
+            _sess = None
+            if _corr_key:
+                _store = getattr(self.server, "session_bindings", None) or {}
+                _sess = _store.get(_corr_key)
+            log.warning(json.dumps({
+                "event": "settle_outcome",
+                "tool": tool_name,
+                "upstream": upstream_url,
+                "verdict": "block",
+                "policy_action": "block_call",
+                "system_outcome": "not_completed",
+                "reason": "system_refusal",
+                "binding_id": (_sess or {}).get("binding_id"),
+                "passport_id": (_sess or {}).get("passport_id"),
+            }))
+            return {"kc_result": {"verdict": "block", "sequence": {}, "reasons": ["system_refusal"]}, "evidence": [{"type": "system_refusal", "id": "false-completion", "detail": "upstream error with completion claim"}]}
         if result_verdict.get("verdict") != "flagged":
             return hold
         reasons = result_verdict.get("reasons", [])
@@ -1296,6 +1319,34 @@ class ProxyHandler(BaseHTTPRequestHandler):
             reputation.record_ti_hit(
                 upstream_url,
                 f"kit fingerprint: {result_verdict['kit_ids'][0][:20]}...")
+        # V8 settle hook, injection quarantine: a flagged result
+        # with injection / data leak / malicious indicator is not
+        # delivered, even if the existing flag path would deliver
+        # it. Quarantine the tool for this session, log the settle
+        # outcome, and never consume a TAP binding on quarantine.
+        if _is_injection_result(result_verdict):
+            _corr_key = (corr or {}).get("session_key") if isinstance(corr, dict) else None
+            _sess = None
+            if _corr_key:
+                _store = getattr(self.server, "session_bindings", None) or {}
+                _sess = _store.get(_corr_key)
+                _q = getattr(self.server, "session_quarantined_tools", None)
+                if _q is None:
+                    _q = {}
+                    self.server.session_quarantined_tools = _q
+                _q.setdefault(_corr_key, set()).add(tool_name)
+            log.warning(json.dumps({
+                "event": "settle_outcome",
+                "tool": tool_name,
+                "upstream": upstream_url,
+                "verdict": "quarantine",
+                "policy_action": "quarantine_tool",
+                "system_outcome": "quarantined",
+                "reason": "injection_or_poisoned_result",
+                "binding_id": (_sess or {}).get("binding_id"),
+                "passport_id": (_sess or {}).get("passport_id"),
+            }))
+            return {"kc_result": {"verdict": "block", "sequence": {}, "reasons": ["injection_or_poisoned_result"]}, "evidence": evidence}
         if quarantine.evaluate(upstream_url, evidence=evidence):
             reputation.record_quarantine(
                 upstream_url, "auto-quarantine: poisoned neighbor")
@@ -1505,3 +1556,61 @@ def _intent_mismatch(session, tool_name, arguments):
     # by the recipient and amount checks above, and a general session binding
     # matches by tool class only, via _tool_is_read_only and the gate above.
     return None
+
+
+def _is_false_completion(upstream_resp):
+    """True only for error plus completion claim, the false completion pair.
+
+    Unwraps a JSON-RPC response: the MCP result can be the object
+    itself, or upstream_resp["result"] if upstream_resp is a wrapped
+    JSON-RPC response. Checks isError and error at either level.
+    """
+    if not isinstance(upstream_resp, dict):
+        return False
+    candidates = [upstream_resp]
+    inner = upstream_resp.get("result")
+    if isinstance(inner, dict):
+        candidates.append(inner)
+    error_present = False
+    parts = []
+    for obj in candidates:
+        if obj.get("error"):
+            error_present = True
+        if obj.get("isError") is True:
+            error_present = True
+        for item in obj.get("content", []) or []:
+            if isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+        if isinstance(obj.get("result"), str):
+            parts.append(obj["result"])
+    if not error_present:
+        return False
+    text = " ".join(parts).lower()
+    claims = ("completed", "successfully", "task complete", "payment sent", "paid successfully", "done")
+    return any(word in text for word in claims)
+
+
+def _is_injection_result(result_verdict):
+    """True for a flagged result with injection / leak / malicious signal."""
+    if not isinstance(result_verdict, dict):
+        return False
+    if result_verdict.get("verdict") != "flagged":
+        return False
+    category = str(result_verdict.get("poison_category", "")).lower()
+    if category in ("prompt_injection", "injection", "data_leak", "malicious"):
+        return True
+    reasons = " ".join(str(r) for r in result_verdict.get("reasons", [])).lower()
+    return any(word in reasons for word in ("injection", "prompt injection", "data leak", "exfiltrat", "malicious indicator"))
+
+
+def _settle_result_outcome(upstream_resp, result_verdict, session=None):
+    """Pure settle outcome, for tests and for _screen_result logging.
+
+    Returns a dict with verdict, policy_action, system_outcome, reason,
+    or a clean pass dict. Never consumes a TAP binding.
+    """
+    if _is_false_completion(upstream_resp):
+        return {"verdict": "block", "policy_action": "block_call", "system_outcome": "not_completed", "reason": "system_refusal"}
+    if _is_injection_result(result_verdict):
+        return {"verdict": "quarantine", "policy_action": "quarantine_tool", "system_outcome": "quarantined", "reason": "injection_or_poisoned_result"}
+    return {"verdict": "pass", "policy_action": "allow", "system_outcome": "completed", "reason": None}

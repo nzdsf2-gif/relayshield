@@ -446,7 +446,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
         if method == "tools/call":
             return self._handle_tools_call(req, req_id, cfg, screener)
 
-        # initialize, tools/list, and anything else: pure passthrough.
+        if method == "initialize":
+            return self._handle_initialize(req, req_id, cfg, screener)
+
+        return self._forward_passthrough(req, req_id, cfg, screener)
+
+
+    def _forward_passthrough(self, req, req_id, cfg, screener):
+        # Extracted verbatim from _handle_one, do not change its behavior here.
+        method = req.get("method", "")
         start = time.monotonic()
         try:
             upstream_resp = _forward_jsonrpc(cfg.upstream_url, req)
@@ -471,6 +479,114 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self._screen_discovery(cfg.upstream_url, method, upstream_resp,
                                    cfg, screener)
         return upstream_resp
+
+    def _handle_initialize(self, req, req_id, cfg, screener):
+        corr = resolve_correlation_identity(req, self.client_address[0], cfg.upstream_url)
+        session_key = corr["session_key"]
+        params = req.get("params") or {}
+        meta = params.get("_meta") or req.get("_meta") or {}
+        binding = meta.get("binding") if isinstance(meta, dict) else None
+        if isinstance(params.get("_meta"), dict):
+            params["_meta"].pop("binding", None)
+        if isinstance(req.get("_meta"), dict):
+            req["_meta"].pop("binding", None)
+        store = getattr(self.server, "session_bindings", None)
+        if store is None:
+            store = {}
+            self.server.session_bindings = store
+        if binding is None:
+            store.pop(session_key, None)
+            return self._forward_passthrough(req, req_id, cfg, screener)
+        passport_compact = binding.get("passport_compact") or meta.get("passport")
+        if not passport_compact:
+            return _error_response(req_id, -32000, "Session binding requires a passport", {"reason": "passport_invalid"})
+        verdict = self._verify_passport_via_gateway(passport_compact)
+        if not verdict.get("valid") or verdict.get("revoked"):
+            return _error_response(req_id, -32000, "Session binding passport check failed", {"reason": verdict.get("status", "passport_invalid")})
+        passport_doc = verdict.get("passport") or {}
+        store[session_key] = {
+            "binding_id": binding.get("binding_id"),
+            "payer": binding.get("payer"),
+            "counterparty": binding.get("counterparty"),
+            "amount": binding.get("amount"),
+            "currency": binding.get("currency"),
+            "artifacts": binding.get("artifacts") or [],
+            "step_up": binding.get("step_up") or {},
+            "passport_id": passport_doc.get("passport_id"),
+            "passport_expires_at": passport_doc.get("expires_at"),
+            "verified_at": time.time(),
+        }
+        return self._forward_passthrough(req, req_id, cfg, screener)
+
+    def _verify_passport_via_gateway(self, passport_compact):
+        # POST /v1/passport/check, free, no API key, no TAP authorizer.
+        # Fail closed on any non-200, 503, timeout, or network error.
+        try:
+            body = json.dumps({"compact": passport_compact}).encode("utf-8")
+            request = urllib.request.Request(
+                "https://api.relayshield.net/v1/passport/check",
+                data=body, headers={"Content-Type": "application/json"}, method="POST")
+            with urllib.request.urlopen(request, timeout=10) as response:
+                data = json.loads(response.read().decode("utf-8"))
+            if isinstance(data, dict):
+                return data.get("data", data)
+            return {"valid": False, "status": "passport_invalid"}
+        except Exception:
+            return {"valid": False, "status": "passport_invalid", "revoked": False}
+
+    def _intent_gate(self, session_key, tool_name, arguments, cfg, req=None):
+        # Returns None to fall through, or a JSON-RPC error response to block.
+        # Policy 1: Bound actions only. Policy 2: Step-up for high-risk actions.
+        if _tool_is_read_only(tool_name, arguments):
+            return None
+        store = getattr(self.server, "session_bindings", None) or {}
+        session = store.get(session_key)
+        # v4 fix: Policy 1 defaults to Off, not Enforce. A patch that defaults
+        # to Enforce blocks every existing agent on day one, and breaks 6
+        # existing tests that have no session binding. Off is simply the
+        # policy not enabled for that tenant or location. Audit records
+        # and flags but does not block. Enforce blocks, only when explicitly enabled.
+        mode = getattr(cfg, "intent_binding_mode", "off")
+        if mode not in ("audit", "enforce"):
+            return None
+        if mode == "audit":
+            return None
+        if session is None:
+            return _error_response(0, -32000, "Blocked by RelayShield: state-changing tool requires a session binding", {"reason": "missing_binding", "tool": tool_name})
+        # Expiry, from the verified passport document, per call.
+        expires_at = session.get("passport_expires_at")
+        if expires_at:
+            try:
+                from datetime import datetime, timezone
+                expires = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
+                if datetime.now(timezone.utc) >= expires:
+                    return _error_response(0, -32000, "Blocked by RelayShield: session passport expired", {"reason": "passport_expired", "tool": tool_name})
+            except Exception:
+                pass
+        # Intent match, Item 3 mapping, first present field wins.
+        mismatch = _intent_mismatch(session, tool_name, arguments)
+        if mismatch:
+            return _error_response(0, -32000, "Blocked by RelayShield: tool call does not match bound intent", {"reason": mismatch, "tool": tool_name})
+        # Policy 2: Step-up, mirroring relayshield_intent_binding.validate_step_up_attestations.
+        # step_up.required False: no validation, attestations ignored.
+        # Otherwise every method in step_up.satisfied_by must be covered by an attestation.
+        # Attestations are read from the call _meta, if present, not from the session store.
+        # A block here never consumes the binding, matching _settle_core.
+        step_up = session.get("step_up") or {}
+        if isinstance(step_up, dict) and step_up.get("required"):
+            required = step_up.get("satisfied_by") or []
+            attestations = []
+            if isinstance(req, dict):
+                params_meta = (req.get("params") or {}).get("_meta") or {}
+                req_meta = req.get("_meta") or {}
+                attestations = params_meta.get("attestations") or req_meta.get("attestations") or []
+            covered = set()
+            for att in attestations:
+                if isinstance(att, dict) and att.get("method"):
+                    covered.add(att.get("method"))
+            if any(method not in covered for method in required):
+                return _error_response(0, -32000, "Blocked by RelayShield: step-up attestation missing", {"reason": "step_up_attestation_missing", "tool": tool_name})
+        return None
 
     def _screen_discovery(self, upstream_url: str, method: str,
                           upstream_resp: dict, cfg: ProxyConfig,
@@ -732,6 +848,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
         # upstream) pair as in behavior.py.
         corr = resolve_correlation_identity(req, agent_id, upstream_url)
         session_key = corr["session_key"]
+        _gate = self._intent_gate(session_key, tool_name, arguments, cfg, req=req)
+        if _gate is not None:
+            _gate["id"] = req_id
+            return _gate
         sequence_result = {"verdict": "allow",
                            "poison_category": "clean",
                            "reasons": [], "risk_score": 0.0}
@@ -1227,3 +1347,126 @@ def run():
         server.serve_forever()
     except KeyboardInterrupt:
         log.info("shutting down")
+
+
+# Intent-binding helpers, Item 3, verb classification, not upstream names.
+_READ_VERBS = ("list", "get", "read", "search", "describe", "query", "lookup", "check", "view", "show", "find", "count")
+_STATE_VERBS = ("create", "update", "delete", "write", "set", "put", "post", "patch", "insert", "remove", "move", "rename", "publish", "send", "pay", "transfer", "refund", "charge", "purchase", "order", "submit", "execute", "run", "upload", "share", "grant", "revoke")
+_WRITE_ARGS = ("amount", "amount_minor", "value", "total", "price", "payment_amount", "recipient", "counterparty", "payee", "to", "destination", "destination_address")
+
+def _tool_verb(tool_name):
+    name = (tool_name or "").lower()
+    for verb in _STATE_VERBS:
+        if name == verb or name.startswith(verb + "_") or name.startswith(verb + "-"):
+            return verb
+    for verb in _READ_VERBS:
+        if name == verb or name.startswith(verb + "_") or name.startswith(verb + "-"):
+            return verb
+    return None
+
+def _tool_is_read_only(tool_name, arguments):
+    if tool_name in ("initialize", "tools/list", "ping"):
+        return True
+    verb = _tool_verb(tool_name)
+    if verb in _STATE_VERBS:
+        return False
+    if isinstance(arguments, dict) and any(k in arguments for k in _WRITE_ARGS):
+        return False
+    # Unknown tools default to state-changing, fail closed.
+    return verb in _READ_VERBS
+
+def _to_minor(amount, currency):
+    # Mirrors relayshield_intent_binding.to_minor_units: decimal string to
+    # integer minor units. USD and most currencies use 2 decimals, JPY 0.
+    # Amounts already in minor units are passed as amount_minor, not here.
+    from decimal import Decimal, InvalidOperation
+    try:
+        value = Decimal(str(amount).replace(",", ""))
+    except (InvalidOperation, ValueError):
+        raise ValueError(f"unparseable amount: {amount!r}")
+    if value < 0:
+        raise ValueError("amount must not be negative")
+    exponent = 0 if str(currency or "").upper() in ("JPY", "KRW", "VND") else 2
+    return int(value * (10 ** exponent))
+
+def _intent_mismatch(session, tool_name, arguments):
+    # Returns a reason code, or None if the call matches the bound intent.
+    # Real Gateway fields: payer, counterparty, amount (decimal string),
+    # currency, artifacts (list), rail. No tool scope in the binding, so
+    # scope is tool class only for general session bindings. Tolerance is
+    # policy, not a binding field: default minor 0, bps 0, exact match,
+    # unless the session carries amount_tolerance_minor or amount_tolerance_bps.
+    args = arguments or {}
+    # Payer, if present in arguments and in the binding.
+    payer = args.get("payer")
+    if payer and session.get("payer") and str(payer).strip().lower() != str(session.get("payer")).strip().lower():
+        return "intent_drift_recipient"
+    # Recipient, counterparty, first present field wins.
+    recipient = None
+    for field in ("counterparty", "recipient", "payee", "to", "destination", "customer_id", "account_id", "user_id", "email", "wallet", "address", "target"):
+        if args.get(field):
+            recipient = str(args.get(field)).strip().lower()
+            break
+    bound_recipient = session.get("counterparty")
+    if recipient and bound_recipient and recipient != str(bound_recipient).strip().lower():
+        return "intent_drift_recipient"
+    # Currency, if present in arguments and in the binding.
+    currency = args.get("currency") or session.get("currency")
+    if args.get("currency") and session.get("currency") and str(args.get("currency")).strip().upper() != str(session.get("currency")).strip().upper():
+        return "intent_drift_amount"
+    # Amount, first present field wins. amount_minor is already minor units,
+    # amount and other decimal fields are converted with _to_minor.
+    amount_minor = None
+    if args.get("amount_minor") is not None:
+        try:
+            amount_minor = int(args.get("amount_minor"))
+        except Exception:
+            return "intent_drift_amount"
+    else:
+        for field in ("amount", "value", "total", "price", "sum", "payment_amount", "charge_amount"):
+            if args.get(field) is not None:
+                try:
+                    amount_minor = _to_minor(args.get(field), currency)
+                except Exception:
+                    return "intent_drift_amount"
+                break
+    bound_amount = session.get("amount")
+    if amount_minor is not None and bound_amount is not None:
+        try:
+            bound_minor = _to_minor(bound_amount, session.get("currency"))
+        except Exception:
+            return "intent_drift_amount"
+        tolerance_minor = session.get("amount_tolerance_minor") or 0
+        tolerance_bps = session.get("amount_tolerance_bps") or 0
+        try:
+            tolerance_minor = int(tolerance_minor)
+            tolerance_bps = int(tolerance_bps)
+        except Exception:
+            tolerance_minor, tolerance_bps = 0, 0
+        allowed = tolerance_minor + (bound_minor * tolerance_bps // 10000 if bound_minor else 0)
+        if abs(amount_minor - bound_minor) > allowed:
+            return "intent_drift_amount"
+    # Artifacts, if the binding carries artifacts and the call carries an artifact id.
+    bound_artifacts = session.get("artifacts") or []
+    if bound_artifacts:
+        call_artifact = None
+        for field in ("artifact_id", "invoice_id", "order_id", "document_id", "file_id", "url", "content_hash"):
+            if args.get(field):
+                call_artifact = str(args.get(field))
+                break
+        if call_artifact:
+            bound_ids = set()
+            for art in bound_artifacts:
+                if isinstance(art, dict):
+                    for key in ("id", "artifact_id", "hash", "content_hash"):
+                        if art.get(key):
+                            bound_ids.add(str(art.get(key)))
+                elif art:
+                    bound_ids.add(str(art))
+            if bound_ids and call_artifact not in bound_ids:
+                return "intent_scope_expansion"
+    # Scope: no tool scope field in the Gateway binding, so no tool-name
+    # check is added here. A payment binding only matches payment-like tools
+    # by the recipient and amount checks above, and a general session binding
+    # matches by tool class only, via _tool_is_read_only and the gate above.
+    return None

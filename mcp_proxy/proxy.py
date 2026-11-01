@@ -563,6 +563,41 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     return _error_response(0, -32000, "Blocked by RelayShield: session passport expired", {"reason": "passport_expired", "tool": tool_name})
             except Exception:
                 pass
+        # Per-call revocation check, small cascade piece, Option B only.
+        # Passport status is free, no API key, no TAP authorizer.
+        # Cache is 60 seconds, never caching revoked as valid.
+        # A known revoked status blocks, a lookup failure logs and
+        # falls back to expiry-only, so a status outage does not
+        # block every tool call, but a known revocation always does.
+        _passport_id = session.get("passport_id")
+        if _passport_id:
+            _now = time.time()
+            _cache = getattr(self.server, "passport_status_cache", None)
+            if _cache is None:
+                _cache = {}
+                self.server.passport_status_cache = _cache
+            _cached = _cache.get(_passport_id)
+            _status = None
+            if _cached and _cached.get("status") == "revoked":
+                _status = "revoked"
+            elif _cached and (_now - _cached.get("checked_at", 0)) < 60:
+                _status = _cached.get("status")
+            else:
+                try:
+                    _url = f"https://api.relayshield.net/v1/passport/{_passport_id}/status"
+                    _req = urllib.request.Request(_url, method="GET")
+                    with urllib.request.urlopen(_req, timeout=5) as _resp:
+                        _data = json.loads(_resp.read().decode("utf-8"))
+                    _status = (_data.get("data", _data) or {}).get("status") if isinstance(_data, dict) else None
+                    if _status:
+                        _cache[_passport_id] = {"status": _status, "checked_at": _now}
+                except Exception as _exc:
+                    log.warning("passport status lookup failed for %s: %s", _passport_id, _exc)
+                    _status = None
+            if _status == "revoked":
+                return _error_response(0, -32000, "Blocked by RelayShield: session passport revoked", {"reason": "passport_revoked", "tool": tool_name})
+            if _status == "expired":
+                return _error_response(0, -32000, "Blocked by RelayShield: session passport expired", {"reason": "passport_expired", "tool": tool_name})
         # Intent match, Item 3 mapping, first present field wins.
         mismatch = _intent_mismatch(session, tool_name, arguments)
         if mismatch:

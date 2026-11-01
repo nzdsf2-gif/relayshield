@@ -14516,6 +14516,64 @@ def handle_passport_check(params: dict) -> dict:
     return _ok(data)
 
 
+def handle_passport_revoke(params: dict) -> dict:
+    """POST /v1/passport/revoke: customer-exposed passport revocation.
+
+    Free, no x402 payment, no TAP authorizer, same pattern as check.
+    Body: {"compact": "<passport compact>", "reason": "optional"}.
+    Returns _ok with passport_id, status revoked, and revoked_at.
+    """
+    signer = _passport_signer()
+    if signer is None:
+        return _err("Passport revocation is not configured on this deployment.", 503)
+    params = params or {}
+    compact = params.get("compact")
+    if not isinstance(compact, str) or not compact:
+        return _err("compact is required: the passport transport string.", 400)
+    verdict = _passport.verify_passport(compact, signer.public_key())
+    if not verdict.get("valid"):
+        return _err(f"Passport verification failed: {verdict.get('status', 'passport_invalid')}.", 400)
+    document = verdict.get("passport")
+    if document is None:
+        return _err("Passport verification failed: no document.", 400)
+    passport_id = document.get("passport_id")
+    if not passport_id:
+        return _err("Passport verification failed: no passport_id.", 400)
+    try:
+        record = _passport_registry_get(passport_id)
+    except Exception as exc:
+        logger.exception("passport registry read failed for %s: %s", passport_id, exc)
+        return _err("Passport registry read failed.", 500)
+    if record is None:
+        return _err("Passport not found in registry.", 404)
+    if record.get("status") == "revoked":
+        return _ok({
+            "passport_id": passport_id,
+            "status": "revoked",
+            "revoked_at": record.get("revoked_at", ""),
+        })
+    try:
+        from datetime import datetime, timezone
+        revoked_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        dynamodb.Table(PASSPORTS_TABLE).update_item(
+            Key={"passport_id": passport_id},
+            UpdateExpression="SET #status = :revoked, revoked_at = :at, revoke_reason = :reason",
+            ExpressionAttributeNames={"#status": "status"},
+            ExpressionAttributeValues={
+                ":revoked": "revoked",
+                ":at": revoked_at,
+                ":reason": str(params.get("reason") or ""),
+            },
+        )
+    except Exception as exc:
+        logger.exception("passport registry revoke failed for %s: %s", passport_id, exc)
+        return _err("Passport revocation failed.", 500)
+    return _ok({
+        "passport_id": passport_id,
+        "status": "revoked",
+        "revoked_at": revoked_at,
+    })
+
 def handle_passport_status(passport_id: str) -> dict:
     """GET /v1/passport/{passport_id}/status: free revocation lookup.
 
@@ -18789,6 +18847,8 @@ def lambda_handler(event: dict, context) -> dict:
         return handle_payg_request(path, method, event)
     if method == "POST" and path == "/v1/passport/check":
         return handle_passport_check(_body(event))
+    if method == "POST" and path == "/v1/passport/revoke":
+        return handle_passport_revoke(_body(event))
     if method == "GET" and path.startswith("/v1/passport/") and path.endswith("/status"):
         return handle_passport_status(path[len("/v1/passport/"):-len("/status")])
 

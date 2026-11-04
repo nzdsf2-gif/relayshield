@@ -787,6 +787,8 @@ def valid_fingerprint_id(value: str) -> bool:
 # On 2026-10-01 he approved knight-office (Huntress 2026-09-01 report:
 # Flask operator console, Cloudflare Turnstile, token-replay engine;
 # surfaced by the family-discovery loop).
+# On 2026-10-28 he approved athena-stealthroute, and on 2026-11-04
+# he approved skyw4lker, both from the weekly kit-family loop.
 # On 2026-10-01 he approved milk-dragon (Group-IB report: AiTM PhaaS kit
 # aka NaiLong, BytePress plugin, real-time 3DS OTP relay; corroborated by
 # Threadlinqs and HuntAegis).
@@ -802,6 +804,8 @@ APPROVED_FAMILIES = frozenset({
     "knight-office",
     "milk-dragon",
     "phantomsub",
+    "athena-stealthroute",
+    "skyw4lker",
 })
 
 

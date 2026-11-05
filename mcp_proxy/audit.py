@@ -93,7 +93,8 @@ class AuditTrail:
                arguments: dict, decision: str, poison_category: str,
                reasons: list = None, evidence: list = None,
                risk_score: float = 0.0, policy_decision: str = "",
-               duration_ms: float = 0.0) -> dict:
+               duration_ms: float = 0.0, tenant_id: str = "",
+               binding_id: str = "", location_id: str = "") -> dict:
         """Append one audit entry. Returns the entry."""
         args_hash = hashlib.sha256(
             _canonical(arguments or {})).hexdigest()
@@ -115,6 +116,9 @@ class AuditTrail:
                 "risk_score": round(risk_score, 2),
                 "policy_decision": policy_decision,
                 "duration_ms": round(duration_ms, 2),
+                "tenant_id": tenant_id or "",
+                "binding_id": binding_id or "",
+                "location_id": location_id or "",
                 "prev_hash": prev_hash,
             }
             entry["entry_hash"] = _entry_hash(entry)

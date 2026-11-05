@@ -378,6 +378,13 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 self.server.kill_chain_history.persist_path
             self._send_json(result)
             return
+        if self.path == "/_rs/tenant-policies":
+            self._send_json({
+                "tenant_policies": getattr(self.server, "tenant_policies", None) or {},
+                "tenant_policy_cache": getattr(self.server, "tenant_policy_cache", None) or {},
+                "tenant_policy_errors": getattr(self.server, "tenant_policy_errors", None) or {},
+            })
+            return
         if self.path == "/_rs/policy":
             self._send_json(self.server.policy.summary())
             return
@@ -504,6 +511,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
         if not verdict.get("valid") or verdict.get("revoked"):
             return _error_response(req_id, -32000, "Session binding passport check failed", {"reason": verdict.get("status", "passport_invalid")})
         passport_doc = verdict.get("passport") or {}
+        # Phase 1 tenant session: Gateway-verified tenant fields.
+        # Passport document wins. A binding-only tenant_id is stored
+        # unverified and must NOT be used for policy resolution.
+        _passport_tenant = passport_doc.get("tenant_id") if isinstance(passport_doc, dict) else None
+        _binding_tenant = binding.get("tenant_id") if isinstance(binding, dict) else None
+        if _passport_tenant and _binding_tenant and _passport_tenant != _binding_tenant:
+            return _error_response(req_id, -32000, "Session binding tenant mismatch", {"reason": "passport_invalid"})
+        _tenant_verified = bool(_passport_tenant)
+        _tenant_id = _passport_tenant or _binding_tenant
         store[session_key] = {
             "binding_id": binding.get("binding_id"),
             "payer": binding.get("payer"),
@@ -515,6 +531,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
             "passport_id": passport_doc.get("passport_id"),
             "passport_expires_at": passport_doc.get("expires_at"),
             "verified_at": time.time(),
+            "tenant_id": _tenant_id,
+            "location_id": (passport_doc.get("location_id") if isinstance(passport_doc, dict) else None) or binding.get("location_id"),
+            "msp_id": (passport_doc.get("msp_id") if isinstance(passport_doc, dict) else None) or binding.get("msp_id"),
+            "distributor_id": (passport_doc.get("distributor_id") if isinstance(passport_doc, dict) else None) or binding.get("distributor_id"),
+            "tenant_verified": _tenant_verified,
         }
         return self._forward_passthrough(req, req_id, cfg, screener)
 
@@ -534,6 +555,77 @@ class ProxyHandler(BaseHTTPRequestHandler):
         except Exception:
             return {"valid": False, "status": "passport_invalid", "revoked": False}
 
+    def _fetch_tenant_policy(self, session):
+        """Phase 2: fetch and cache a resolved tenant policy.
+
+        Returns a policy dict, or None if no fetch is configured
+        or if no last good policy exists. Never raises on fetch
+        failure: the caller keeps last good policy.
+        """
+        tenant_id = (session or {}).get("tenant_id")
+        if not tenant_id:
+            return None
+        location_id = (session or {}).get("location_id")
+        cache_key = f"{tenant_id}:{location_id}" if location_id else tenant_id
+        now = time.time()
+        cache = getattr(self.server, "tenant_policy_cache", None)
+        if cache is None:
+            cache = {}
+            self.server.tenant_policy_cache = cache
+        ttl = getattr(self.server, "tenant_policy_ttl_seconds", None)
+        if ttl is None:
+            try:
+                ttl = int(os.environ.get("MCP_PROXY_TENANT_POLICY_TTL_SECONDS", "60"))
+            except ValueError:
+                ttl = 60
+        entry = cache.get(cache_key)
+        if entry and (now - entry.get("fetched_at", 0) < ttl):
+            return entry.get("policy") or {}
+        policies = getattr(self.server, "tenant_policies", None) or {}
+        last_good = policies.get(cache_key)
+        try:
+            fetcher = getattr(self.server, "tenant_policy_fetcher", None)
+            if fetcher is not None:
+                fetched = fetcher(tenant_id, location_id)
+                if not isinstance(fetched, dict):
+                    raise ValueError("tenant policy fetcher did not return a dict")
+                policy = fetched
+            else:
+                base_url = os.environ.get("MCP_PROXY_TENANT_POLICY_URL", "").strip()
+                if not base_url or "{tenant_id}" not in base_url:
+                    return last_good
+                url = base_url.replace("{tenant_id}", tenant_id)
+                if location_id:
+                    sep = "&" if "?" in url else "?"
+                    url = f"{url}{sep}location_id={location_id}"
+                headers = {"Content-Type": "application/json"}
+                api_key = os.environ.get("MCP_PROXY_TENANT_POLICY_KEY", "").strip()
+                if api_key:
+                    headers["Authorization"] = "Bearer " + api_key
+                request = urllib.request.Request(url, headers=headers, method="GET")
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    data = json.loads(response.read().decode("utf-8"))
+                if isinstance(data, dict):
+                    inner = data.get("data", data)
+                    policy = inner.get("policies") if isinstance(inner, dict) else None
+                    if not isinstance(policy, dict):
+                        policy = inner if isinstance(inner, dict) else {}
+                else:
+                    policy = {}
+        except Exception as exc:
+            log.warning("tenant policy fetch failed for %s: %s", cache_key, exc)
+            errors = getattr(self.server, "tenant_policy_errors", None)
+            if errors is None:
+                errors = {}
+                self.server.tenant_policy_errors = errors
+            errors[cache_key] = str(exc)
+            return last_good
+        cache[cache_key] = {"policy": policy, "fetched_at": now, "error": None}
+        if not hasattr(self.server, "tenant_policies") or self.server.tenant_policies is None:
+            self.server.tenant_policies = {}
+        self.server.tenant_policies[cache_key] = policy
+        return policy
+
     def _intent_gate(self, session_key, tool_name, arguments, cfg, req=None):
         # Returns None to fall through, or a JSON-RPC error response to block.
         # Policy 1: Bound actions only. Policy 2: Step-up for high-risk actions.
@@ -546,7 +638,28 @@ class ProxyHandler(BaseHTTPRequestHandler):
         # existing tests that have no session binding. Off is simply the
         # policy not enabled for that tenant or location. Audit records
         # and flags but does not block. Enforce blocks, only when explicitly enabled.
-        mode = getattr(cfg, "intent_binding_mode", "off")
+        # Phase 2 tenant policy resolution. Verified tenant only.
+        # _fetch_tenant_policy populates server.tenant_policies from
+        # the console, with cache and last-good fallback. Unverified
+        # or missing tenant falls back to the global env mode,
+        # preserving dedicated per-SMB behavior.
+        _session_for_mode = store.get(session_key) or {}
+        if _session_for_mode.get("tenant_verified") and _session_for_mode.get("tenant_id"):
+            self._fetch_tenant_policy(_session_for_mode)
+            _tenant_policies = getattr(self.server, "tenant_policies", None) or {}
+            _loc_key = None
+            if _session_for_mode.get("location_id"):
+                _loc_key = f"{_session_for_mode.get('tenant_id')}:{_session_for_mode.get('location_id')}"
+            _tenant_policy = {}
+            if _loc_key and isinstance(_tenant_policies.get(_loc_key), dict):
+                _tenant_policy = _tenant_policies.get(_loc_key) or {}
+            elif isinstance(_tenant_policies.get(_session_for_mode.get("tenant_id")), dict):
+                _tenant_policy = _tenant_policies.get(_session_for_mode.get("tenant_id")) or {}
+            mode = _tenant_policy.get("policy1_mode", "off")
+            if mode not in ("audit", "enforce"):
+                mode = "off"
+        else:
+            mode = getattr(cfg, "intent_binding_mode", "off")
         if mode not in ("audit", "enforce"):
             return None
         if mode == "audit":
@@ -731,6 +844,27 @@ class ProxyHandler(BaseHTTPRequestHandler):
             except Exception as exc:
                 log.error("kill-chain pivot register error: %s", exc)
 
+    def _audit_session_fields(self, session_key):
+        """Phase 3a call-site helper: tenant and binding stamps.
+
+        Returns (tenant_id, binding_id, location_id), all strings.
+        Tenant and location are stamped only when the session is
+        Gateway-verified. Binding is stamped whenever present.
+        No session, no tenant, or no binding means empty strings,
+        never an error.
+        """
+        try:
+            session = (getattr(self.server, "session_bindings", None) or {}).get(session_key) or {}
+        except Exception:
+            session = {}
+        if not isinstance(session, dict):
+            return "", "", ""
+        verified = bool(session.get("tenant_verified"))
+        tenant_id = session.get("tenant_id") if verified else ""
+        location_id = session.get("location_id") if verified else ""
+        binding_id = session.get("binding_id") or ""
+        return (tenant_id or "", binding_id or "", location_id or "")
+
     def _handle_tools_call(self, req: dict, req_id, cfg: ProxyConfig,
                            screener: Screener):
         params = req.get("params") or {}
@@ -747,6 +881,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
         # IP is the available signal; deployments with authenticated
         # agents should override this with a stable agent ID.
         agent_id = self.client_address[0]
+        corr = resolve_correlation_identity(req, agent_id, upstream_url)
+        session_key = corr["session_key"]
+        _audit_tenant, _audit_binding, _audit_location = self._audit_session_fields(session_key)
 
         # Fail-closed: quarantined servers get no traffic at all.
         if quarantine.is_quarantined(upstream_url):
@@ -760,6 +897,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 decision="block", poison_category="quarantined_server",
                 reasons=["upstream server is quarantined"],
                 policy_decision="",
+                tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location
             )
             return _error_response(
                 req_id,
@@ -831,6 +969,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     reasons=policy_result.get("reasons", []),
                     evidence=signed.get("evidence", []),
                     policy_decision="deny",
+                    tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location
                 )
                 return _error_response(
                     req_id,
@@ -881,11 +1020,23 @@ class ProxyHandler(BaseHTTPRequestHandler):
         # authenticated agent ID when the deployment stamps one,
         # else the transport session ID, else the (agent IP,
         # upstream) pair as in behavior.py.
-        corr = resolve_correlation_identity(req, agent_id, upstream_url)
-        session_key = corr["session_key"]
+        # corr and session_key moved above, after agent_id, before first audit call (Phase 3a call-site step 2v3)
         _gate = self._intent_gate(session_key, tool_name, arguments, cfg, req=req)
         if _gate is not None:
             _gate["id"] = req_id
+            # Phase 1 gate stamp: tenant and binding, when a session exists.
+            # AuditTrail stamping is Phase 3; this does not change it.
+            try:
+                _gate_session = (getattr(self.server, "session_bindings", None) or {}).get(session_key) or {}
+                if isinstance(_gate, dict) and isinstance(_gate.get("error"), dict):
+                    _gate_data = _gate["error"].get("data")
+                    if isinstance(_gate_data, dict):
+                        if _gate_session.get("tenant_id"):
+                            _gate_data["tenant_id"] = _gate_session.get("tenant_id")
+                        if _gate_session.get("binding_id"):
+                            _gate_data["binding_id"] = _gate_session.get("binding_id")
+            except Exception:
+                pass
             return _gate
         sequence_result = {"verdict": "allow",
                            "poison_category": "clean",
@@ -1002,6 +1153,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 risk_score=behavior_result.get("risk_score", 0.0),
                 policy_decision=policy_decision,
                 duration_ms=total_ms,
+                tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location
             )
             return _error_response(
                 req_id,
@@ -1049,6 +1201,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 risk_score=sequence_result.get("risk_score", 0.0),
                 policy_decision=policy_decision,
                 duration_ms=total_ms,
+                tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location
             )
             # Quarantine coupling (Phase 5 decision, 2026-10-23): a
             # sequence block feeds the quarantine mechanism exactly
@@ -1120,6 +1273,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 risk_score=kc_result.get("risk_score", 0.0),
                 policy_decision=policy_decision,
                 duration_ms=(time.monotonic() - t0) * 1000,
+                tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location
             )
             return _error_response(
                 req_id,
@@ -1147,6 +1301,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             risk_score=behavior_result.get("risk_score", 0.0),
             policy_decision=policy_decision,
             duration_ms=(time.monotonic() - t0) * 1000,
+            tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location
         )
 
         return upstream_resp

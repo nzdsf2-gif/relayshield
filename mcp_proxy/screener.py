@@ -438,7 +438,8 @@ class Screener:
         self.ssrf_screening_enabled = ssrf_screening_enabled
 
     def screen_indicators(self, indicators: dict,
-                          ssrf_check: bool = True) -> dict:
+                          ssrf_check: bool = True,
+                          api_key: str = None) -> dict:
         """Screen extracted indicators. Returns a verdict dict.
 
         Verdict: {"verdict": "allow"|"block"|"unknown",
@@ -509,7 +510,7 @@ class Screener:
         errors = 0
         for url in urls[:10]:  # cap per-call fan-out
             try:
-                result = self._check_url(url)
+                result = self._check_url(url, api_key=api_key)
                 checked += 1
             except Exception as exc:
                 errors += 1
@@ -558,13 +559,13 @@ class Screener:
         worst["cause_codes"] = scored["cause_codes"]
         return worst
 
-    def _check_url(self, url: str) -> dict:
+    def _check_url(self, url: str, api_key: str = None) -> dict:
         """Single URL check via the composite-check API."""
         body = _post_json(
             f"{self.api_base}/v1/composite-check",
             {"url": url},
             timeout=self.timeout,
-            api_key=self.api_key,
+            api_key=api_key if api_key is not None else self.api_key,
         )
         data = body.get("data", body)
         level = str(data.get("level", "unknown")).lower()
@@ -577,7 +578,7 @@ class Screener:
             reasons = [f"composite-check level={level} score={score}"]
         return {"level": level, "score": score, "reasons": reasons}
 
-    def _lookup_kit(self, kit_id: str) -> dict:
+    def _lookup_kit(self, kit_id: str, api_key: str = None) -> dict:
         """Look up a kit fingerprint via the scamkit-match API.
 
         Returns {"kit_id": ..., "family": ..., "verdict": ...} or None
@@ -587,7 +588,7 @@ class Screener:
             f"{self.api_base}/v1/payg/scamkit-match",
             {"kit_id": kit_id},
             timeout=self.timeout,
-            api_key=self.api_key,
+            api_key=api_key if api_key is not None else self.api_key,
         )
         data = body.get("data", body)
         if not data or data.get("verdict") == "no-match":
@@ -599,7 +600,7 @@ class Screener:
             "confidence": data.get("confidence", 0),
         }
 
-    def screen_tool_call(self, tool_name: str, arguments: dict) -> dict:
+    def screen_tool_call(self, tool_name: str, arguments: dict, api_key: str = None) -> dict:
         """Full screening for a tools/call invocation."""
         # Path traversal: check raw arguments before indicator extraction.
         if getattr(self, 'path_traversal_enabled', True):
@@ -628,7 +629,7 @@ class Screener:
             if oauth_verdict is not None:
                 oauth_verdict["tool_name"] = tool_name
                 return oauth_verdict
-        verdict = self.screen_indicators(indicators)
+        verdict = self.screen_indicators(indicators, api_key=api_key)
         verdict["tool_name"] = tool_name
         return verdict
 
@@ -683,7 +684,7 @@ class Screener:
                 }
         return None
 
-    def screen_tool_result(self, result_obj) -> dict:
+    def screen_tool_result(self, result_obj, api_key: str = None) -> dict:
         """Screen an upstream tools/call result for poisoned content.
 
         Checks result text for prompt-injection phrases, embedded
@@ -741,7 +742,7 @@ class Screener:
         worst = None
         for url in urls[:10]:
             try:
-                check = self._check_url(url)
+                check = self._check_url(url, api_key=api_key)
             except Exception as exc:
                 log.warning("result URL screening failed for %s: %s",
                             url, exc)
@@ -782,7 +783,7 @@ class Screener:
         if kit_ids and getattr(self, "kit_lookup_enabled", False):
             for kit_id in kit_ids[:5]:
                 try:
-                    match = self._lookup_kit(kit_id)
+                    match = self._lookup_kit(kit_id, api_key=api_key)
                     if match:
                         kit_evidence.append(match)
                 except Exception as exc:

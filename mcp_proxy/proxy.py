@@ -482,9 +482,27 @@ class ProxyHandler(BaseHTTPRequestHandler):
         # Discovery responses (initialize, tools/list, ...) are screened for the
         # cacheScope / instructions-field attacks. Flag-only: the response is
         # forwarded unchanged either way.
+        _lt_tenant = ""
+        _lt_session = {}
+        _lt_corr = resolve_correlation_identity(req, self.client_address[0], cfg.upstream_url)
+        _lt_session_key = (_lt_corr or {}).get("session_key", "")
+        if _lt_session_key:
+            _lt_session = (getattr(self.server, "session_bindings", None) or {}).get(_lt_session_key) or {}
+            _lt_tenant = self._audit_session_fields(_lt_session_key)[0]
         if method in DISCOVERY_METHODS:
             self._screen_discovery(cfg.upstream_url, method, upstream_resp,
-                                   cfg, screener)
+                                   cfg, screener, tenant_id=_lt_tenant)
+        if method == "tools/list":
+            _lt_tools = (upstream_resp.get("result", {}) or {}).get("tools", [])
+            if isinstance(_lt_tools, list) and _lt_tools:
+                _lt_policy = self._fetch_tenant_policy(_lt_session) or {}
+                _lt_names = [t.get("name", "") for t in _lt_tools if isinstance(t, dict)]
+                _lt_allowed = self.server.policy.allowed_tools(
+                    self.client_address[0], _lt_names, tenant_policy=_lt_policy)
+                _lt_allowed_set = set(_lt_allowed)
+                upstream_resp["result"]["tools"] = [
+                    t for t in _lt_tools
+                    if isinstance(t, dict) and t.get("name", "") in _lt_allowed_set]
         return upstream_resp
 
     def _handle_initialize(self, req, req_id, cfg, screener):
@@ -555,6 +573,70 @@ class ProxyHandler(BaseHTTPRequestHandler):
         except Exception:
             return {"valid": False, "status": "passport_invalid", "revoked": False}
 
+    def _tenant_secrets_store(self):
+        """Phase 3b: lazy per-tenant credentials store."""
+        store = getattr(self.server, "tenant_secrets", None)
+        if store is None:
+            from mcp_proxy.tenant_secrets import TenantSecrets
+            store = TenantSecrets()
+            self.server.tenant_secrets = store
+        return store
+
+    def _sync_tenant_keys(self, tenant_id):
+        """Phase 3b: fetch a tenant's keys from the Worker sync endpoint.
+
+        GET MCP_PROXY_TENANT_KEYS_URL with {tenant_id},
+        authenticated by the proxy bootstrap identity
+        MCP_PROXY_TENANT_POLICY_KEY. The endpoint returns
+        the tenant's keys as JSON, the policy_key,
+        screener_key, and collector_secret either at top
+        level or under "data". What it returns is written
+        into the local file. Returns True if any key was
+        stored, False when sync is unconfigured, the
+        endpoint is unreachable, or it returned no keys.
+        Never raises.
+        """
+        try:
+            url_template = os.environ.get("MCP_PROXY_TENANT_KEYS_URL", "").strip()
+            if not url_template or "{tenant_id}" not in url_template:
+                return False
+            bootstrap = os.environ.get("MCP_PROXY_TENANT_POLICY_KEY", "").strip()
+            if not bootstrap:
+                return False
+            url = url_template.replace("{tenant_id}", str(tenant_id))
+            headers = {"Content-Type": "application/json", "Authorization": "Bearer " + bootstrap}
+            request = urllib.request.Request(url, headers=headers, method="GET")
+            with urllib.request.urlopen(request, timeout=5) as response:
+                data = json.loads(response.read().decode("utf-8"))
+            inner = data.get("data", data) if isinstance(data, dict) else {}
+            if not isinstance(inner, dict):
+                return False
+            store = self._tenant_secrets_store()
+            changed = False
+            for kind in ("policy_key", "screener_key", "collector_secret"):
+                if inner.get(kind):
+                    if store.set(tenant_id, kind, str(inner.get(kind))):
+                        changed = True
+            return changed
+        except Exception as exc:
+            log.warning("tenant keys sync failed for %s: %s", tenant_id, exc)
+            return False
+
+    def _tenant_key(self, tenant_id, kind):
+        """Phase 3b: a tenant's key of the given kind, or None.
+
+        Reads the local file first. When the file has no key
+        for the tenant, tries one sync, then re-checks. The
+        no-tenant path never calls this: it keeps the global
+        key as its default.
+        """
+        store = self._tenant_secrets_store()
+        key = store.get(tenant_id, kind)
+        if key:
+            return key
+        self._sync_tenant_keys(tenant_id)
+        return store.get(tenant_id, kind)
+
     def _fetch_tenant_policy(self, session):
         """Phase 2: fetch and cache a resolved tenant policy.
 
@@ -599,9 +681,22 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     sep = "&" if "?" in url else "?"
                     url = f"{url}{sep}location_id={location_id}"
                 headers = {"Content-Type": "application/json"}
-                api_key = os.environ.get("MCP_PROXY_TENANT_POLICY_KEY", "").strip()
+                api_key = self._tenant_key(tenant_id, "policy_key")
                 if api_key:
                     headers["Authorization"] = "Bearer " + api_key
+                else:
+                    # Fail closed: a verified tenant with no policy key
+                    # cannot fetch its policy. Pop any cached policy
+                    # so a stale one does not apply, record the reason
+                    # so the gate can treat this tenant as Enforce,
+                    # and do not fall back to the global key.
+                    policies.pop(cache_key, None)
+                    _key_errors = getattr(self.server, "tenant_policy_errors", None)
+                    if _key_errors is None:
+                        _key_errors = {}
+                        self.server.tenant_policy_errors = _key_errors
+                    _key_errors[cache_key] = "missing_policy_key"
+                    return None
                 request = urllib.request.Request(url, headers=headers, method="GET")
                 with urllib.request.urlopen(request, timeout=5) as response:
                     data = json.loads(response.read().decode("utf-8"))
@@ -624,9 +719,21 @@ class ProxyHandler(BaseHTTPRequestHandler):
         if not hasattr(self.server, "tenant_policies") or self.server.tenant_policies is None:
             self.server.tenant_policies = {}
         self.server.tenant_policies[cache_key] = policy
+        _key_errors = getattr(self.server, "tenant_policy_errors", None)
+        if _key_errors is not None:
+            _key_errors.pop(cache_key, None)
         return policy
 
-    def _intent_gate(self, session_key, tool_name, arguments, cfg, req=None):
+    def _known_recipients_store(self):
+        """Phase 3b: lazy per-tenant known-recipients store."""
+        store = getattr(self.server, "known_recipients", None)
+        if store is None:
+            from mcp_proxy.known_recipients import KnownRecipients
+            store = KnownRecipients()
+            self.server.known_recipients = store
+        return store
+
+    def _intent_gate(self, session_key, tool_name, arguments, cfg, req=None, screen_verdict=None):
         # Returns None to fall through, or a JSON-RPC error response to block.
         # Policy 1: Bound actions only. Policy 2: Step-up for high-risk actions.
         if _tool_is_read_only(tool_name, arguments):
@@ -643,6 +750,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         # the console, with cache and last-good fallback. Unverified
         # or missing tenant falls back to the global env mode,
         # preserving dedicated per-SMB behavior.
+        _tenant_policy = {}
         _session_for_mode = store.get(session_key) or {}
         if _session_for_mode.get("tenant_verified") and _session_for_mode.get("tenant_id"):
             self._fetch_tenant_policy(_session_for_mode)
@@ -660,9 +768,56 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 mode = "off"
         else:
             mode = getattr(cfg, "intent_binding_mode", "off")
+        # Policy 2 tenant translation, Phase 3b. The tenant policy
+        # is the resolved policies dict already fetched for Policy 1.
+        # Triggers: amount at or above step_up_amount_threshold
+        # (minor units), a recipient the tenant has not seen before,
+        # a screening flag on this call's arguments. The binding's
+        # step_up.required stays a floor; Policy 2 only adds.
+        _policy2_triggers = []
+        _session_step_up_would_require = isinstance(session, dict) and bool((session.get("step_up") or {}).get("required"))
+        if isinstance(_tenant_policy, dict) and _tenant_policy.get("policy2_step_up_enabled"):
+            _threshold = _tenant_policy.get("step_up_amount_threshold")
+            if _threshold is not None:
+                try:
+                    _call_currency = (arguments or {}).get("currency") or (session or {}).get("currency")
+                    _call_amount = _extract_amount_minor(arguments, _call_currency)
+                    if _call_amount is not None and _call_amount >= int(_threshold):
+                        _policy2_triggers.append("amount")
+                except Exception:
+                    pass
+            _call_recipient = _extract_recipient(arguments)
+            _bound_recipient = str((session or {}).get("counterparty") or "").strip().lower()
+            _policy_tenant = _session_for_mode.get("tenant_id")
+            if _call_recipient and _call_recipient != _bound_recipient and _policy_tenant:
+                try:
+                    if not self._known_recipients_store().is_known(_policy_tenant, _call_recipient):
+                        _policy2_triggers.append("unknown_recipient")
+                except Exception:
+                    _policy2_triggers.append("unknown_recipient")
+            if isinstance(screen_verdict, dict) and screen_verdict.get("verdict") == "flag":
+                _policy2_triggers.append("content_flag")
+        # Phase 3b: a verified tenant whose policy key is
+        # missing fails closed as Enforce. The fetch marks
+        # the reason in tenant_policy_errors; a transient
+        # fetch failure keeps last-good and does not land
+        # here.
+        if _session_for_mode.get("tenant_verified") and _session_for_mode.get("tenant_id"):
+            _fail_key = f"{_session_for_mode.get('tenant_id')}:{_session_for_mode.get('location_id')}" if _session_for_mode.get("location_id") else _session_for_mode.get("tenant_id")
+            _policy_errors = getattr(self.server, "tenant_policy_errors", None) or {}
+            if _policy_errors.get(_fail_key) == "missing_policy_key":
+                mode = "enforce"
         if mode not in ("audit", "enforce"):
             return None
         if mode == "audit":
+            if _policy2_triggers or _session_step_up_would_require:
+                log.info(json.dumps({
+                    "event": "step_up_would_require",
+                    "tenant_id": _session_for_mode.get("tenant_id", ""),
+                    "tool": tool_name,
+                    "triggers": _policy2_triggers,
+                    "binding_step_up": bool(_session_step_up_would_require),
+                }))
             return None
         if session is None:
             return _error_response(0, -32000, "Blocked by RelayShield: state-changing tool requires a session binding", {"reason": "missing_binding", "tool": tool_name})
@@ -721,8 +876,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
         # Attestations are read from the call _meta, if present, not from the session store.
         # A block here never consumes the binding, matching _settle_core.
         step_up = session.get("step_up") or {}
-        if isinstance(step_up, dict) and step_up.get("required"):
-            required = step_up.get("satisfied_by") or []
+        _binding_required = isinstance(step_up, dict) and bool(step_up.get("required"))
+        if _binding_required or _policy2_triggers:
+            if isinstance(step_up, dict):
+                required = step_up.get("satisfied_by") or (["human_approval"] if _policy2_triggers else [])
+            else:
+                required = ["human_approval"] if _policy2_triggers else []
             attestations = []
             if isinstance(req, dict):
                 params_meta = (req.get("params") or {}).get("_meta") or {}
@@ -733,19 +892,19 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 if isinstance(att, dict) and att.get("method"):
                     covered.add(att.get("method"))
             if any(method not in covered for method in required):
-                return _error_response(0, -32000, "Blocked by RelayShield: step-up attestation missing", {"reason": "step_up_attestation_missing", "tool": tool_name})
+                return _error_response(0, -32000, "Blocked by RelayShield: step-up attestation missing", {"reason": "step_up_attestation_missing", "tool": tool_name, "step_up_triggers": _policy2_triggers})
         return None
 
     def _screen_discovery(self, upstream_url: str, method: str,
                           upstream_resp: dict, cfg: ProxyConfig,
-                          screener: Screener):
+                          screener: Screener, tenant_id: str = ""):
         """Screen a discovery response; flag the server, never block."""
         # Store tool schemas for argument validation on tools/list
         if method == "tools/list":
             try:
                 tools = upstream_resp.get("result", {}).get("tools", [])
                 if tools and hasattr(self, 'schema_store'):
-                    self.schema_store.update_from_tools_list(tools)
+                    self.schema_store.update_from_tools_list(tools, tenant_id=tenant_id)
             except Exception:
                 pass
         if not cfg.result_screening_enabled:
@@ -771,7 +930,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             evidence=evidence, reasons=reasons, poison_category=category,
             extra={"upstream": upstream_url, "taxonomy_ids": ids,
                    "taxonomy_version": TAXONOMY_VERSION},
-        )
+                tenant_id=tenant_id, binding_id="", location_id="")
         log.warning(json.dumps({
             "event": "poisoned_discovery_detected",
             "method": method, "upstream": upstream_url,
@@ -786,10 +945,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.server.audit.record(
             self.client_address[0], upstream_url, method, {},
             decision="flag", poison_category=category,
-            reasons=reasons, evidence=evidence)
+            reasons=reasons, evidence=evidence, tenant_id=tenant_id)
         self.server.telemetry.record(category, "discovery", ids, upstream_url,
                                      upstream_resp)
-        if self.server.quarantine.evaluate(upstream_url, evidence=evidence):
+        if self.server.quarantine.evaluate(upstream_url, evidence=evidence, tenant_id=tenant_id):
             self.server.reputation.record_quarantine(
                 upstream_url, "auto-quarantine: poisoned discovery response")
 
@@ -886,7 +1045,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         _audit_tenant, _audit_binding, _audit_location = self._audit_session_fields(session_key)
 
         # Fail-closed: quarantined servers get no traffic at all.
-        if quarantine.is_quarantined(upstream_url):
+        if quarantine.is_quarantined(upstream_url, tenant_id=_audit_tenant):
             log.warning(json.dumps({
                 "event": "tools_call_blocked_quarantined",
                 "tool": tool_name,
@@ -897,7 +1056,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 decision="block", poison_category="quarantined_server",
                 reasons=["upstream server is quarantined"],
                 policy_decision="",
-                tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location
+                tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location, screened_call=True
             )
             return _error_response(
                 req_id,
@@ -916,7 +1075,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
         if policy.enabled:
             try:
                 policy_result = policy.evaluate(
-                    agent_id, tool_name, upstream_url, arguments)
+                    agent_id, tool_name, upstream_url, arguments,
+                    tenant_id=_audit_tenant)
             except Exception as exc:
                 log.error("policy engine error: %s", exc)
         if policy_result.get("decision") == "deny":
@@ -931,12 +1091,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 reasons=policy_result.get("reasons", []),
                 poison_category=policy_result.get(
                     "poison_category", "policy_deny"),
-            )
+                tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location)
 
         # Schema validation: check arguments against tool's declared JSON Schema.
         # Catches malformed input that weak server-side validation would miss.
         if hasattr(self.server, 'schema_store'):
-            schema = self.server.schema_store.get_schema(tool_name)
+            schema = self.server.schema_store.get_schema(tool_name, tenant_id=_audit_tenant)
             if schema:
                 is_valid, violations = validate_arguments(tool_name, arguments, schema)
                 blocking = [v for v in violations if v["severity"] in ("HIGH", "CRITICAL")]
@@ -969,7 +1129,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     reasons=policy_result.get("reasons", []),
                     evidence=signed.get("evidence", []),
                     policy_decision="deny",
-                    tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location
+                    tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location, screened_call=True
                 )
                 return _error_response(
                     req_id,
@@ -992,7 +1152,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         if cfg.screening_enabled:
             try:
                 s0 = time.monotonic()
-                verdict = screener.screen_tool_call(tool_name, arguments)
+                verdict = screener.screen_tool_call(tool_name, arguments, api_key=self._tenant_key(_audit_tenant, "screener_key") if _audit_tenant else None)
                 screen_ms = (time.monotonic() - s0) * 1000
             except Exception as exc:
                 log.error("screener error: %s", exc)
@@ -1021,7 +1181,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         # else the transport session ID, else the (agent IP,
         # upstream) pair as in behavior.py.
         # corr and session_key moved above, after agent_id, before first audit call (Phase 3a call-site step 2v3)
-        _gate = self._intent_gate(session_key, tool_name, arguments, cfg, req=req)
+        _gate = self._intent_gate(session_key, tool_name, arguments, cfg, req=req, screen_verdict=verdict)
         if _gate is not None:
             _gate["id"] = req_id
             # Phase 1 gate stamp: tenant and binding, when a session exists.
@@ -1038,6 +1198,16 @@ class ProxyHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             return _gate
+        # Phase 3b: record the call recipient as known for the tenant.
+        # Recorded when a state-changing call passes the gate, before
+        # forwarding, so the next call to the same recipient does not
+        # need step-up. In Audit mode this records by being seen.
+        try:
+            _known_rec = _extract_recipient(arguments)
+            if _known_rec and _audit_tenant and not _tool_is_read_only(tool_name, arguments):
+                self._known_recipients_store().record(_audit_tenant, _known_rec)
+        except Exception:
+            pass
         sequence_result = {"verdict": "allow",
                            "poison_category": "clean",
                            "reasons": [], "risk_score": 0.0}
@@ -1102,7 +1272,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     f"behavioral risk score {risk:.1f} reached "
                     f"quarantine threshold",
                     behavior_result.get("reasons", []))
-                if quarantine.evaluate(upstream_url):
+                if quarantine.evaluate(upstream_url, tenant_id=_audit_tenant):
                     reputation.record_quarantine(
                         upstream_url,
                         f"behavioral risk {risk:.1f}")
@@ -1135,7 +1305,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 score=verdict.get("score", 0),
                 reasons=verdict.get("reasons", []),
                 poison_category=poison_category,
-            )
+                tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location)
             log.info(json.dumps({
                 "event": "tools_call_verdict",
                 "poison_category": poison_category,
@@ -1153,7 +1323,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 risk_score=behavior_result.get("risk_score", 0.0),
                 policy_decision=policy_decision,
                 duration_ms=total_ms,
-                tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location
+                tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location, screened_call=True
             )
             return _error_response(
                 req_id,
@@ -1191,7 +1361,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 score=int(sequence_result.get("risk_score", 0.0)),
                 reasons=sequence_result.get("reasons", []),
                 poison_category=poison_category,
-            )
+                tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location)
             self.server.telemetry.record(poison_category, "call")
             self.server.audit.record(
                 agent_id, upstream_url, tool_name, arguments,
@@ -1201,7 +1371,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 risk_score=sequence_result.get("risk_score", 0.0),
                 policy_decision=policy_decision,
                 duration_ms=total_ms,
-                tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location
+                tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location, screened_call=True
             )
             # Quarantine coupling (Phase 5 decision, 2026-10-23): a
             # sequence block feeds the quarantine mechanism exactly
@@ -1213,7 +1383,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 upstream_url,
                 f"kill-chain sequence block on '{tool_name}'",
                 [e["detail"] for e in evidence])
-            if quarantine.evaluate(upstream_url, evidence=evidence):
+            if quarantine.evaluate(upstream_url, evidence=evidence,
+                    tenant_id=_audit_tenant):
                 reputation.record_quarantine(
                     upstream_url,
                     "auto-quarantine: kill-chain sequence block")
@@ -1263,7 +1434,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 score=int(kc_result.get("risk_score", 0.0)),
                 reasons=kc_result.get("reasons", []),
                 poison_category=poison_category,
-            )
+                tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location)
             self.server.telemetry.record(poison_category, "result")
             self.server.audit.record(
                 agent_id, upstream_url, tool_name, arguments,
@@ -1273,7 +1444,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 risk_score=kc_result.get("risk_score", 0.0),
                 policy_decision=policy_decision,
                 duration_ms=(time.monotonic() - t0) * 1000,
-                tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location
+                tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location, screened_call=True
             )
             return _error_response(
                 req_id,
@@ -1301,7 +1472,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             risk_score=behavior_result.get("risk_score", 0.0),
             policy_decision=policy_decision,
             duration_ms=(time.monotonic() - t0) * 1000,
-            tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location
+            tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location, screened_call=True
         )
 
         return upstream_resp
@@ -1321,7 +1492,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         if not cfg.result_screening_enabled:
             return None
         try:
-            result_verdict = screener.screen_tool_result(upstream_resp)
+            result_verdict = screener.screen_tool_result(upstream_resp, api_key=self._tenant_key(_sr_tenant, "screener_key") if _sr_tenant else None)
         except Exception as exc:
             # Fail-open for the proxy itself: log and keep the response.
             log.error("result screener error: %s", exc)
@@ -1363,8 +1534,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
                             f"kill-chain sequence completed by result "
                             f"of '{tool_name}'",
                             [e["detail"] for e in evidence])
+                        _sr_tenant = ""
+                        _sr_binding = ""
+                        _sr_location = ""
+                        _sr_corr_key = (corr or {}).get("session_key") if isinstance(corr, dict) else None
+                        if _sr_corr_key:
+                            _sr_tenant, _sr_binding, _sr_location = self._audit_session_fields(_sr_corr_key)
                         if quarantine.evaluate(
-                                upstream_url, evidence=evidence):
+                                upstream_url, evidence=evidence,
+                                tenant_id=_sr_tenant):
                             self.server.reputation.record_quarantine(
                                 upstream_url,
                                 "auto-quarantine: kill-chain sequence "
@@ -1411,6 +1589,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 "policy_action": "block_call",
                 "system_outcome": "not_completed",
                 "reason": "system_refusal",
+                "tenant_id": _sr_tenant,
                 "binding_id": (_sess or {}).get("binding_id"),
                 "passport_id": (_sess or {}).get("passport_id"),
             }))
@@ -1449,7 +1628,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             reasons=reasons,
             poison_category=poison_category,
             extra={"upstream": upstream_url, "kit_ids": kit_ids},
-        )
+                tenant_id=_sr_tenant, binding_id=_sr_binding, location_id=_sr_location)
 
         log.warning(json.dumps({
             "event": "poisoned_result_detected",
@@ -1498,11 +1677,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 "policy_action": "quarantine_tool",
                 "system_outcome": "quarantined",
                 "reason": "injection_or_poisoned_result",
+                "tenant_id": _sr_tenant,
                 "binding_id": (_sess or {}).get("binding_id"),
                 "passport_id": (_sess or {}).get("passport_id"),
             }))
             return {"kc_result": {"verdict": "block", "sequence": {}, "reasons": ["injection_or_poisoned_result"]}, "evidence": evidence}
-        if quarantine.evaluate(upstream_url, evidence=evidence):
+        if quarantine.evaluate(upstream_url, evidence=evidence, tenant_id=_sr_tenant):
             reputation.record_quarantine(
                 upstream_url, "auto-quarantine: poisoned neighbor")
         return hold
@@ -1630,6 +1810,35 @@ def _to_minor(amount, currency):
     exponent = 0 if str(currency or "").upper() in ("JPY", "KRW", "VND") else 2
     return int(value * (10 ** exponent))
 
+_RECIPIENT_FIELDS = ("counterparty", "recipient", "payee", "to", "destination", "customer_id", "account_id", "user_id", "email", "wallet", "address", "target")
+_AMOUNT_FIELDS = ("amount", "value", "total", "price", "sum", "payment_amount", "charge_amount")
+
+
+def _extract_recipient(arguments):
+    """First present recipient field, lowercased and stripped, or None."""
+    args = arguments or {}
+    for field in _RECIPIENT_FIELDS:
+        if args.get(field):
+            return str(args.get(field)).strip().lower()
+    return None
+
+
+def _extract_amount_minor(arguments, currency=None):
+    """Call amount in minor units, or None if no amount field is present.
+
+    amount_minor is already minor units. Other decimal fields are
+    converted with _to_minor. Raises ValueError on an unparseable
+    amount, matching _to_minor.
+    """
+    args = arguments or {}
+    if args.get("amount_minor") is not None:
+        return int(args.get("amount_minor"))
+    for field in _AMOUNT_FIELDS:
+        if args.get(field) is not None:
+            return _to_minor(args.get(field), currency)
+    return None
+
+
 def _intent_mismatch(session, tool_name, arguments):
     # Returns a reason code, or None if the call matches the bound intent.
     # Real Gateway fields: payer, counterparty, amount (decimal string),
@@ -1643,11 +1852,7 @@ def _intent_mismatch(session, tool_name, arguments):
     if payer and session.get("payer") and str(payer).strip().lower() != str(session.get("payer")).strip().lower():
         return "intent_drift_recipient"
     # Recipient, counterparty, first present field wins.
-    recipient = None
-    for field in ("counterparty", "recipient", "payee", "to", "destination", "customer_id", "account_id", "user_id", "email", "wallet", "address", "target"):
-        if args.get(field):
-            recipient = str(args.get(field)).strip().lower()
-            break
+    recipient = _extract_recipient(args)
     bound_recipient = session.get("counterparty")
     if recipient and bound_recipient and recipient != str(bound_recipient).strip().lower():
         return "intent_drift_recipient"
@@ -1657,20 +1862,10 @@ def _intent_mismatch(session, tool_name, arguments):
         return "intent_drift_amount"
     # Amount, first present field wins. amount_minor is already minor units,
     # amount and other decimal fields are converted with _to_minor.
-    amount_minor = None
-    if args.get("amount_minor") is not None:
-        try:
-            amount_minor = int(args.get("amount_minor"))
-        except Exception:
-            return "intent_drift_amount"
-    else:
-        for field in ("amount", "value", "total", "price", "sum", "payment_amount", "charge_amount"):
-            if args.get(field) is not None:
-                try:
-                    amount_minor = _to_minor(args.get(field), currency)
-                except Exception:
-                    return "intent_drift_amount"
-                break
+    try:
+        amount_minor = _extract_amount_minor(args, currency)
+    except Exception:
+        return "intent_drift_amount"
     bound_amount = session.get("amount")
     if amount_minor is not None and bound_amount is not None:
         try:

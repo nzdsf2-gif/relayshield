@@ -291,6 +291,13 @@ def lambda_handler(event, context):
     Expected event shape:
         { "user_id": "...", "tier": "..." }
     """
+    # ci.import-probe guard: the Deploy Changed Lambdas smoke step
+    # invokes every deployed function with {"source": "ci.import-probe"}.
+    # Without this early return the probe sends a real message to all
+    # subscribers. Mirrors the guard in relayshield_intel_feed.py.
+    if isinstance(event, dict) and event.get("source") == "ci.import-probe":
+        logger.info("ci.import-probe: module imported, returning without sending")
+        return {"statusCode": 200, "probe": "ok"}
     if DAY3_TEMPLATE_SID == "PENDING_META_APPROVAL":
         logger.error(
             "Day 3 template SID not configured — Meta approval still pending. "

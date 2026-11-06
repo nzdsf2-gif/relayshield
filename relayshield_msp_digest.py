@@ -311,6 +311,13 @@ def _send_digest_email(email: str, subject: str, html: str, text: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def lambda_handler(event, context):
+    # ci.import-probe guard: the Deploy Changed Lambdas smoke step
+    # invokes every deployed function with {"source": "ci.import-probe"}.
+    # Without this early return the probe sends a real message to all
+    # subscribers. Mirrors the guard in relayshield_intel_feed.py.
+    if isinstance(event, dict) and event.get("source") == "ci.import-probe":
+        logger.info("ci.import-probe: module imported, returning without sending")
+        return {"statusCode": 200, "probe": "ok"}
     logger.info("MSP weekly digest starting")
     week_label = datetime.now(timezone.utc).strftime("Week of %B %d, %Y")
     subject    = f"RelayShield Weekly TI Digest — {datetime.now(timezone.utc).strftime('%b %d')}"

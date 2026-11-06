@@ -17838,6 +17838,7 @@ def handle_app_event(params: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 INTENT_BINDINGS_TABLE = "relayshield_intent_bindings"
+PAYER_TENANT_MAP_TABLE = "relayshield_payer_tenant_map"
 INTENT_BINDING_KMS_KEY_ID_ENV = "RELAYSHIELD_INTENT_BINDING_KMS_KEY_ID"
 
 # Rail name -> identifier canonicalization policy, registered on every
@@ -17942,9 +17943,15 @@ class _DynamoBindingStore:
     never as "not consumed".
     """
 
-    def __init__(self, tenant_id: str, rail: str):
+    def __init__(self, tenant_id: str, rail: str, console_tenant_id: str = "",
+                 location_id: str = "", msp_id: str = "",
+                 distributor_id: str = ""):
         self._tenant_id = tenant_id
         self._rail = rail
+        self._console_tenant_id = console_tenant_id
+        self._location_id = location_id
+        self._msp_id = msp_id
+        self._distributor_id = distributor_id
         self._table = dynamodb.Table(INTENT_BINDINGS_TABLE)
 
     def save(self, binding) -> None:
@@ -17959,6 +17966,10 @@ class _DynamoBindingStore:
                     "key_id": binding.key_id,
                     "tenant_id": self._tenant_id,
                     "rail": self._rail,
+                    "console_tenant_id": self._console_tenant_id,
+                    "location_id": self._location_id,
+                    "msp_id": self._msp_id,
+                    "distributor_id": self._distributor_id,
                     "consumed": False,
                     "created_at": int(record["issued_at"]),
                     "expires_at": int(record["expires_at"]),
@@ -18253,14 +18264,19 @@ def _binding_policy():
     return _BINDING_POLICY
 
 
-def _intent_binder(tenant_id: str, rail: str):
+def _intent_binder(tenant_id: str, rail: str, console_tenant_id: str = "",
+                   location_id: str = "", msp_id: str = "",
+                   distributor_id: str = ""):
     """A binder for one request, or None when signing is unconfigured."""
     signer = _binding_signer()
     if signer is None:
         return None
     return _intent_binding.IntentBinder(
         signer=signer,
-        store=_DynamoBindingStore(tenant_id=tenant_id, rail=rail),
+        store=_DynamoBindingStore(
+            tenant_id=tenant_id, rail=rail,
+            console_tenant_id=console_tenant_id, location_id=location_id,
+            msp_id=msp_id, distributor_id=distributor_id),
         policy=_binding_policy(),
         counterparty_screener=_CorpusCounterpartyScreener(),
         artifact_screener=_CorpusArtifactScreener(),
@@ -18306,9 +18322,14 @@ def _binding_refused_response(refusal) -> dict:
     }
 
 
-def _bind_core(params: dict, tenant_id: str, rail_default: str) -> dict:
+def _bind_core(params: dict, tenant_id: str, rail_default: str,
+               console_tenant_id: str = "", location_id: str = "",
+               msp_id: str = "", distributor_id: str = "") -> dict:
     rail = str(params.get("rail") or rail_default)
-    binder = _intent_binder(tenant_id=tenant_id, rail=rail)
+    binder = _intent_binder(
+        tenant_id=tenant_id, rail=rail,
+        console_tenant_id=console_tenant_id, location_id=location_id,
+        msp_id=msp_id, distributor_id=distributor_id)
     if binder is None:
         return _err("Intent binding is not configured on this deployment.", 503)
     intent = _intent_binding.PaymentIntent(
@@ -18418,8 +18439,12 @@ def handle_tap_intent_bind(params: dict, key_record: dict) -> dict:
     API keys carrying the verifiers entitlement. No per-call charge
     on this rail."""
     params = params or {}
-    return _bind_core(params, tenant_id=key_record["api_key"],
-                      rail_default="tap")
+    return _bind_core(
+        params, tenant_id=key_record["api_key"], rail_default="tap",
+        console_tenant_id=key_record.get("console_tenant_id") or "",
+        location_id=key_record.get("location_id") or "",
+        msp_id=key_record.get("msp_id") or "",
+        distributor_id=key_record.get("distributor_id") or "")
 
 
 def handle_tap_settle_check(params: dict, key_record: dict) -> dict:
@@ -18427,6 +18452,35 @@ def handle_tap_settle_check(params: dict, key_record: dict) -> dict:
     its binding before release (same entitlement as intent-bind)."""
     params = params or {}
     return _settle_core(params, tenant_id=key_record["api_key"])
+
+
+def _payg_console_fields(rail: str, payer: str) -> dict:
+    """Console tenant fields for a PAYG payer, from the mirror table.
+
+    The mirror (relayshield_payer_tenant_map) is written at
+    provisioning time; a missing row means the payer is not mapped
+    to a console tenant, so the binding is stored as dedicated /
+    direct (all fields empty), not an error. A read failure is
+    treated the same way and logged: the mapping is attribution,
+    not a trust decision, and the registry tenant (the canonical
+    payer) still isolates the binding.
+    """
+    empty = {"console_tenant_id": "", "location_id": "", "msp_id": "",
+             "distributor_id": ""}
+    if not payer:
+        return empty
+    try:
+        item = dynamodb.Table(PAYER_TENANT_MAP_TABLE).get_item(
+            Key={"rail": rail, "payer": payer}).get("Item") or {}
+    except Exception as exc:
+        logger.exception("payer tenant map read failed: %s", exc)
+        return empty
+    return {
+        "console_tenant_id": item.get("console_tenant_id") or "",
+        "location_id": item.get("location_id") or "",
+        "msp_id": item.get("msp_id") or "",
+        "distributor_id": item.get("distributor_id") or "",
+    }
 
 
 def _payg_tenant(params: dict, rail: str) -> str:
@@ -18443,8 +18497,13 @@ def handle_payg_intent_bind(params: dict) -> dict:
     canonicalized under the rail's identifier policy."""
     params = params or {}
     rail = str(params.get("rail") or "x402")
-    return _bind_core(params, tenant_id=_payg_tenant(params, rail),
-                      rail_default="x402")
+    tenant_id = _payg_tenant(params, rail)
+    fields = _payg_console_fields(rail, tenant_id)
+    return _bind_core(params, tenant_id=tenant_id, rail_default="x402",
+                      console_tenant_id=fields["console_tenant_id"],
+                      location_id=fields["location_id"],
+                      msp_id=fields["msp_id"],
+                      distributor_id=fields["distributor_id"])
 
 
 def handle_payg_intent_settle_check(params: dict) -> dict:
@@ -18461,8 +18520,12 @@ def handle_payg_intent_settle_check(params: dict) -> dict:
 def handle_metered_intent_bind(params: dict, key_record: dict) -> dict:
     """Metered twin of /v1/payg/intent-bind for API-key callers."""
     params = params or {}
-    return _bind_core(params, tenant_id=key_record["api_key"],
-                      rail_default="tap")
+    return _bind_core(
+        params, tenant_id=key_record["api_key"], rail_default="tap",
+        console_tenant_id=key_record.get("console_tenant_id") or "",
+        location_id=key_record.get("location_id") or "",
+        msp_id=key_record.get("msp_id") or "",
+        distributor_id=key_record.get("distributor_id") or "")
 
 
 def handle_metered_intent_settle_check(params: dict, key_record: dict) -> dict:

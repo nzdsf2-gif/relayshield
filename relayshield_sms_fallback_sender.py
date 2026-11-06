@@ -183,6 +183,13 @@ def clear_pending_fallback(user_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 def lambda_handler(event: dict, context) -> dict:
+    # ci.import-probe guard: the Deploy Changed Lambdas smoke step
+    # invokes every deployed function with {"source": "ci.import-probe"}.
+    # Without this early return the probe sends a real message to all
+    # subscribers. Mirrors the guard in relayshield_intel_feed.py.
+    if isinstance(event, dict) and event.get("source") == "ci.import-probe":
+        logger.info("ci.import-probe: module imported, returning without sending")
+        return {"statusCode": 200, "probe": "ok"}
     dry_run = bool(event.get("dry_run"))
     if dry_run:
         logger.info("DRY RUN — no SMS will be sent.")

@@ -274,6 +274,13 @@ def lambda_handler(event, context):
       {"test_user_id": "your-user-id"}  — restricts send to a single user.
       Use to verify end-to-end delivery without messaging all subscribers.
     """
+    # ci.import-probe guard: the Deploy Changed Lambdas smoke step
+    # invokes every deployed function with {"source": "ci.import-probe"}.
+    # Without this early return the probe sends a real message to all
+    # subscribers. Mirrors the guard in relayshield_intel_feed.py.
+    if isinstance(event, dict) and event.get("source") == "ci.import-probe":
+        logger.info("ci.import-probe: module imported, returning without sending")
+        return {"statusCode": 200, "probe": "ok"}
     test_user_id = event.get("test_user_id") if isinstance(event, dict) else None
 
     if QUARTERLY_TEMPLATE_SID == "PENDING_META_APPROVAL":

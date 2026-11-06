@@ -14513,6 +14513,38 @@ def handle_passport_check(params: dict) -> dict:
         except Exception as exc:
             logger.warning("passport registry read failed for %s: %s",
                            document["passport_id"], exc)
+    # Issuer build step 3, Q3 Option A: return the binding's
+    # console tenant fields when a binding_id is supplied (the
+    # proxy calls this at initialize). The binding_id is the
+    # capability: the passport carries no tenant context, so
+    # this is a direct GetItem, not a tenant-scoped store read.
+    # A missing row (unknown binding, or one that predates step
+    # 2) means found False and empty fields, not an error. A
+    # read failure is logged and reported the same way; it must
+    # not break the passport verification itself.
+    binding_id = params.get("binding_id")
+    if isinstance(binding_id, str) and binding_id:
+        binding_data = {
+            "binding_id": binding_id,
+            "found": False,
+            "console_tenant_id": "",
+            "location_id": "",
+            "msp_id": "",
+            "distributor_id": "",
+        }
+        try:
+            item = dynamodb.Table(INTENT_BINDINGS_TABLE).get_item(
+                Key={"binding_id": binding_id}).get("Item") or {}
+        except Exception as exc:
+            logger.warning("binding read failed for %s: %s", binding_id, exc)
+            item = {}
+        if item:
+            binding_data["found"] = True
+            binding_data["console_tenant_id"] = item.get("console_tenant_id") or ""
+            binding_data["location_id"] = item.get("location_id") or ""
+            binding_data["msp_id"] = item.get("msp_id") or ""
+            binding_data["distributor_id"] = item.get("distributor_id") or ""
+        data["binding"] = binding_data
     return _ok(data)
 
 

@@ -23,16 +23,48 @@ class QuarantineManager:
         self.alert_webhook = (alert_webhook or "").strip()
         self.auto_quarantine_after = auto_quarantine_after
         self.events = []  # quarantine / clear event log
+        # Option B, per-tenant quarantine, separate from the shared
+        # NeighborRegistry: (tenant_id, url) -> {"reputation": str,
+        # "flags": [...], "events": [...]}. Empty tenant_id means
+        # global behaviour, via the registry, as today.
+        self._tenant_quarantines = {}
 
-    def is_quarantined(self, url: str) -> bool:
+    def is_quarantined(self, url: str, tenant_id: str = "") -> bool:
+        if tenant_id:
+            entry = self._tenant_quarantines.get((tenant_id, url))
+            return entry is not None and entry["reputation"] == QUARANTINED
         rep = self.registry.get(url)
         return rep is not None and rep.reputation == QUARANTINED
 
-    def evaluate(self, url: str, evidence: list = None) -> bool:
+    def evaluate(self, url: str, evidence: list = None,
+                 tenant_id: str = "") -> bool:
         """Auto-quarantine a server that reached the flag threshold.
 
         Returns True if the server was quarantined by this call.
+        With tenant_id, counts only that tenant's flags, in the
+        tenant store, not global registry flags. See module header
+        in the patch script: the caller must pass tenant_id here
+        on every evaluate call, or tenant auto-quarantine will
+        never trigger.
         """
+        if tenant_id:
+            entry = self._tenant_quarantines.setdefault(
+                (tenant_id, url),
+                {"reputation": CLEAN, "flags": [], "events": []})
+            if entry["reputation"] == QUARANTINED:
+                return False
+            if evidence:
+                entry["flags"].append(
+                    {"ts": time.time(), "reason": "flag",
+                     "evidence": evidence})
+            if len(entry["flags"]) >= self.auto_quarantine_after:
+                self.quarantine(
+                    url,
+                    f"auto-quarantine: {len(entry['flags'])} flags reached "
+                    f"threshold of {self.auto_quarantine_after}",
+                    evidence=evidence, tenant_id=tenant_id)
+                return True
+            return False
         rep = self.registry.get(url)
         if rep is None or rep.reputation == QUARANTINED:
             return False
@@ -46,13 +78,28 @@ class QuarantineManager:
             return True
         return False
 
-    def quarantine(self, url: str, reason: str, evidence: list = None) -> dict:
+    def quarantine(self, url: str, reason: str, evidence: list = None,
+                   tenant_id: str = "") -> dict:
         """Quarantine a server immediately (fail-closed from now on).
 
         evidence: list of {"type", "id", "detail"} TI evidence entries.
         Quarantine decisions must reference specific TI evidence, not
         just a bare "suspicious" label.
         """
+        if tenant_id:
+            entry = self._tenant_quarantines.setdefault(
+                (tenant_id, url),
+                {"reputation": CLEAN, "flags": [], "events": []})
+            entry["reputation"] = QUARANTINED
+            event = {"ts": time.time(), "action": "quarantined",
+                     "url": url, "tenant_id": tenant_id, "reason": reason,
+                     "flag_count": len(entry["flags"]),
+                     "evidence": evidence or []}
+            entry["events"].append(event)
+            self.events.append(event)
+            log.warning(json.dumps({"event": "server_quarantined", **event}))
+            self._send_alert("server_quarantined", event)
+            return event
         rep = self.registry.get(url) or self.registry.register(url)
         rep.reputation = QUARANTINED
         ev = evidence or []
@@ -69,12 +116,26 @@ class QuarantineManager:
         self._send_alert("server_quarantined", event)
         return event
 
-    def clear(self, url: str, cleared_by: str = "operator") -> bool:
+    def clear(self, url: str, cleared_by: str = "operator",
+              tenant_id: str = "") -> bool:
         """Clear a quarantine, returning the server to clean.
 
         Flag history is kept for audit; only the reputation resets.
         Returns False if the server was unknown.
         """
+        if tenant_id:
+            entry = self._tenant_quarantines.get((tenant_id, url))
+            if entry is None:
+                return False
+            entry["reputation"] = CLEAN
+            event = {"ts": time.time(), "action": "cleared", "url": url,
+                     "tenant_id": tenant_id, "cleared_by": cleared_by,
+                     "prior_flag_count": len(entry["flags"])}
+            entry["events"].append(event)
+            self.events.append(event)
+            log.info(json.dumps({"event": "server_quarantine_cleared", **event}))
+            self._send_alert("server_quarantine_cleared", event)
+            return True
         rep = self.registry.get(url)
         if rep is None:
             return False

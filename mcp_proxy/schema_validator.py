@@ -119,18 +119,38 @@ class SchemaStore:
     
     def __init__(self):
         self._schemas: Dict[str, Dict[str, Any]] = {}
+        # Ph3b, per-tenant schemas: (tenant_id, tool_name) -> schema,
+        # plus the set of tenants that have had a list stored.
+        self._tenant_schemas: Dict[tuple, Dict[str, Any]] = {}
+        self._tenant_tools: Dict[str, set] = {}
     
-    def update_from_tools_list(self, tools: List[Dict[str, Any]]):
+    def update_from_tools_list(self, tools: List[Dict[str, Any]],
+                               tenant_id: str = ""):
         """Store schemas from a tools/list response."""
         for tool in tools:
             name = tool.get("name")
             schema = tool.get("inputSchema", {})
-            if name:
+            if not name:
+                continue
+            if tenant_id:
+                self._tenant_schemas[(tenant_id, name)] = schema
+                self._tenant_tools.setdefault(tenant_id, set()).add(name)
+            else:
                 self._schemas[name] = schema
     
-    def get_schema(self, tool_name: str) -> Dict[str, Any]:
+    def get_schema(self, tool_name: str,
+                   tenant_id: str = "") -> Dict[str, Any]:
         """Get the schema for a tool, or empty dict if unknown."""
+        if tenant_id:
+            if tenant_id in self._tenant_tools:
+                return self._tenant_schemas.get((tenant_id, tool_name), {})
+            return self._schemas.get(tool_name, {})
         return self._schemas.get(tool_name, {})
     
-    def has_schema(self, tool_name: str) -> bool:
+    def has_schema(self, tool_name: str,
+                   tenant_id: str = "") -> bool:
+        if tenant_id:
+            if tenant_id in self._tenant_tools:
+                return (tenant_id, tool_name) in self._tenant_schemas
+            return tool_name in self._schemas
         return tool_name in self._schemas

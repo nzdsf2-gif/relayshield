@@ -202,7 +202,7 @@ class PolicyEngine:
     # -- evaluation -----------------------------------------------------
 
     def evaluate(self, agent_id: str, tool_name: str, server_url: str,
-                 arguments: dict = None) -> dict:
+                 arguments: dict = None, tenant_id: str = "") -> dict:
         """Evaluate a tools/call. Returns a decision dict.
 
         decision: "allow" | "deny" | "approval_required"
@@ -238,7 +238,8 @@ class PolicyEngine:
         if rate_spec:
             max_calls, window_s = parse_rate_limit(str(rate_spec))
             if max_calls:
-                key = f"{agent_id}:{tool_name}"
+                key = (f"{tenant_id}:{agent_id}:{tool_name}"
+                       if tenant_id else f"{agent_id}:{tool_name}")
                 if not self._limiter.check(key, max_calls, window_s):
                     return {
                         "decision": "deny",
@@ -268,6 +269,49 @@ class PolicyEngine:
             "server_trust": trust,
             "server_strictness": strictness,
         }
+
+    def allows_tool(self, agent_id: str, tool_name: str) -> bool:
+        """Pure allow/deny check for one tool, no rate-limit side effects.
+
+        Deny_tools wins; an allow_tools list, when present, is
+        exclusive. Policy disabled means allow all.
+        """
+        if not self.enabled:
+            return True
+        rules = self._agent_rules(agent_id)
+        deny_tools = rules.get("deny_tools") or []
+        if any(_match_key(str(p), tool_name) for p in deny_tools):
+            return False
+        allow_tools = rules.get("allow_tools") or []
+        if allow_tools and not any(
+                _match_key(str(p), tool_name) for p in allow_tools):
+            return False
+        return True
+
+    def allowed_tools(self, agent_id: str, tool_names: list,
+                      tenant_policy: dict = None) -> list:
+        """Filter tool names to the allowed set, Option C.
+
+        Tenant policy allow_tools / deny_tools, when present in
+        the dict, win. Otherwise fall back to the agent rules.
+        Neither restricting means every name is returned.
+        """
+        if isinstance(tenant_policy, dict):
+            deny = tenant_policy.get("deny_tools")
+            allow = tenant_policy.get("allow_tools")
+            if isinstance(deny, list) or isinstance(allow, list):
+                deny = deny if isinstance(deny, list) else []
+                allow = allow if isinstance(allow, list) else []
+                out = []
+                for name in tool_names:
+                    if any(_match_key(str(p), name) for p in deny):
+                        continue
+                    if allow and not any(
+                            _match_key(str(p), name) for p in allow):
+                        continue
+                    out.append(name)
+                return out
+        return [n for n in tool_names if self.allows_tool(agent_id, n)]
 
     def summary(self) -> dict:
         """Policy overview for the admin API."""

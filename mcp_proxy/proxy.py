@@ -525,7 +525,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
         passport_compact = binding.get("passport_compact") or meta.get("passport")
         if not passport_compact:
             return _error_response(req_id, -32000, "Session binding requires a passport", {"reason": "passport_invalid"})
-        verdict = self._verify_passport_via_gateway(passport_compact)
+        verdict = self._verify_passport_via_gateway(
+            passport_compact, binding_id=binding.get("binding_id"))
         if not verdict.get("valid") or verdict.get("revoked"):
             return _error_response(req_id, -32000, "Session binding passport check failed", {"reason": verdict.get("status", "passport_invalid")})
         passport_doc = verdict.get("passport") or {}
@@ -536,7 +537,20 @@ class ProxyHandler(BaseHTTPRequestHandler):
         _binding_tenant = binding.get("tenant_id") if isinstance(binding, dict) else None
         if _passport_tenant and _binding_tenant and _passport_tenant != _binding_tenant:
             return _error_response(req_id, -32000, "Session binding tenant mismatch", {"reason": "passport_invalid"})
-        _tenant_verified = bool(_passport_tenant)
+        # Issuer build step 4: the passport/check response carries
+        # the binding's console tenant fields (step 3) when the
+        # binding was found. Those are server-resolved (written at
+        # bind time from the issuer lookup), so they outrank the
+        # client-supplied binding fields but not a Gateway-verified
+        # passport field. A found binding with a console tenant
+        # also verifies the session, the same as a passport tenant.
+        _binding_fields = verdict.get("binding") or {}
+        _binding_found = bool(_binding_fields.get("found"))
+        _console_tenant_id = (_binding_fields.get("console_tenant_id") or "") if _binding_found else ""
+        _console_location_id = (_binding_fields.get("location_id") or "") if _binding_found else ""
+        _console_msp_id = (_binding_fields.get("msp_id") or "") if _binding_found else ""
+        _console_distributor_id = (_binding_fields.get("distributor_id") or "") if _binding_found else ""
+        _tenant_verified = bool(_passport_tenant) or bool(_console_tenant_id)
         _tenant_id = _passport_tenant or _binding_tenant
         store[session_key] = {
             "binding_id": binding.get("binding_id"),
@@ -550,18 +564,24 @@ class ProxyHandler(BaseHTTPRequestHandler):
             "passport_expires_at": passport_doc.get("expires_at"),
             "verified_at": time.time(),
             "tenant_id": _tenant_id,
-            "location_id": (passport_doc.get("location_id") if isinstance(passport_doc, dict) else None) or binding.get("location_id"),
-            "msp_id": (passport_doc.get("msp_id") if isinstance(passport_doc, dict) else None) or binding.get("msp_id"),
-            "distributor_id": (passport_doc.get("distributor_id") if isinstance(passport_doc, dict) else None) or binding.get("distributor_id"),
+            "console_tenant_id": _console_tenant_id,
+            "location_id": (passport_doc.get("location_id") if isinstance(passport_doc, dict) else None) or _console_location_id or binding.get("location_id"),
+            "msp_id": (passport_doc.get("msp_id") if isinstance(passport_doc, dict) else None) or _console_msp_id or binding.get("msp_id"),
+            "distributor_id": (passport_doc.get("distributor_id") if isinstance(passport_doc, dict) else None) or _console_distributor_id or binding.get("distributor_id"),
             "tenant_verified": _tenant_verified,
         }
         return self._forward_passthrough(req, req_id, cfg, screener)
 
-    def _verify_passport_via_gateway(self, passport_compact):
+    def _verify_passport_via_gateway(self, passport_compact, binding_id=None):
         # POST /v1/passport/check, free, no API key, no TAP authorizer.
         # Fail closed on any non-200, 503, timeout, or network error.
+        # binding_id is passed through so the check can return the
+        # binding's console tenant fields (issuer build step 3).
         try:
-            body = json.dumps({"compact": passport_compact}).encode("utf-8")
+            _check_body = {"compact": passport_compact}
+            if binding_id:
+                _check_body["binding_id"] = binding_id
+            body = json.dumps(_check_body).encode("utf-8")
             request = urllib.request.Request(
                 "https://api.relayshield.net/v1/passport/check",
                 data=body, headers={"Content-Type": "application/json"}, method="POST")
@@ -644,7 +664,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
         or if no last good policy exists. Never raises on fetch
         failure: the caller keeps last good policy.
         """
-        tenant_id = (session or {}).get("tenant_id")
+        # Issuer build step 4: prefer the console tenant when the
+        # session resolved one (the policy is keyed by console
+        # tenant). Falls back to tenant_id for sessions without one.
+        tenant_id = (session or {}).get("console_tenant_id") or (session or {}).get("tenant_id")
         if not tenant_id:
             return None
         location_id = (session or {}).get("location_id")

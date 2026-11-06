@@ -859,7 +859,9 @@ def _verify_stripe_sig(payload: bytes, sig_header: str, secret: str) -> bool:
 # POST /developer/stripe-webhook
 # ---------------------------------------------------------------------------
 
-def _issue_api_key(customer_id: str, subscription_id: str, email: str, source: str = "direct") -> str:
+def _issue_api_key(customer_id: str, subscription_id: str, email: str, source: str = "direct",
+                   console_tenant_id: str = "", location_id: str = "", msp_id: str = "",
+                   distributor_id: str = "") -> str:
     api_key = f"rs_live_{uuid.uuid4().hex}"
     dynamodb.Table(API_KEYS_TABLE).put_item(Item={
         "api_key":                api_key,
@@ -868,6 +870,10 @@ def _issue_api_key(customer_id: str, subscription_id: str, email: str, source: s
         "email":                  email,
         "active":                 True,
         "source":                 source,
+        "console_tenant_id":      console_tenant_id,
+        "location_id":            location_id,
+        "msp_id":                 msp_id,
+        "distributor_id":         distributor_id,
         "created_at":             datetime.now(timezone.utc).isoformat(),
     })
     logger.info("API key issued customer=%s subscription=%s email=%s source=%s", customer_id, subscription_id, email, source)
@@ -1624,7 +1630,27 @@ def _handle_ti_checkout(session: dict, source: str = "direct") -> None:
         )
     else:
         # No metered key exists — create one so the customer gets a working key immediately
-        api_key = _issue_api_key(stripe_customer_id, stripe_subscription_id, customer_email, source=source)
+        # Console tenant fields (Option C, issuer build step 1): carried on the
+        # Stripe subscription metadata by the checkout that created this key
+        # (the same metadata dict that already carries developer_email and
+        # source). Absent means unmapped (dedicated path), so default to "".
+        sub_metadata = {}
+        try:
+            sub_metadata = _stripe_get_sub(stripe_subscription_id).get("metadata") or {}
+        except Exception:
+            pass
+        session_metadata = session.get("metadata") or {}
+        console_tenant_id = (sub_metadata.get("console_tenant_id")
+                             or session_metadata.get("console_tenant_id") or "")
+        location_id = (sub_metadata.get("location_id")
+                       or session_metadata.get("location_id") or "")
+        msp_id = (sub_metadata.get("msp_id")
+                  or session_metadata.get("msp_id") or "")
+        distributor_id = (sub_metadata.get("distributor_id")
+                          or session_metadata.get("distributor_id") or "")
+        api_key = _issue_api_key(stripe_customer_id, stripe_subscription_id, customer_email, source=source,
+                                 console_tenant_id=console_tenant_id, location_id=location_id,
+                                 msp_id=msp_id, distributor_id=distributor_id)
         _provision_intel_access(api_key, stripe_subscription_id, intel_plan_tier, source=source)
         if customer_email:
             _send_ti_key_email(customer_email, api_key, intel_plan_tier)

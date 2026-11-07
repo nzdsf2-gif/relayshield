@@ -36,6 +36,7 @@ from decimal import Decimal
 
 import boto3
 from boto3.dynamodb.conditions import Attr
+from botocore.exceptions import ClientError
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -63,6 +64,59 @@ THREAT_ACTOR_MAP = {
 _secrets  = boto3.client("secretsmanager", region_name="us-east-1")
 _dynamodb = boto3.resource("dynamodb",      region_name="us-east-1")
 _ses      = boto3.client("ses",             region_name="us-east-1")
+
+# ---------------------------------------------------------------------------
+# Send idempotency (per-user, per-period markers)
+# ---------------------------------------------------------------------------
+# A second invocation for the same period must not re-send. Before sending
+# to a user, claim a marker in relayshield_send_markers with a conditional
+# write; only the invocation that wins the claim sends. The ci.import-probe
+# guard above is layer one (probe); this is the durable layer two.
+
+SEND_MARKERS_TABLE = "relayshield_send_markers"
+SEND_TYPE = "msp-weekly"
+MARKER_TTL_SECONDS = 120 * 24 * 3600  # 120 days
+
+
+def _claim_send_marker(marker_id: str, user_id: str, period: str) -> bool:
+    """Claim the marker for (user, period). True if this invocation owns the send."""
+    now = datetime.now(timezone.utc)
+    try:
+        _dynamodb.Table(SEND_MARKERS_TABLE).put_item(
+            Item={
+                "marker_id": marker_id,
+                "user_id": user_id,
+                "send_type": SEND_TYPE,
+                "period": period,
+                "status": "claimed",
+                "claimed_at": now.isoformat(),
+                "expires_at": int(now.timestamp()) + MARKER_TTL_SECONDS,
+            },
+            ConditionExpression="attribute_not_exists(marker_id)",
+        )
+        return True
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            logger.info("Send marker already claimed marker_id=%s — skipping.", marker_id)
+            return False
+        raise
+
+
+def _mark_send_sent(marker_id: str, message_id: str = "") -> None:
+    """Mark a claimed marker as sent. Best effort; a failure here does not resend."""
+    try:
+        _dynamodb.Table(SEND_MARKERS_TABLE).update_item(
+            Key={"marker_id": marker_id},
+            UpdateExpression="SET #st = :sent, sent_at = :now, message_id = :mid",
+            ExpressionAttributeNames={"#st": "status"},
+            ExpressionAttributeValues={
+                ":sent": "sent",
+                ":now": datetime.now(timezone.utc).isoformat(),
+                ":mid": message_id,
+            },
+        )
+    except Exception as exc:
+        logger.warning("Failed to mark send marker sent marker_id=%s: %s", marker_id, exc)
 
 
 def _tg_token() -> str:
@@ -320,6 +374,9 @@ def lambda_handler(event, context):
         return {"statusCode": 200, "probe": "ok"}
     logger.info("MSP weekly digest starting")
     week_label = datetime.now(timezone.utc).strftime("Week of %B %d, %Y")
+    # Idempotency period: ISO year-week (e.g. 2026-W45).
+    _iso = datetime.now(timezone.utc).isocalendar()
+    period = f"{_iso[0]}-W{_iso[1]:02d}"
     subject    = f"RelayShield Weekly TI Digest — {datetime.now(timezone.utc).strftime('%b %d')}"
 
     stats      = _aggregate_ioc_stats()
@@ -332,7 +389,18 @@ def lambda_handler(event, context):
     for sub in subscribers:
         email = sub.get("developer_email") or sub.get("email", "")
         if email and "@" in email:
+            # Idempotency: claim the per-subscriber, per-week marker
+            # before sending. Only the invocation that wins the claim sends.
+            marker_id = f"msp-weekly#{email}#{period}"
+            try:
+                claimed = _claim_send_marker(marker_id, email, period)
+            except Exception as exc:
+                logger.error("Send marker claim failed email=%s: %s", email, exc)
+                continue
+            if not claimed:
+                continue
             if _send_digest_email(email, subject, html, text):
+                _mark_send_sent(marker_id)
                 sent += 1
                 logger.info("Digest sent to %s", email)
 

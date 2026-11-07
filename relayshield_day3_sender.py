@@ -49,6 +49,8 @@ import urllib.request
 
 import boto3
 from boto3.dynamodb.conditions import Key
+from botocore.exceptions import ClientError
+from datetime import datetime, timezone
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -68,6 +70,59 @@ kms_client = boto3.client("kms")
 USERS_TABLE = "relayshield_users"
 
 KMS_PHONE_KEY_ALIAS = "alias/relayshield-data-key"
+
+# ---------------------------------------------------------------------------
+# Send idempotency (per-user, per-period markers)
+# ---------------------------------------------------------------------------
+# A second invocation for the same period must not re-send. Before sending
+# to a user, claim a marker in relayshield_send_markers with a conditional
+# write; only the invocation that wins the claim sends. The ci.import-probe
+# guard above is layer one (probe); this is the durable layer two.
+
+SEND_MARKERS_TABLE = "relayshield_send_markers"
+SEND_TYPE = "day3"
+MARKER_TTL_SECONDS = 120 * 24 * 3600  # 120 days
+
+
+def _claim_send_marker(marker_id: str, user_id: str, period: str) -> bool:
+    """Claim the marker for (user, period). True if this invocation owns the send."""
+    now = datetime.now(timezone.utc)
+    try:
+        dynamodb.Table(SEND_MARKERS_TABLE).put_item(
+            Item={
+                "marker_id": marker_id,
+                "user_id": user_id,
+                "send_type": SEND_TYPE,
+                "period": period,
+                "status": "claimed",
+                "claimed_at": now.isoformat(),
+                "expires_at": int(now.timestamp()) + MARKER_TTL_SECONDS,
+            },
+            ConditionExpression="attribute_not_exists(marker_id)",
+        )
+        return True
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            logger.info("Send marker already claimed marker_id=%s — skipping.", marker_id)
+            return False
+        raise
+
+
+def _mark_send_sent(marker_id: str, message_id: str = "") -> None:
+    """Mark a claimed marker as sent. Best effort; a failure here does not resend."""
+    try:
+        dynamodb.Table(SEND_MARKERS_TABLE).update_item(
+            Key={"marker_id": marker_id},
+            UpdateExpression="SET #st = :sent, sent_at = :now, message_id = :mid",
+            ExpressionAttributeNames={"#st": "status"},
+            ExpressionAttributeValues={
+                ":sent": "sent",
+                ":now": datetime.now(timezone.utc).isoformat(),
+                ":mid": message_id,
+            },
+        )
+    except Exception as exc:
+        logger.warning("Failed to mark send marker sent marker_id=%s: %s", marker_id, exc)
 
 # ---------------------------------------------------------------------------
 # Secrets
@@ -239,8 +294,8 @@ def send_whatsapp_template(
     account_sid: str,
     auth_token: str,
     from_number: str,
-) -> bool:
-    """Send an approved WhatsApp template via Twilio Content API. Returns True on success."""
+) -> str | None:
+    """Send an approved WhatsApp template via Twilio Content API. Returns the Twilio message SID on success, None on failure."""
     url = TWILIO_MESSAGES_URL.format(account_sid=account_sid)
     credentials = base64.b64encode(f"{account_sid}:{auth_token}".encode()).decode()
 
@@ -268,16 +323,16 @@ def send_whatsapp_template(
                 "Day 3 template sent to %s — SID: %s status: %s",
                 to_number, result.get("sid"), result.get("status"),
             )
-            return True
+            return result.get("sid")
     except urllib.error.HTTPError as exc:
         error_body = exc.read().decode("utf-8", errors="replace")
         logger.error(
             "Twilio HTTP %d sending Day 3 to %s: %s", exc.code, to_number, error_body
         )
-        return False
+        return None
     except Exception as exc:
         logger.exception("Twilio Day 3 send failed for %s: %s", to_number, exc)
-        return False
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -356,7 +411,22 @@ def lambda_handler(event, context):
         logger.exception("Failed to retrieve Twilio credentials: %s", exc)
         return {"statusCode": 500, "body": "Credential retrieval failed"}
 
-    sent = send_whatsapp_template(
+    # Idempotency: claim the one-time per-user marker before sending.
+    # Only the invocation that wins the claim sends.
+    marker_id = f"day3#{user_id}"
+    try:
+        claimed = _claim_send_marker(marker_id, user_id, "once")
+    except Exception as exc:
+        logger.exception(
+            "Send marker claim failed user_id=%s: %s — skipping send.",
+            user_id, exc,
+        )
+        return {"statusCode": 200, "body": "Marker claim failed — suppressed"}
+    if not claimed:
+        logger.info("Day 3 already sent user_id=%s — skipping.", user_id)
+        return {"statusCode": 200, "body": "Already sent — suppressed"}
+
+    message_sid = send_whatsapp_template(
         to_number=to_number,
         template_sid=DAY3_TEMPLATE_SID,
         variables={
@@ -370,6 +440,9 @@ def lambda_handler(event, context):
         auth_token=auth_token,
         from_number=from_number,
     )
+    sent = bool(message_sid)
+    if message_sid:
+        _mark_send_sent(marker_id, message_sid)
 
     logger.info(
         "Day 3 follow-up complete — user_id=%s tier=%s sent=%s",

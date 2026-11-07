@@ -38,6 +38,7 @@ from datetime import datetime, timedelta, timezone
 
 import boto3
 from boto3.dynamodb.conditions import Attr
+from botocore.exceptions import ClientError
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -48,6 +49,60 @@ dynamodb       = boto3.resource("dynamodb")
 USERS_TABLE             = "relayshield_users"
 MONITORED_WALLETS_TABLE = "relayshield_monitored_wallets"
 BREACH_ALERTS_TABLE     = "relayshield_breach_alerts"
+
+# ---------------------------------------------------------------------------
+# Send idempotency (per-user, per-period markers)
+# ---------------------------------------------------------------------------
+# A second invocation for the same period must not re-send. Before sending
+# to a user, claim a marker in relayshield_send_markers with a conditional
+# write; only the invocation that wins the claim sends. The ci.import-probe
+# guard above is layer one (probe); this is the durable layer two.
+
+SEND_MARKERS_TABLE = "relayshield_send_markers"
+SEND_TYPE = "tg-monthly-digest"
+MARKER_TTL_SECONDS = 120 * 24 * 3600  # 120 days
+
+
+def _claim_send_marker(marker_id: str, user_id: str, period: str) -> bool:
+    """Claim the marker for (user, period). True if this invocation owns the send."""
+    now = datetime.now(timezone.utc)
+    try:
+        dynamodb.Table(SEND_MARKERS_TABLE).put_item(
+            Item={
+                "marker_id": marker_id,
+                "user_id": user_id,
+                "send_type": SEND_TYPE,
+                "period": period,
+                "status": "claimed",
+                "claimed_at": now.isoformat(),
+                "expires_at": int(now.timestamp()) + MARKER_TTL_SECONDS,
+            },
+            ConditionExpression="attribute_not_exists(marker_id)",
+        )
+        return True
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            logger.info("Send marker already claimed marker_id=%s — skipping.", marker_id)
+            return False
+        raise
+
+
+def _mark_send_sent(marker_id: str, message_id: str = "") -> None:
+    """Mark a claimed marker as sent. Best effort; a failure here does not resend."""
+    try:
+        dynamodb.Table(SEND_MARKERS_TABLE).update_item(
+            Key={"marker_id": marker_id},
+            UpdateExpression="SET #st = :sent, sent_at = :now, message_id = :mid",
+            ExpressionAttributeNames={"#st": "status"},
+            ExpressionAttributeValues={
+                ":sent": "sent",
+                ":now": datetime.now(timezone.utc).isoformat(),
+                ":mid": message_id,
+            },
+        )
+    except Exception as exc:
+        logger.warning("Failed to mark send marker sent marker_id=%s: %s", marker_id, exc)
+
 ALCHEMY_SECRET_NAME     = "relayshield/alchemy_api_key"
 TG_SECRET_NAME          = "relayshield/telegram_bot_token"
 TELEGRAM_API_BASE       = "https://api.telegram.org/bot{token}/{method}"
@@ -599,11 +654,23 @@ def lambda_handler(event: dict, context) -> dict:
             continue
         tier = user.get("subscription_tier") or user.get("tier", "")
         try:
+            # Idempotency: claim the per-user, per-period marker before
+            # sending. Only the invocation that wins the claim sends.
+            period = now.strftime("%Y-%m")
+            marker_id = "tg-monthly-digest#" + user["user_id"] + "#" + period
+            try:
+                claimed = _claim_send_marker(marker_id, user["user_id"], period)
+            except Exception as exc:
+                logger.error("Send marker claim failed user_id=%s: %s", user["user_id"], exc)
+                continue
+            if not claimed:
+                continue
             if tier in CRYPTO_TIERS:
                 message = _build_crypto_digest(user, month_label)
             else:
                 message = _build_business_digest(user, month_label)
             _send_telegram(int(chat_id), message)
+            _mark_send_sent(marker_id)
             _mark_digest_sent(user["user_id"])
             sent += 1
             logger.info("Monthly digest sent — user_id=%s tier=%s", user["user_id"], tier)

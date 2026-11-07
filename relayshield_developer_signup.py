@@ -2773,6 +2773,46 @@ print(f<span class="str">"Breaches: {breach.get('breach_count', 0)}"</span>)
   <p style="margin:.5rem 0 0"><button type="button" onclick="copySnippet('snippet-badge', this)" style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:.45rem 1rem;font-size:.85rem;cursor:pointer">Copy</button></p>
 </div>
 
+
+  <h2 class="section-title" id="scope-of-protection">Scope of Protection</h2>
+  <p style="color:var(--muted);font-size:.9rem;margin:0 0 1rem">What the MCP Proxy Firewall protects, and what it does not.</p>
+  <p style="color:var(--text);font-size:.95rem;font-weight:600;margin:0 0 .4rem">What RelayShield protects</p>
+  <p style="color:var(--muted);font-size:.85rem;margin:0 0 .6rem">RelayShield screens MCP traffic at the protocol layer, between your agent and the MCP servers it connects to.</p>
+  <ul style="color:var(--muted);font-size:.85rem;line-height:1.6;margin:0 0 1rem;padding-left:1.2rem">
+    <li style="margin-bottom:.4rem"><strong style="color:var(--text)">MCP server risk screening.</strong> Before your agent connects to or installs an MCP server, RelayShield checks it against the threat-intelligence corpus: known-malicious indicators, typosquat domains, and newly-registered domains. A flagged server is blocked at the gate.</li>
+    <li style="margin-bottom:.4rem"><strong style="color:var(--text)">Tool-call gating.</strong> Every tools/call routed through the proxy is screened before it reaches the server. Calls to quarantined servers, calls that violate policy, calls with TI-flagged arguments, and calls that complete a known attack chain are blocked.</li>
+    <li style="margin-bottom:.4rem"><strong style="color:var(--text)">Tool-result screening.</strong> Results returning from a server are screened for TI-poisoned content and kill-chain indicators before they reach your agent.</li>
+    <li style="margin-bottom:.4rem"><strong style="color:var(--text)">Neighbor verification.</strong> In multi-server workflows, RelayShield verifies the sending server against the registry and corpus, and quarantines suspicious cross-server traffic.</li>
+    <li style="margin-bottom:.4rem"><strong style="color:var(--text)">Audit trail.</strong> Every screened invocation is logged with TI enrichment, in a signed, tamper-evident trail.</li>
+  </ul>
+  <p style="color:var(--muted);font-size:.85rem;margin:0 0 1rem">All of the above applies only to traffic routed through the RelayShield proxy. If a tool call bypasses the proxy, RelayShield does not see it, does not screen it, and does not log it.</p>
+  <p style="color:var(--text);font-size:.95rem;font-weight:600;margin:0 0 .4rem">What RelayShield does not protect</p>
+  <ul style="color:var(--muted);font-size:.85rem;line-height:1.6;margin:0 0 1rem;padding-left:1.2rem">
+    <li style="margin-bottom:.4rem"><strong style="color:var(--text)">Client-side UI isolation.</strong> RelayShield does not sandbox MCP App user interfaces, and it does not isolate code running in a third-party client. A vulnerability in a client&apos;s App frame, such as the <a href="https://theinjection.dev/items/mcp-inspector-2-14-0-app-frame-escape/" target="_blank" rel="noopener" style="color:var(--accent)">MCP Inspector frame escape</a> affecting Inspector 2.13.0 and earlier, is a client-side isolation failure. Patch the client. RelayShield screens the server and the tool call, not the client&apos;s UI sandbox.</li>
+    <li style="margin-bottom:.4rem"><strong style="color:var(--text)">Third-party testing tools.</strong> <a href="https://github.com/modelcontextprotocol/inspector" target="_blank" rel="noopener" style="color:var(--accent)">MCP Inspector</a>, and other tools you use to vet MCP servers, are separate products with their own security boundaries. RelayShield does not audit them, and a flaw in one of them is outside RelayShield&apos;s scope. Keep your testing tools updated.</li>
+    <li style="margin-bottom:.4rem"><strong style="color:var(--text)">Upstream server internals.</strong> RelayShield checks what a server presents to your agent. It does not audit what the server does with an authorized request once it receives it. Input validation, data access controls, and business logic inside the server stay the server&apos;s responsibility.</li>
+    <li style="margin-bottom:.4rem"><strong style="color:var(--text)">OS-level isolation.</strong> RelayShield is a protocol-layer gateway, not an operating-system sandbox. It gates tool access but does not isolate filesystem or process resources. Pair it with container or VM isolation for execution containment.</li>
+    <li style="margin-bottom:.4rem"><strong style="color:var(--text)">Tools that bypass the proxy.</strong> A client&apos;s native tools, or other MCP servers that do not route through RelayShield, are neither gated nor audited. Only traffic through the proxy is protected.</li>
+    <li style="margin-bottom:.4rem"><strong style="color:var(--text)">A compromised host.</strong> If the machine running your agent or the proxy is compromised, an attacker with local access can bypass the proxy configuration. Host security stays your responsibility.</li>
+    <li style="margin-bottom:.4rem"><strong style="color:var(--text)">Prompt injection in model reasoning.</strong> RelayShield screens tool calls and results for TI indicators and kill-chain patterns. It does not make a model resistant to malicious instructions embedded in retrieved content. Treat retrieved content as untrusted, and require human confirmation for consequential actions.</li>
+  </ul>
+  <p style="color:var(--text);font-size:.95rem;font-weight:600;margin:0 0 .4rem">Trust boundaries</p>
+  <table style="width:100%;border-collapse:collapse;color:var(--muted);font-size:.85rem;margin:0 0 1rem">
+    <tr><th style="text-align:left;border-bottom:1px solid var(--border);padding:.4rem .6rem;color:var(--text)">Protected</th><th style="text-align:left;border-bottom:1px solid var(--border);padding:.4rem .6rem;color:var(--text)">Not protected</th></tr>
+    <tr><td style="border-bottom:1px solid var(--border);padding:.4rem .6rem;vertical-align:top">Tool calls routed through the RelayShield proxy</td><td style="border-bottom:1px solid var(--border);padding:.4rem .6rem;vertical-align:top">Tool calls that bypass the proxy, and a client&apos;s native tools</td></tr>
+    <tr><td style="border-bottom:1px solid var(--border);padding:.4rem .6rem;vertical-align:top">MCP servers checked against the RelayShield corpus at connection time</td><td style="border-bottom:1px solid var(--border);padding:.4rem .6rem;vertical-align:top">Servers not yet in the corpus, and servers whose App UI is compromised after connection</td></tr>
+    <tr><td style="border-bottom:1px solid var(--border);padding:.4rem .6rem;vertical-align:top">Tool results screened for TI and kill-chain indicators</td><td style="border-bottom:1px solid var(--border);padding:.4rem .6rem;vertical-align:top">Client-side App code, and vulnerabilities in third-party testing tools such as MCP Inspector</td></tr>
+    <tr><td style="border-bottom:1px solid var(--border);padding:.4rem .6rem;vertical-align:top">Audit of screened invocations</td><td style="border-bottom:1px solid var(--border);padding:.4rem .6rem;vertical-align:top">Activity on a compromised host, and OS-level isolation</td></tr>
+  </table>
+  <p style="color:var(--text);font-size:.95rem;font-weight:600;margin:0 0 .4rem">What to do</p>
+  <ul style="color:var(--muted);font-size:.85rem;line-height:1.6;margin:0 0 1rem;padding-left:1.2rem">
+    <li style="margin-bottom:.4rem">Route all MCP traffic through the RelayShield proxy. Anything that bypasses it is unprotected.</li>
+    <li style="margin-bottom:.4rem">Keep MCP Inspector and other testing tools updated.</li>
+    <li style="margin-bottom:.4rem">Treat tool results as untrusted data, not as instructions.</li>
+    <li style="margin-bottom:.4rem">Use container or VM isolation for tool execution where the risk warrants it.</li>
+  </ul>
+  <p style="color:var(--muted);font-size:.85rem;margin:0">Questions? Contact RelayShield at <a href="mailto:support@relayshield.net" style="color:var(--accent)">support@relayshield.net</a>.</p>
+
 <footer>
   <!--
     Blog link added 2026-07-30. The blog was reachable only from two inline

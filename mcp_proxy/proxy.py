@@ -32,6 +32,8 @@ from .sequence_scoring import (KillChainScorer, SequenceScoringConfig,
                                _external_endpoints, make_session_key)
 from .telemetry import Telemetry
 from .verdicts import VerdictSigner, content_hash_of
+from .risk_profile import consult_profile, resolve_profile
+from .citations import citations_for_verdict
 
 log = logging.getLogger(__name__)
 
@@ -776,7 +778,22 @@ class ProxyHandler(BaseHTTPRequestHandler):
         _tenant_policy = {}
         _session_for_mode = store.get(session_key) or {}
         if _session_for_mode.get("tenant_verified") and _session_for_mode.get("tenant_id"):
-            self._fetch_tenant_policy(_session_for_mode)
+            _fetched_policy = self._fetch_tenant_policy(_session_for_mode)
+            # Context-engine item 1: resolve and consult the tenant
+            # risk profile carried in the resolved policy. The profile
+            # informs the gate; it does not change any policy
+            # decision. The consultation is stored per-request for
+            # the audit trail. A profile failure never blocks the
+            # gate; the gate proceeds with full per-call evaluation.
+            try:
+                _profile = resolve_profile(
+                    _fetched_policy,
+                    tenant_id=_session_for_mode.get("tenant_id", ""))
+                self._profile_consult = consult_profile(
+                    _profile, tool_name, arguments)
+            except Exception:
+                self._profile_consult = consult_profile(
+                    None, tool_name, arguments)
             _tenant_policies = getattr(self.server, "tenant_policies", None) or {}
             _loc_key = None
             if _session_for_mode.get("location_id"):
@@ -1066,6 +1083,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
         corr = resolve_correlation_identity(req, agent_id, upstream_url)
         session_key = corr["session_key"]
         _audit_tenant, _audit_binding, _audit_location = self._audit_session_fields(session_key)
+        # Context-engine item 1 and 5: profile and citation locals
+        # for the audit trail. Defaults stand for calls that never
+        # reach the gate (quarantined) or have no verified tenant
+        # (dedicated per-SMB, no profile by design). _intent_gate
+        # updates them after it runs, via self._profile_consult.
+        _profile_version = 0
+        _profile_fallback = False
+        _profile_high_risk = False
+        _audit_citations = []
 
         # Fail-closed: quarantined servers get no traffic at all.
         if quarantine.is_quarantined(upstream_url, tenant_id=_audit_tenant):
@@ -1079,7 +1105,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 decision="block", poison_category="quarantined_server",
                 reasons=["upstream server is quarantined"],
                 policy_decision="",
-                tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location, screened_call=True
+                tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location, screened_call=True,
+                profile_version=_profile_version, profile_fallback=_profile_fallback, profile_high_risk=_profile_high_risk, citations=_audit_citations
             )
             return _error_response(
                 req_id,
@@ -1152,7 +1179,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     reasons=policy_result.get("reasons", []),
                     evidence=signed.get("evidence", []),
                     policy_decision="deny",
-                    tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location, screened_call=True
+                    tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location, screened_call=True,
+                    profile_version=_profile_version, profile_fallback=_profile_fallback, profile_high_risk=_profile_high_risk, citations=_audit_citations
                 )
                 return _error_response(
                     req_id,
@@ -1205,6 +1233,13 @@ class ProxyHandler(BaseHTTPRequestHandler):
         # upstream) pair as in behavior.py.
         # corr and session_key moved above, after agent_id, before first audit call (Phase 3a call-site step 2v3)
         _gate = self._intent_gate(session_key, tool_name, arguments, cfg, req=req, screen_verdict=verdict)
+        # Context-engine item 1: pick up the profile consultation
+        # _intent_gate stored per-request. Defaults above stand when
+        # there is no verified tenant, so no profile applies.
+        _consult = getattr(self, "_profile_consult", None) or {}
+        _profile_version = _consult.get("profile_version", 0)
+        _profile_fallback = bool(_consult.get("profile_fallback", False))
+        _profile_high_risk = bool(_consult.get("tool_high_risk", False))
         if _gate is not None:
             _gate["id"] = req_id
             # Phase 1 gate stamp: tenant and binding, when a session exists.
@@ -1319,6 +1354,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 for i, r in enumerate(verdict.get("reasons", []))
             ]
             poison_category = verdict.get("poison_category", "clean")
+            # Context-engine item 5: build corpus citations from
+            # the screening result the proxy already has. Evidence
+            # only; never changes the verdict. A missing citation
+            # never delays or changes the verdict. _audit_citations
+            # carries them into the audit record for the block.
+            _citations = citations_for_verdict(
+                "block", verdict.get("matched_indicators"))
+            _audit_citations = _citations.get("citations", [])
             signed = signer.issue(
                 decision="block",
                 tool_name=tool_name,
@@ -1328,7 +1371,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 score=verdict.get("score", 0),
                 reasons=verdict.get("reasons", []),
                 poison_category=poison_category,
-                tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location)
+                tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location,
+                citations=_citations,
+            )
             log.info(json.dumps({
                 "event": "tools_call_verdict",
                 "poison_category": poison_category,
@@ -1346,7 +1391,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 risk_score=behavior_result.get("risk_score", 0.0),
                 policy_decision=policy_decision,
                 duration_ms=total_ms,
-                tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location, screened_call=True
+                tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location, screened_call=True,
+                profile_version=_profile_version, profile_fallback=_profile_fallback, profile_high_risk=_profile_high_risk, citations=_audit_citations
             )
             return _error_response(
                 req_id,
@@ -1394,7 +1440,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 risk_score=sequence_result.get("risk_score", 0.0),
                 policy_decision=policy_decision,
                 duration_ms=total_ms,
-                tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location, screened_call=True
+                tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location, screened_call=True,
+                profile_version=_profile_version, profile_fallback=_profile_fallback, profile_high_risk=_profile_high_risk, citations=_audit_citations
             )
             # Quarantine coupling (Phase 5 decision, 2026-10-23): a
             # sequence block feeds the quarantine mechanism exactly
@@ -1467,7 +1514,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 risk_score=kc_result.get("risk_score", 0.0),
                 policy_decision=policy_decision,
                 duration_ms=(time.monotonic() - t0) * 1000,
-                tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location, screened_call=True
+                tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location, screened_call=True,
+                profile_version=_profile_version, profile_fallback=_profile_fallback, profile_high_risk=_profile_high_risk, citations=_audit_citations
             )
             return _error_response(
                 req_id,
@@ -1495,7 +1543,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             risk_score=behavior_result.get("risk_score", 0.0),
             policy_decision=policy_decision,
             duration_ms=(time.monotonic() - t0) * 1000,
-            tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location, screened_call=True
+            tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location, screened_call=True,
+            profile_version=_profile_version, profile_fallback=_profile_fallback, profile_high_risk=_profile_high_risk, citations=_audit_citations
         )
 
         return upstream_resp
@@ -1514,6 +1563,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
         """
         if not cfg.result_screening_enabled:
             return None
+        # Context-engine fix: _sr_tenant/_sr_binding/_sr_location
+        # are resolved from the correlation key below, but the
+        # screener key fetch here references _sr_tenant first.
+        # Initialize them so the reference is always bound; the
+        # resolved values overwrite these below.
+        _sr_tenant = ""
+        _sr_binding = ""
+        _sr_location = ""
         try:
             result_verdict = screener.screen_tool_result(upstream_resp, api_key=self._tenant_key(_sr_tenant, "screener_key") if _sr_tenant else None)
         except Exception as exc:
@@ -1643,6 +1700,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
         # Issue a signed verdict for the poisoned-neighbor flag.
         signer = self.server.signer
         poison_category = result_verdict.get("poison_category", "clean")
+        # Context-engine item 5: build corpus citations from
+        # the result screening already in hand. Evidence only;
+        # never changes the verdict.
+        _result_citations = citations_for_verdict(
+            "flag", result_verdict.get("matched_indicators"))
         signed = signer.issue(
             decision="flag",
             tool_name=tool_name,
@@ -1651,7 +1713,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
             reasons=reasons,
             poison_category=poison_category,
             extra={"upstream": upstream_url, "kit_ids": kit_ids},
-                tenant_id=_sr_tenant, binding_id=_sr_binding, location_id=_sr_location)
+                tenant_id=_sr_tenant, binding_id=_sr_binding, location_id=_sr_location,
+            citations=_result_citations,
+        )
 
         log.warning(json.dumps({
             "event": "poisoned_result_detected",

@@ -1695,6 +1695,8 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
         # and nothing else; the re-screens the watcher performs are covered by
         # the licence, so there is no per-call meter on this path either.
         is_watch_license_call = bool(key_record.get("watch_access")) and path in WATCH_LICENSE_ENDPOINTS
+        # Free MCP server (hosted relayshield-free-mcp) — scoped bypass for the breach endpoint only, so the public free server's check_breach works without burning the key's free allowance or credits. free_mcp_access must never grant the rest of the metered catalog.
+        is_free_mcp_call = bool(key_record.get("free_mcp_access")) and path == "/v1/metered/breach"
 
     if key_record.get("source") in DEMO_QUOTA_SOURCES and not _check_demo_quota(key_record):
         return {
@@ -1714,7 +1716,7 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
             and not is_bundle_b_call and not is_bundle_b_direct_call
             and not is_bundle_d_included_call
             and not is_cs_mobile_call and not is_llm_license_call
-            and not is_watch_license_call and not is_free_tier_call):
+            and not is_watch_license_call and not is_free_tier_call and not is_free_mcp_call):
         logger.warning(
             "402 insufficient credits — path=%s key=%s credit_balance=%s source=%s",
             path, api_key_str[:24], credit_balance, key_record.get("source"),
@@ -1823,6 +1825,9 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
             # their $299 already covers, and it would look like normal usage in
             # every log. Any future flat-rate bypass belongs above the credit
             # branch for the same reason.
+            pass
+        elif is_free_mcp_call:
+            # Free MCP server breach check. No billing, no credit deduction, no free-call decrement. Positioned above `elif use_credits` so a key that also carries a credit balance is not charged for a call the free server's exemption covers.
             pass
         elif is_free_tier_call:
             # Conditional update: if two calls race, the second fails the

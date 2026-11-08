@@ -183,7 +183,8 @@ class VerdictSigner:
               evidence: list, level: str = "", score: int = 0,
               reasons: list = None, extra: dict = None,
               poison_category: str = "clean", tenant_id: str = "",
-              binding_id: str = "", location_id: str = "") -> dict:
+              binding_id: str = "", location_id: str = "",
+              citations: dict = None) -> dict:
         """Build a verdict dict, signed when a key is configured.
 
         decision: "block" | "quarantine" | "flag" | "allow"
@@ -209,6 +210,16 @@ class VerdictSigner:
             "binding_id": binding_id or "",
             "location_id": location_id or "",
         }
+        if citations is not None:
+            # Context-engine item 5: corpus citations on a flagged
+            # verdict. Evidence only; never changes the decision,
+            # score, or poison category. Covered by the signature
+            # below, like the rest of the verdict.
+            verdict["citations"] = citations.get("citations", [])
+            verdict["citations_total_matched"] = citations.get(
+                "citations_total_matched", 0)
+            verdict["citations_available"] = bool(
+                citations.get("citations_available", False))
         if extra:
             verdict["extra"] = extra
         if self.signing_enabled:

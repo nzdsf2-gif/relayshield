@@ -464,6 +464,7 @@ class Screener:
                 "reasons": ["no screenable indicators in tool arguments"],
                 "poison_category": POISON_CLEAN,
                 "screened": indicators,
+                "matched_indicators": [],
                 "confidence": scored["confidence"],
                 "cause_codes": scored["cause_codes"],
             }
@@ -500,12 +501,14 @@ class Screener:
                 ],
                 "poison_category": POISON_SSRF,
                 "screened": indicators,
+                "matched_indicators": [],
                 "confidence": scored["confidence"],
                 "cause_codes": scored["cause_codes"],
             }
 
         # Check each URL via composite-check (keyless). Take the worst.
-        worst = {"level": "unknown", "score": 0, "reasons": []}
+        worst = {"level": "unknown", "score": 0, "reasons": [],
+                 "matched_indicators": []}
         checked = 0
         errors = 0
         for url in urls[:10]:  # cap per-call fan-out
@@ -532,6 +535,7 @@ class Screener:
                 "reasons": [f"TI screening unavailable ({errors} errors); allowed"],
                 "poison_category": POISON_CLEAN,
                 "screened": indicators,
+                "matched_indicators": [],
                 "confidence": scored["confidence"],
                 "cause_codes": scored["cause_codes"],
             }
@@ -571,12 +575,33 @@ class Screener:
         level = str(data.get("level", "unknown")).lower()
         score = int(data.get("score", 0))
         reasons = []
-        for sig in data.get("signals", []):
+        signals = data.get("signals", []) or []
+        for sig in signals:
             for r in sig.get("reasons", []):
                 reasons.append(str(r))
         if not reasons:
             reasons = [f"composite-check level={level} score={score}"]
-        return {"level": level, "score": score, "reasons": reasons}
+        # Context-engine item 5: preserve the matched-indicator
+        # records from this screening result, so citations can be
+        # built from the result the proxy already has. No new call.
+        # Signal dicts are carried verbatim; the citation builder
+        # normalizes them and skips any it cannot use. When no
+        # signal carries an indicator value but the check matched,
+        # the checked URL itself is the matched indicator.
+        matched = []
+        for sig in signals[:10]:
+            if isinstance(sig, dict):
+                matched.append(dict(sig))
+        if level != "unknown" and not any(
+                isinstance(m, dict) and (m.get("indicator") or m.get("ioc_value") or m.get("value") or m.get("kit_id"))
+                for m in matched):
+            matched.append({
+                "indicator": url,
+                "indicator_type": "url",
+                "confidence": score / 100.0,
+            })
+        return {"level": level, "score": score, "reasons": reasons,
+                "matched_indicators": matched}
 
     def _lookup_kit(self, kit_id: str, api_key: str = None) -> dict:
         """Look up a kit fingerprint via the scamkit-match API.
@@ -740,6 +765,7 @@ class Screener:
         urls = indicators.get("urls", [])
         details["urls_found"] = len(urls)
         worst = None
+        worst_url = None
         for url in urls[:10]:
             try:
                 check = self._check_url(url, api_key=api_key)
@@ -750,6 +776,7 @@ class Screener:
             if _level_rank(check["level"]) > _level_rank(
                     worst["level"] if worst else "unknown"):
                 worst = check
+                worst_url = url
         if worst and worst["level"] in self.block_levels:
             reasons.append(
                 f"malicious URL in tool result: level={worst['level']} "
@@ -889,6 +916,33 @@ class Screener:
                     }
                     categories.add(POISON_CREDENTIAL_EXFILTRATION)
 
+        # Context-engine item 5: matched-indicator records for
+        # citations, from the screening result already in hand.
+        # Kit evidence carries kit family and confidence; the worst
+        # TI-matched URL carries its check records. PII and
+        # credential values are never here: only pattern types and
+        # counts are ever reported for those, as today.
+        matched_indicators = []
+        if worst is not None and worst.get("level") in self.block_levels:
+            for record in worst.get("matched_indicators", []) or []:
+                if isinstance(record, dict):
+                    matched_indicators.append(dict(record))
+            if worst_url and not any(
+                    isinstance(m, dict) and m.get("indicator") == worst_url
+                    for m in matched_indicators):
+                matched_indicators.append({
+                    "indicator": worst_url,
+                    "indicator_type": "url",
+                    "confidence": (worst.get("score", 0) or 0) / 100.0,
+                })
+        for ke in details.get("kit_evidence", []) or []:
+            if isinstance(ke, dict) and ke.get("kit_id"):
+                matched_indicators.append({
+                    "indicator": ke.get("kit_id", ""),
+                    "indicator_type": "kit",
+                    "kit_family": ke.get("family", ""),
+                    "confidence": ke.get("confidence", 0),
+                })
         scored = _confidence_for_result(categories, details)
         return {
             "verdict": "flagged" if reasons else "clean",
@@ -896,6 +950,7 @@ class Screener:
             "reasons": reasons,
             "details": details,
             "kit_ids": kit_ids,
+            "matched_indicators": matched_indicators,
             "pii_leak": bool(pii_found),
             "confidence": scored["confidence"],
             "cause_codes": scored["cause_codes"],

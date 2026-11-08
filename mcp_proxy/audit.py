@@ -94,7 +94,10 @@ class AuditTrail:
                reasons: list = None, evidence: list = None,
                risk_score: float = 0.0, policy_decision: str = "",
                duration_ms: float = 0.0, tenant_id: str = "",
-               binding_id: str = "", location_id: str = "", screened_call: bool = False) -> dict:
+               binding_id: str = "", location_id: str = "", screened_call: bool = False,
+               profile_version: int = 0, profile_fallback: bool = False,
+               profile_high_risk: bool = False,
+               citations: list = None) -> dict:
         """Append one audit entry. Returns the entry."""
         args_hash = hashlib.sha256(
             _canonical(arguments or {})).hexdigest()
@@ -120,6 +123,10 @@ class AuditTrail:
                 "binding_id": binding_id or "",
                 "location_id": location_id or "",
                 "screened_call": screened_call,
+                "profile_version": int(profile_version or 0),
+                "profile_fallback": bool(profile_fallback),
+                "profile_high_risk": bool(profile_high_risk),
+                "citations": list(citations or []),
                 "prev_hash": prev_hash,
             }
             entry["entry_hash"] = _entry_hash(entry)

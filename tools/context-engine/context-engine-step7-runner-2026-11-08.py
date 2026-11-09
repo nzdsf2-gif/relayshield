@@ -150,7 +150,7 @@ def main():
 
     account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
     api_token = os.environ.get("CLOUDFLARE_API_TOKEN")
-    namespace_id = os.environ.get("CE_CONFIG_KV_ID", DEFAULT_CONFIG_KV_ID)
+    namespace_id = os.environ.get("CE_CONFIG_KV_ID") or DEFAULT_CONFIG_KV_ID
     if not account_id or not api_token:
         print("ABORT: CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN must be set in the environment.")
         sys.exit(1)

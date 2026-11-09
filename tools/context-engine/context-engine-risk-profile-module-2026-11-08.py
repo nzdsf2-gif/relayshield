@@ -60,7 +60,8 @@ class RiskProfile:
 
     def __init__(self, tenant_id="", version=1, computed_at=0.0,
                  sector="", risk_score=0.0, high_risk_tools=None,
-                 kit_families=None, known_counterparties=None):
+                 kit_families=None, known_counterparties=None,
+                 score_breakdown=None):
         self.tenant_id = tenant_id or ""
         self.version = int(version) if version is not None else 1
         try:
@@ -75,6 +76,7 @@ class RiskProfile:
         self.high_risk_tools = list(high_risk_tools or [])
         self.kit_families = list(kit_families or [])
         self.known_counterparties = list(known_counterparties or [])
+        self.score_breakdown = dict(score_breakdown) if isinstance(score_breakdown, dict) else {}
 
     @classmethod
     def from_dict(cls, data, tenant_id=""):
@@ -94,6 +96,7 @@ class RiskProfile:
             high_risk_tools=data.get("high_risk_tools"),
             kit_families=data.get("kit_families"),
             known_counterparties=data.get("known_counterparties"),
+            score_breakdown=data.get("score_breakdown"),
         )
 
     @classmethod
@@ -128,6 +131,7 @@ class RiskProfile:
             "high_risk_tools": list(self.high_risk_tools),
             "kit_families": list(self.kit_families),
             "known_counterparties": list(self.known_counterparties),
+            "score_breakdown": dict(self.score_breakdown),
         }
 
     def age_seconds(self, now=None):

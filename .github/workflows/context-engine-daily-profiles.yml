@@ -15,7 +15,7 @@
 #    expects, e.g. tools/context-engine/):
 #      - context-engine-daily-profile-job-2026-11-08.py
 #      - context-engine-risk-profile-module-2026-11-08.py
-#      - context-engine-step7-runner-2026-11-08.py --corpus-file tools/context-engine/context-engine-step7-corpus-default-2026-11-08.json
+#      - context-engine-step7-runner-2026-11-08.py --corpus-file context-engine-step7-corpus-default-2026-11-08.json
 #    The runner loads the daily job module by path from its own
 #    directory, and the daily job loads the risk profile module
 #    the same way, so keep the three files together.
@@ -67,5 +67,5 @@ jobs:
           CE_CONFIG_KV_ID: ${{ secrets.CE_CONFIG_KV_ID }}
         run: |
           cd tools/context-engine
-          python3 context-engine-step7-runner-2026-11-08.py --corpus-file tools/context-engine/context-engine-step7-corpus-default-2026-11-08.json --dry-run
-          python3 context-engine-step7-runner-2026-11-08.py --corpus-file tools/context-engine/context-engine-step7-corpus-default-2026-11-08.json
+          python3 context-engine-step7-runner-2026-11-08.py --corpus-file context-engine-step7-corpus-default-2026-11-08.json --dry-run
+          python3 context-engine-step7-runner-2026-11-08.py --corpus-file context-engine-step7-corpus-default-2026-11-08.json

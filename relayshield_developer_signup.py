@@ -4639,4 +4639,12 @@ def lambda_handler(event: dict, context) -> dict:
             raw_body = raw_body.encode("utf-8")
         return handle_webhook(event.get("headers") or {}, raw_body)
 
+    if method in ("GET", "HEAD") and path.startswith("/.well-known/muse-challenge/"):
+        token = path.rsplit("/", 1)[-1]
+        return {
+            "statusCode": 200,
+            "headers": {"Content-Type": "text/plain"},
+            "body": f"muse-challenge={token}",
+        }
+
     return _err("not found", 404)

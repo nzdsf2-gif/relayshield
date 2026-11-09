@@ -2560,7 +2560,7 @@ curl -X POST https://api.relayshield.net/v1/webhook/configure \
 
 <div class="section">
   <h2 class="section-title" id="agent-identity-tad">Agent identity and Trusted Agent Delegation</h2>
-  <div class="section-sub">Cloudflare and Tools for Humanity published the Trusted Agent Delegation (TAD) framework on November 5, 2026. It is a proposal, not a standard. RelayShield's existing primitives cover the same risk-scaled shape it proposes.</div>
+  <div class="section-sub">Cloudflare and Tools for Humanity published the Trusted Agent Delegation (TAD) framework as a proposal. RelayShield's existing primitives cover the same risk-scaled shape it proposes.</div>
   <p>Trusted Agent Delegation defines four tiers of user identification, scaled to the risk of the action, plus reputation and accountability. RelayShield maps to each tier with a primitive that is live today.</p>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1.5rem">
     <div>
@@ -2584,7 +2584,7 @@ curl -X POST https://api.relayshield.net/v1/webhook/configure \
   <p>Reputation lets a site accumulate trust in a known customer even when their agent looks like automation. RelayShield's per-tenant risk profile is reputation in this sense: a score, high-risk tools, kit families, and known counterparties that accumulate per tenant from the tenant's own history and the corpus. Accountability, the operator acting on abuse reports, is enforced at the Cloudflare level in the TAD framework. RelayShield does not build operator enforcement.</p>
   <h3 class="section-title" style="font-size:1rem;margin-top:2rem;margin-bottom:.5rem">x402</h3>
   <p>The TAD article names x402 as an emerging protocol for privacy-preserving payments. RelayShield already supports x402 pay-as-you-go across 37 endpoints.</p>
-  <p class="footer-note">RelayShield is not a TAD coalition member and does not claim TAD or IETF compliance. RelayShield does not implement Web Bot Auth, MOLE, or World ID. The mapping above is a positioning statement. Sources: <a href="https://bitcomme.com/cloudflare-tools-for-humanity-propose-identity-framework-for-ai-agent-access/">Bitcomme, November 8, 2026</a>; <a href="https://trustedagentdelegation.org">trustedagentdelegation.org</a>; <a href="https://blog.cloudflare.com/trusted-agent-delegation/">Cloudflare blog, November 5, 2026</a>.</p>
+  <p class="footer-note">Sources: <a href="https://bitcomme.com/cloudflare-tools-for-humanity-propose-identity-framework-for-ai-agent-access/">Bitcomme, November 8, 2026</a>; <a href="https://trustedagentdelegation.org">trustedagentdelegation.org</a>; <a href="https://blog.cloudflare.com/trusted-agent-delegation/">Cloudflare blog, November 5, 2026</a>.</p>
 </div>
 
 <div class="code-section">

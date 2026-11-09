@@ -180,11 +180,41 @@ def compute_profile(tenant, history, corpus, previous=None, now=None):
         risk_score = (0.50 * flag_rate_pct
                       + 0.30 * kit_share * 100.0
                       + 0.20 * baseline)
+        score_breakdown = {
+            "flag_rate_pct": round(flag_rate_pct, 1),
+            "flag_weight": 0.50,
+            "flag_contribution": round(0.50 * flag_rate_pct, 1),
+            "kit_share": round(kit_share, 2),
+            "kit_weight": 0.30,
+            "kit_contribution": round(0.30 * kit_share * 100.0, 1),
+            "sector_baseline": round(baseline, 1),
+            "baseline_weight": 0.20,
+            "baseline_contribution": round(0.20 * baseline, 1),
+            "screened": screened,
+            "flagged": flagged,
+            "blocked": blocked,
+        }
     else:
         # Q6: new tenant, no history. Score is the sector baseline,
         # or neutral 50.0 when the sector has no baseline.
         risk_score = (sector_baseline if sector_baseline is not None
                       else NEUTRAL_RISK_SCORE)
+        _base = sector_baseline if sector_baseline is not None else NEUTRAL_RISK_SCORE
+        score_breakdown = {
+            "flag_rate_pct": None,
+            "flag_weight": 0.50,
+            "flag_contribution": 0.0,
+            "kit_share": None,
+            "kit_weight": 0.30,
+            "kit_contribution": 0.0,
+            "sector_baseline": round(_base, 1),
+            "baseline_weight": 0.20,
+            "baseline_contribution": round(0.20 * _base, 1),
+            "screened": 0,
+            "flagged": 0,
+            "blocked": 0,
+            "note": "new tenant, no history; score is the sector baseline",
+        }
     risk_score = clamp_score(risk_score)
 
     # High-risk tools: tools flagged or blocked for this tenant in
@@ -249,6 +279,7 @@ def compute_profile(tenant, history, corpus, previous=None, now=None):
         high_risk_tools=high_risk_tools,
         kit_families=kit_families,
         known_counterparties=known,
+        score_breakdown=score_breakdown,
     )
 
 

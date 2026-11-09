@@ -2558,6 +2558,35 @@ curl -X POST https://api.relayshield.net/v1/webhook/configure \
   <p style="margin-top:1rem;font-size:.88rem;color:var(--muted)">Background reading: the TAP verifier launch post on <a href="https://blog.relayshield.net/" style="color:var(--accent)">blog.relayshield.net</a> (direct post link added when it publishes).</p>
 </div>
 
+<div class="section">
+  <h2 class="section-title" id="agent-identity-tad">Agent identity and Trusted Agent Delegation</h2>
+  <div class="section-sub">Cloudflare and Tools for Humanity published the Trusted Agent Delegation (TAD) framework on November 5, 2026. It is a proposal, not a standard. RelayShield's existing primitives cover the same risk-scaled shape it proposes.</div>
+  <p>Trusted Agent Delegation defines four tiers of user identification, scaled to the risk of the action, plus reputation and accountability. RelayShield maps to each tier with a primitive that is live today.</p>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1.5rem">
+    <div>
+      <h3 class="section-title" style="font-size:1rem;margin-bottom:.5rem">Nothing tier: no identifier</h3>
+      <p>The site judges only the agent. RelayShield: the proxy screens the call against the threat intelligence corpus with no identity required. The free MCP server does this today.</p>
+    </div>
+    <div>
+      <h3 class="section-title" style="font-size:1rem;margin-bottom:.5rem">Session tier: one agent instance</h3>
+      <p>Requests are tied to one agent instance. RelayShield: the intent binding carries a binding_id that ties a session's calls to one delegation. One session's misuse does not taint another session's binding.</p>
+    </div>
+    <div>
+      <h3 class="section-title" style="font-size:1rem;margin-bottom:.5rem">Account tier: stable identifier across sessions</h3>
+      <p>Requests are linked across sessions through a stable identifier. RelayShield: Passport issues an identity credential that links an agent across sessions, and the TAP verifier checks it.</p>
+    </div>
+    <div>
+      <h3 class="section-title" style="font-size:1rem;margin-bottom:.5rem">Unique tier: persistent identifier for high-risk actions</h3>
+      <p>High-risk actions use a persistent third-party identifier. RelayShield: Policy 2 step-up requires a human approval attestation for high-risk actions. That is the same risk-scaled idea, without requiring a government ID or a World ID. There is no World ID integration.</p>
+    </div>
+  </div>
+  <h3 class="section-title" style="font-size:1rem;margin-top:2rem;margin-bottom:.5rem">Reputation and accountability</h3>
+  <p>Reputation lets a site accumulate trust in a known customer even when their agent looks like automation. RelayShield's per-tenant risk profile is reputation in this sense: a score, high-risk tools, kit families, and known counterparties that accumulate per tenant from the tenant's own history and the corpus. Accountability, the operator acting on abuse reports, is enforced at the Cloudflare level in the TAD framework. RelayShield does not build operator enforcement.</p>
+  <h3 class="section-title" style="font-size:1rem;margin-top:2rem;margin-bottom:.5rem">x402</h3>
+  <p>The TAD article names x402 as an emerging protocol for privacy-preserving payments. RelayShield already supports x402 pay-as-you-go across 37 endpoints.</p>
+  <p class="footer-note">RelayShield is not a TAD coalition member and does not claim TAD or IETF compliance. RelayShield does not implement Web Bot Auth, MOLE, or World ID. The mapping above is a positioning statement. Sources: <a href="https://bitcomme.com/cloudflare-tools-for-humanity-propose-identity-framework-for-ai-agent-access/">Bitcomme, November 8, 2026</a>; <a href="https://trustedagentdelegation.org">trustedagentdelegation.org</a>; <a href="https://blog.cloudflare.com/trusted-agent-delegation/">Cloudflare blog, November 5, 2026</a>.</p>
+</div>
+
 <div class="code-section">
   <h2 class="section-title" id="quick-start" style="margin-bottom:1rem">Quick start</h2>
 <pre><span class="cmt"># Breach check</span>

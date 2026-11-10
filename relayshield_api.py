@@ -38,6 +38,7 @@ Pay-as-you-go endpoints (no API key — x402 payment verified in Lambda):
   POST /v1/payg/token-security      — $0.05 USDC — token honeypot + tax analysis (teaser price, CDPX-3)
   POST /v1/payg/nft-security        — $0.10 USDC — NFT contract risk
   POST /v1/payg/wallet-screen-batch — $0.50 USDC — batch up to 10 addresses
+  POST /v1/payg/counterparty-screen — $0.10 USDC — pre-payment counterparty screen: TI corpus + GoPlus, Base
   POST /v1/payg/infostealer         — $0.15 USDC — Hudson Rock infostealer detection
   POST /v1/payg/supply-chain        — $0.10 USDC per CALL, not per domain — vendor breach + infostealer risk (up to 10 domains)
   POST /v1/payg/session-risk        — $0.30 USDC — INTEL-5 active session hijack / AiTM detection
@@ -368,6 +369,7 @@ PAYG_PRICE_UNITS: dict[str, int] = {
     "/v1/payg/scamkit-match":        100000,   # $0.10 — match a kit_<sha256> against the corpus
     "/v1/payg/scamkit-lineage":      SCAMKIT_LINEAGE_PRICE_UNITS_PLACEHOLDER,
     "/v1/payg/campaign-scan":       5500000,   # $5.50 flat — composite over the TI endpoints
+    "/v1/payg/counterparty-screen": 100000,   # $0.10 — pre-payment counterparty screen: TI corpus + GoPlus, Base
     # Intent binding (staged 2026-10-23, price APPROVED 2026-10-24
     # at $0.10/call, scamkit-match parity).
     "/v1/payg/intent-bind":          INTENT_BIND_PRICE_UNITS_PLACEHOLDER,
@@ -451,6 +453,114 @@ ASSET_WATCHLIST_TABLE   = "relayshield_asset_watchlist"
 ACTOR_WATCHLIST_TABLE   = "relayshield_actor_watchlist"
 EXPLOIT_CHATTER_TABLE   = "relayshield_exploit_chatter"
 SHARED_REPORTS_TABLE    = "relayshield_shared_reports"
+# Step 4 licensing: issued appliance licenses (written by the Stripe
+# issuance flow) and revocations (written by the issuer revoke
+# command and the Stripe flow). The API-side entitlement check reads
+# these to decide whether an appliance-originated screening call is
+# served. See _check_license_entitlement below.
+LICENSES_TABLE          = "relayshield_licenses"
+LICENSE_REVOCATIONS_TABLE = "relayshield_license_revocations"
+
+
+def _check_license_entitlement(api_key_record):
+    """Check whether an appliance-originated screening call is
+    entitled. Returns {"entitled": bool, "reason": str}.
+
+    Applies ONLY to API keys that carry a license_tid attribute
+    (the tenant the license is bound to). A key with no license_tid
+    is not an appliance key; the check passes through (entitled
+    True, reason "not_an_appliance_key") so existing keys are never
+    affected. For an appliance key, the license record for the
+    tenant is read from relayshield_licenses and the revocation
+    record from relayshield_license_revocations. The call is
+    entitled only when a license record exists, is not expired, and
+    is not revoked. A DynamoDB failure fails OPEN (entitled True,
+    reason "lookup_failed") and is logged, because a transient
+    table outage must not take down screening for every appliance
+    at once; the in-image gate and the 7-day cap still bound
+    operation.
+    """
+    if not api_key_record:
+        return {"entitled": True, "reason": "no_key_record"}
+    tid = (api_key_record.get("license_tid") or "").strip()
+    if not tid:
+        return {"entitled": True, "reason": "not_an_appliance_key"}
+    now = int(time.time())
+    try:
+        lic_table = dynamodb.Table(LICENSES_TABLE)
+        resp = lic_table.query(
+            KeyConditionExpression="tid = :t",
+            ExpressionAttributeValues={":t": tid},
+            ScanIndexForward=False,
+            Limit=1,
+        )
+        items = resp.get("Items") or []
+    except Exception as exc:
+        logger.warning(
+            "license entitlement lookup failed tid=%s: %s (fail open)",
+            tid, exc)
+        return {"entitled": True, "reason": "lookup_failed"}
+    if not items:
+        logger.warning(
+            "license entitlement: no license record for tid=%s", tid)
+        return {"entitled": False, "reason": "license_not_found"}
+    record = items[0]
+    exp = record.get("exp")
+    if isinstance(exp, int) and exp <= now:
+        logger.warning(
+            "license entitlement: license expired for tid=%s", tid)
+        return {"entitled": False, "reason": "license_expired"}
+    if record.get("status") == "revoked":
+        logger.warning(
+            "license entitlement: license revoked for tid=%s", tid)
+        return {"entitled": False, "reason": "license_revoked"}
+    try:
+        rev_table = dynamodb.Table(LICENSE_REVOCATIONS_TABLE)
+        rev = rev_table.get_item(Key={"tid": tid}).get("Item") or {}
+    except Exception as exc:
+        logger.warning(
+            "license revocation lookup failed tid=%s: %s (fail open)",
+            tid, exc)
+        return {"entitled": True, "reason": "lookup_failed"}
+    if rev.get("revoked_all"):
+        logger.warning(
+            "license entitlement: tenant-wide revocation tid=%s", tid)
+        return {"entitled": False, "reason": "license_revoked"}
+    kid = (record.get("kid") or "").strip()
+    if kid and kid in (rev.get("revoked_kids") or []):
+        logger.warning(
+            "license entitlement: kid revoked tid=%s kid=%s", tid, kid)
+        return {"entitled": False, "reason": "license_revoked"}
+    return {"entitled": True, "reason": "ok"}
+
+
+def _license_entitlement_error(reason):
+    """Build the 403 response for a failed entitlement check."""
+    messages = {
+        "license_not_found": (
+            "No license on file for this tenant. Obtain a license "
+            "at https://relayshield.net or contact "
+            "support@relayshield.net."),
+        "license_expired": (
+            "The license for this tenant has expired. Renew it at "
+            "https://relayshield.net or contact "
+            "support@relayshield.net."),
+        "license_revoked": (
+            "The license for this tenant has been revoked. Contact "
+            "support@relayshield.net."),
+    }
+    return {
+        "statusCode": 403,
+        "headers": {"Content-Type": "application/json",
+                    "Access-Control-Allow-Origin": "*"},
+        "body": json.dumps({
+            "ok": False,
+            "error": messages.get(reason, "License required."),
+            "license_error": reason,
+            "docs": "https://api.relayshield.net/developers",
+        }),
+    }
+
 FROM_EMAIL              = "noreply@relayshield.net"
 
 # Quota warning thresholds for mp_499 (10,000 call/month) TI plan.
@@ -1495,6 +1605,18 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
                 "docs":  "https://api.relayshield.net/developers",
             }),
         }
+
+    # Step 4 licensing: API-side entitlement. An appliance-originated
+    # screening call (a key carrying license_tid) is served only when
+    # the tenant has a valid, unexpired, non-revoked license. This is
+    # the backstop for an operator who starts the proxy directly and
+    # bypasses the in-image gate. Non-appliance keys pass through.
+    _ent = _check_license_entitlement(key_record)
+    if not _ent["entitled"]:
+        logger.warning(
+            "license entitlement denied path=%s reason=%s",
+            path, _ent["reason"])
+        return _license_entitlement_error(_ent["reason"])
 
     metered_routes = {
         "/v1/metered/breach":          handle_breach,
@@ -6426,6 +6548,203 @@ def handle_wallet_screen_batch(params: dict) -> dict:
         "screened":   len(results),
         "high_risk":  high_count,
         "results":    results,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Endpoint: POST /v1/payg/counterparty-screen  (PAYG only — $0.10)
+# ---------------------------------------------------------------------------
+# Pre-payment counterparty screen for Coinbase Wallet MCP agents (and any
+# agent paying over x402 on Base). Screens the payTo address in two layers:
+#
+#   1. TI corpus — relayshield_intel_iocs, keyed by the exact address value
+#      (EVM addresses lowercased, as the ingest stores them). A corpus hit
+#      outranks a GoPlus clean: a corpus-listed address is never LOW.
+#   2. GoPlus — the shared handle_wallet_risk path (address_security plus
+#      the token-contract cross-check), used when the corpus has no verdict.
+#
+# Fail behaviour (Andrew, 2026-11-09): the UNKNOWN/review verdict fires ONLY
+# when neither layer produced a verdict — the corpus had no sighting (or its
+# read failed) and GoPlus failed too. A corpus miss fails over to GoPlus; a
+# GoPlus outage with a corpus hit still returns the corpus verdict.
+# The verdict is advice shown before the human approves in Coinbase Wallet:
+# it never moves funds and never overrides the Wallet approval step.
+#
+# Request:  { "address": "0x...", "chain_id": "8453",
+#             "amount_usdc": "25.00", "source": "coinbase-wallet-mcp" }
+# Response: { "address": "...", "chain": "evm", "chain_id": "8453",
+#             "risk_level": "LOW|MEDIUM|HIGH|UNKNOWN",
+#             "recommendation": "proceed|review|do_not_pay",
+#             "risk_flags": [...],
+#             "corpus": { "sightings": n, "first_seen": ..., "last_seen": ...,
+#                         "citations": [...] },
+#             "goplus": { "risk_flags": [...] }, ...freshness... }
+
+_COUNTERPARTY_CITATION_LIMIT = 5
+
+
+def _query_corpus_address(address: str) -> tuple[list | None, bool]:
+    """Query relayshield_intel_iocs for one exact address value.
+
+    Returns (items, ok). items is the list of raw rows (possibly empty);
+    ok is False only when the query itself raised (DynamoDB down), which
+    the caller must distinguish from an empty result — an empty result is
+    a corpus miss and fails over to GoPlus, a raised query is a layer
+    failure. Same Query pattern as handle_intel_telegram: ioc_value is
+    the hash key, newest first.
+    """
+    try:
+        resp = dynamodb.Table(INTEL_IOCS_TABLE).query(
+            KeyConditionExpression=Key("ioc_value").eq(address),
+            ScanIndexForward=False,
+            Limit=50,
+        )
+        return resp.get("Items", []), True
+    except Exception as exc:
+        logger.error("counterparty-screen corpus query failed address=%s: %s",
+                     address[:20], exc)
+        return None, False
+
+
+def _corpus_citations(items: list, limit: int = _COUNTERPARTY_CITATION_LIMIT) -> list:
+    """Build corpus citations from raw IOC rows, capped and ordered by
+    confidence (same cap and ordering as the context-engine flagged-verdict
+    citations approved 2026-11-08). Shape mirrors handle_intel_telegram's
+    safe_hits so callers see one consistent citation format."""
+    scored = []
+    for h in items:
+        source  = h.get("channel", "") or ""
+        seen_ts = h.get("seen_ts", "") or ""
+        cit = {
+            "ioc_value":        h.get("ioc_value", ""),
+            "ioc_type":         h.get("ioc_type", ""),
+            "channel":          source,
+            "category":         h.get("category"),
+            "seen_ts":          seen_ts,
+            "confidence":       _ioc_confidence(source, seen_ts),
+        }
+        malware = h.get("malware", "") or ""
+        if malware and malware not in ("None", "n/a", ""):
+            cit["malware_family"] = malware
+        scored.append(cit)
+    scored.sort(key=lambda c: c["confidence"], reverse=True)
+    return scored[:limit]
+
+
+def handle_counterparty_screen(params: dict) -> dict:
+    address = (params.get("address") or "").strip()
+    if not address:
+        return _err("address is required")
+    chain = _detect_chain_api(address)
+    if chain == "unknown":
+        return _err("unrecognised address format \u2014 supported: EVM (0x), Solana, TON (EQ.../UQ...), Bitcoin")
+    chain_id    = str(params.get("chain_id") or "8453").strip()
+    amount_usdc = params.get("amount_usdc")
+    source      = (params.get("source") or "")[:40]
+
+    # --- Layer 1: TI corpus (EVM addresses are stored lowercased) ---
+    lookup_value = address.lower() if chain == "evm" else address
+    items, corpus_ok = _query_corpus_address(lookup_value)
+    corpus_hit = bool(corpus_ok and items)
+    corpus_rows = items or []
+    timestamps = [h.get("seen_ts", "") for h in corpus_rows if h.get("seen_ts")]
+    corpus_families = sorted({
+        (h.get("malware") or "").strip()
+        for h in corpus_rows
+        if (h.get("malware") or "").strip()
+        and h.get("malware") not in ("None", "n/a")
+    })
+    corpus_flags: list[str] = []
+    if corpus_hit:
+        corpus_flags.append("listed in RelayShield threat-intelligence corpus")
+        if corpus_families:
+            corpus_flags.append("linked to scam-kit family: " + ", ".join(corpus_families))
+    citations = _corpus_citations(corpus_rows) if corpus_hit else []
+
+    # --- Layer 2: GoPlus via the shared wallet-risk path ---
+    # Screened even on a corpus hit: the GoPlus flags stack with the corpus
+    # flags for the 2+ flag HIGH rule, and the goplus block is always present
+    # in the response so the caller can see both layers.
+    goplus_flags: list[str] = []
+    goplus_failed = False
+    goplus_metadata: dict = {}
+    try:
+        result = handle_wallet_risk({"address": address})
+        body = json.loads(result.get("body", "{}"))
+        data = body.get("data", {}) if body.get("ok") else {}
+        goplus_metadata = data.get("metadata", {}) or {}
+        goplus_flags = list(data.get("risk_flags", []) or [])
+        if not body.get("ok"):
+            goplus_failed = True
+        elif not goplus_flags and "goplus_error" in goplus_metadata:
+            # address_security itself failed and the token cross-check added
+            # nothing: no GoPlus verdict exists for this address.
+            goplus_failed = True
+    except Exception as exc:
+        logger.error("counterparty-screen goplus layer failed address=%s: %s",
+                     address[:20], exc)
+        goplus_failed = True
+
+    if goplus_failed:
+        # The GoPlus layer normally records the first-seen datapoint; if it
+        # did not run, record it here so the screen still leaves a trace.
+        # _record_first_seen is a conditional first-wins write and never raises.
+        _record_first_seen(address, chain)
+
+    degraded = (not corpus_ok) or goplus_failed
+    if not corpus_hit and goplus_failed:
+        # Neither layer produced a verdict: the corpus had no sighting (or
+        # its read failed) and GoPlus failed too. Fail open with UNKNOWN /
+        # review — never block a legitimate payment because the screen
+        # itself is unavailable, but do not present a clean verdict either.
+        logger.info("counterparty-screen address=%s chain=%s risk=UNKNOWN no_verdict source=%s",
+                    address, chain, source)
+        return _ok({
+            "address":        address.lower() if chain == "evm" else address,
+            "chain":          chain,
+            "chain_id":       chain_id,
+            "amount_usdc":    amount_usdc,
+            "risk_level":     "UNKNOWN",
+            "recommendation": "review",
+            "risk_flags":     ["screen unavailable \u2014 both the TI corpus and GoPlus failed"],
+            "corpus":         {"sightings": 0, "first_seen": None, "last_seen": None, "citations": []},
+            "goplus":         {"risk_flags": []},
+            "note":           ("Advisory only: this screen never moves funds and never overrides "
+                               "the human approval step in Coinbase Wallet."),
+            **_freshness_for("/v1/payg/counterparty-screen", flagged=False, degraded=True),
+        })
+
+    all_flags = corpus_flags + goplus_flags
+    if corpus_hit and corpus_families:
+        risk_level, recommendation = "HIGH", "do_not_pay"
+    elif "sanctions-listed" in goplus_flags or len(all_flags) >= 2:
+        risk_level, recommendation = "HIGH", "do_not_pay"
+    elif all_flags:
+        risk_level, recommendation = "MEDIUM", "review"
+    else:
+        risk_level, recommendation = "LOW", "proceed"
+
+    logger.info("counterparty-screen address=%s chain=%s risk=%s corpus_hits=%d goplus_flags=%d source=%s",
+                address, chain, risk_level, len(corpus_rows), len(goplus_flags), source)
+    return _ok({
+        "address":        address.lower() if chain == "evm" else address,
+        "chain":          chain,
+        "chain_id":       chain_id,
+        "amount_usdc":    amount_usdc,
+        "risk_level":     risk_level,
+        "recommendation": recommendation,
+        "risk_flags":     all_flags,
+        "corpus": {
+            "sightings":  len(corpus_rows),
+            "first_seen": min(timestamps) if timestamps else None,
+            "last_seen":  max(timestamps) if timestamps else None,
+            "citations":  citations,
+        },
+        "goplus":         {"risk_flags": goplus_flags},
+        "note":           ("Advisory only: this screen never moves funds and never overrides "
+                           "the human approval step in Coinbase Wallet."),
+        **_freshness_for("/v1/payg/counterparty-screen",
+                         flagged=bool(all_flags), degraded=degraded),
     })
 
 
@@ -13596,6 +13915,14 @@ PAYG_DESCRIPTIONS: dict[str, str] = {
         "families, cross-indicator links (shared exfil hosts, shared kit fingerprints), and an "
         "aggregate risk score with corpus citations. Call for campaign-level takedown intel."
     ),
+    "/v1/payg/counterparty-screen": (
+        "Screen a payment counterparty address before your agent pays it: the RelayShield "
+        "threat-intelligence corpus is checked first, and GoPlus address reputation is used "
+        "when the corpus has no verdict. Returns a risk level and a proceed/review/do_not_pay "
+        "recommendation with corpus citations. Advisory only — it never moves funds and never "
+        "overrides the human approval step in Coinbase Wallet. Call before an agent prepares "
+        "an x402 payment to an unfamiliar wallet on Base."
+    ),
     # Agent passport issuance (added 2026-10-22).
     "/v1/passport/issue": (
         "Issue a signed RelayShield reputation passport for an agent identity: a portable "
@@ -14343,6 +14670,7 @@ def handle_payg_request(path: str, method: str, event: dict) -> dict:
         "/v1/payg/intent-bind":          handle_payg_intent_bind,
         "/v1/payg/intent-settle-check":  handle_payg_intent_settle_check,
         "/v1/payg/campaign-scan":        handle_campaign_scan,
+        "/v1/payg/counterparty-screen": handle_counterparty_screen,
         # Agent passport issuance (added 2026-10-22): admitted to this
         # dispatcher by the passport branch in lambda_handler.
         "/v1/passport/issue":           handle_passport_issue,
@@ -19099,6 +19427,15 @@ def lambda_handler(event: dict, context) -> dict:
             headers    = event.get("headers") or {}
             api_key    = _header(headers, "X-API-Key") or _header(headers, "X-RS-API-KEY")
             key_record = _verify_rs_api_key(api_key) if api_key else None
+            # Step 4 licensing: API-side entitlement (see
+            # handle_metered_request). An appliance-originated call
+            # is served only with a valid license.
+            _ent = _check_license_entitlement(key_record)
+            if not _ent["entitled"]:
+                logger.warning(
+                    "license entitlement denied path=%s reason=%s",
+                    path, _ent["reason"])
+                return _license_entitlement_error(_ent["reason"])
             qp         = event.get("queryStringParameters") or {}
             merged     = {**qp, **params}
             return handler(merged, api_key_record=key_record)

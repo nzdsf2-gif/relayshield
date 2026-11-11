@@ -9886,7 +9886,7 @@ X402INDEX_DOMAIN_VERIFICATION_HASH = (
 
 # x402-list ownership proof, issued 2026-10-28 for api.relayshield.net.
 # Public by design and served verbatim at /.well-known/x402list.txt.
-X402LIST_OWNERSHIP_TOKEN = 'KODcFaPCYu2VIGSLuk_b3VjNJCi9s5ZBQCpWYKRLDXg'
+X402LIST_OWNERSHIP_TOKEN = 'x402list-verify-0BdjZVu5F9utqbg3P8x8Se-qhuEwL8zsnFJF44GDUnE'
 
 VERDICT_WATCHES_TABLE = "relayshield_verdict_watches"
 

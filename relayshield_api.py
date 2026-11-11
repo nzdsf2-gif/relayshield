@@ -38,6 +38,8 @@ Pay-as-you-go endpoints (no API key — x402 payment verified in Lambda):
   POST /v1/payg/token-security      — $0.05 USDC — token honeypot + tax analysis (teaser price, CDPX-3)
   POST /v1/payg/nft-security        — $0.10 USDC — NFT contract risk
   POST /v1/payg/wallet-screen-batch — $0.50 USDC — batch up to 10 addresses
+  POST /v1/payg/pin-check          - $0.02 USDC - pin comparison: payTo, network, asset, amount vs the seller pin
+  POST /v1/payg/pin                - free, API key - create or update a payTo pin (NOT x402)
   POST /v1/payg/counterparty-screen — $0.10 USDC — pre-payment counterparty screen: TI corpus + GoPlus, Base
   POST /v1/payg/infostealer         — $0.15 USDC — Hudson Rock infostealer detection
   POST /v1/payg/supply-chain        — $0.10 USDC per CALL, not per domain — vendor breach + infostealer risk (up to 10 domains)
@@ -369,6 +371,7 @@ PAYG_PRICE_UNITS: dict[str, int] = {
     "/v1/payg/scamkit-match":        100000,   # $0.10 — match a kit_<sha256> against the corpus
     "/v1/payg/scamkit-lineage":      SCAMKIT_LINEAGE_PRICE_UNITS_PLACEHOLDER,
     "/v1/payg/campaign-scan":       5500000,   # $5.50 flat — composite over the TI endpoints
+    "/v1/payg/pin-check":         20000,    # $0.02 - standalone pin comparison
     "/v1/payg/counterparty-screen": 100000,   # $0.10 — pre-payment counterparty screen: TI corpus + GoPlus, Base
     # Intent binding (staged 2026-10-23, price APPROVED 2026-10-24
     # at $0.10/call, scamkit-match parity).
@@ -433,6 +436,7 @@ OAUTH_REVOCATION_URLS: dict[str, str] = {
 
 API_KEYS_TABLE          = "relayshield_api_keys"
 INTEL_IOCS_TABLE        = "relayshield_intel_iocs"
+PINNED_PAYEES_TABLE     = "relayshield_pinned_payees"
 # Scam-kit fingerprints (kit_<sha256>). Created by
 # tools/setup_kit_fingerprints_table.sh BEFORE the fingerprinting code ships;
 # handlers degrade gracefully (log + continue) when it is absent.
@@ -6746,6 +6750,411 @@ def handle_counterparty_screen(params: dict) -> dict:
         **_freshness_for("/v1/payg/counterparty-screen",
                          flagged=bool(all_flags), degraded=degraded),
     })
+
+
+# ---------------------------------------------------------------------------
+# PayTo pinning  (added 2026-11-10)
+# ---------------------------------------------------------------------------
+# A pin records a seller's payment details at discovery time (payTo,
+# network, asset, max amount). Every later 402 is compared to the pin;
+# any drift aborts the payment. A changed payTo looks identical whether
+# it is a key rotation or a redirect, so the discipline is abort on any
+# drift and re-pin explicitly, never automatically.
+#
+# Endpoints:
+#   POST /v1/payg/pin         free, API-key authenticated (NOT x402).
+#                             Create or update a pin. Admitted in
+#                             lambda_handler before the PAYG branch.
+#   POST /v1/payg/pin-check   x402, $0.02. Standalone pin comparison.
+#   POST /v1/payg/counterparty-screen  integrated pin check, via the
+#                             handle_counterparty_screen_pinned wrapper:
+#                             when tenant_id and seller_id are present,
+#                             the pin is compared first; a mismatch
+#                             short-circuits before the corpus/GoPlus
+#                             layers. Bundled into the $0.10 price.
+#
+# Tenant identity mirrors intent binding: on the x402 rail the tenant
+# is the canonical payer (an explicit "tenant_id" in the body, else
+# the canonicalized "payer"); on the API-key rail the tenant is the
+# key record. The caller must use the same tenant_id for pin creation
+# and pin checks, or the check will not find the pin.
+#
+# Storage: DynamoDB relayshield_pinned_payees, partition key tenant_id,
+# sort key seller_id. A settings row (seller_id "__tenant_settings__")
+# carries the per-tenant pin_mismatch_mode ("abort" default, "step_up").
+# All pin reads degrade gracefully: a missing table or a failed lookup
+# is "no pin", never an error.
+
+_PIN_SETTINGS_SELLER = "__tenant_settings__"
+# Base USDC contract, the default asset for a Base x402 payment when the
+# caller does not pass one explicitly.
+_BASE_USDC_ASSET = "0x833589fCD6eDb6E08f4c7C32D4f71b54bd029029"
+
+
+def _pin_canonical_id(value: str) -> str:
+    """Canonical form for a pin tenant/seller identifier.
+
+    Mirrors relayshield_intent_binding.canonical_identifier: strip and
+    lowercase; URLs reduce to host plus path. Correct for EVM wallet
+    addresses, domains, and emails. Kept local (not imported from the
+    intent-binding module) so pinning does not depend on that module
+    being present in this Lambda's deployment.
+    """
+    s = (value or "").strip()
+    if "://" in s:
+        parts = urllib.parse.urlsplit(s)
+        host = (parts.hostname or "").lower()
+        path = (parts.path or "").rstrip("/")
+        return (host + path) if path else host
+    return s.lower().rstrip("/")
+
+
+def _pin_table():
+    """The pin store table. Table() construction is lazy, so a missing
+    table only surfaces on the first call; callers must therefore treat
+    a failed call the same as a missing table (no pin)."""
+    try:
+        return dynamodb.Table(PINNED_PAYEES_TABLE)
+    except Exception as exc:
+        logger.warning("pin table open failed: %s", exc)
+        return None
+
+
+def _pin_get(tenant_id: str, seller_id: str):
+    """Fetch one pin row. Returns the item dict, or None when there is
+    no pin or the lookup failed for any infrastructure reason (a
+    missing table included). A failed lookup is 'no pin', never an
+    error, so pinning can never break the screen itself."""
+    table = _pin_table()
+    if table is None:
+        return None
+    try:
+        return table.get_item(Key={"tenant_id": tenant_id, "seller_id": seller_id}).get("Item")
+    except Exception as exc:
+        logger.warning("pin lookup failed tenant=%s seller=%s: %s", tenant_id, seller_id, exc)
+        return None
+
+
+def _pin_tenant_mode(tenant_id: str) -> str:
+    """Per-tenant pin mismatch mode: 'abort' (default) or 'step_up'.
+
+    Read from the tenant settings row in the pin table. Any failure
+    (missing table, missing row, bad value) defaults to 'abort'.
+    """
+    if not tenant_id:
+        return "abort"
+    row = _pin_get(tenant_id, _PIN_SETTINGS_SELLER)
+    mode = (row or {}).get("pin_mismatch_mode", "")
+    return "step_up" if str(mode).strip().lower() == "step_up" else "abort"
+
+
+def _pin_public(pin: dict):
+    """The pin record as returned to callers. DynamoDB Decimals are
+    converted to plain ints so the response JSON-encodes."""
+    if not pin:
+        return None
+    return _decimals_to_plain({
+        "tenant_id":   pin.get("tenant_id"),
+        "seller_id":   pin.get("seller_id"),
+        "payTo":       pin.get("payTo"),
+        "network":     pin.get("network"),
+        "asset":       pin.get("asset"),
+        "max_amount":  pin.get("max_amount"),
+        "pinned_at":   pin.get("pinned_at"),
+        "pinned_from": pin.get("pinned_from"),
+    })
+
+
+def _usdc_to_minor(amount_usdc) -> int | None:
+    """Convert a decimal USDC amount ('25.00') to minor units (25000000).
+
+    USDC has 6 decimals. Returns None when the amount is absent or not
+    a number, so the caller skips the amount comparison rather than
+    failing the whole check.
+    """
+    if amount_usdc is None or str(amount_usdc).strip() == "":
+        return None
+    try:
+        return int(Decimal(str(amount_usdc)) * 1_000_000)
+    except Exception:
+        return None
+
+
+def _pin_compare(pin: dict, pay_to: str, network: str, asset: str,
+                 amount_minor: int | None) -> dict | None:
+    """Compare observed payment details to a stored pin.
+
+    Returns None when everything matches (or a field cannot be
+    compared), else a drift dict {field, pinned, observed}. The first
+    drift found wins; the order is payTo, network, asset, amount.
+    EVM addresses compare lowercased. The amount compares only when
+    both the pin's max_amount and the observed amount are known.
+    """
+    if not pin:
+        return None
+    observed_pay = (pay_to or "").strip().lower()
+    pinned_pay = (pin.get("payTo") or "").strip().lower()
+    if pinned_pay and observed_pay and pinned_pay != observed_pay:
+        return {"field": "payTo", "pinned": pin.get("payTo"), "observed": pay_to}
+    observed_net = str(network or "").strip()
+    pinned_net = str(pin.get("network") or "").strip()
+    if pinned_net and observed_net and pinned_net != observed_net:
+        return {"field": "network", "pinned": pin.get("network"), "observed": network}
+    observed_asset = (asset or "").strip().lower()
+    pinned_asset = (pin.get("asset") or "").strip().lower()
+    if pinned_asset and observed_asset and pinned_asset != observed_asset:
+        return {"field": "asset", "pinned": pin.get("asset"), "observed": asset}
+    try:
+        max_amount = int(pin.get("max_amount"))
+    except (TypeError, ValueError):
+        max_amount = None
+    if max_amount is not None and amount_minor is not None and amount_minor > max_amount:
+        return {"field": "amount", "pinned": max_amount, "observed": amount_minor}
+    return None
+
+
+def _check_pin(tenant_id: str, seller_id: str, pay_to: str, network: str,
+               asset: str, amount_minor: int | None) -> dict:
+    """Compare observed payment details to the stored pin for a tenant
+    and seller. Returns a pin block:
+      {pin_status, seller_id, drift, pin}
+    pin_status is PIN_OK (everything matches), PIN_MISMATCH (a field
+    drifted; drift holds the field plus pinned vs observed), or NO_PIN
+    (no pin is set for this tenant and seller, or the lookup failed).
+    """
+    pin = _pin_get(tenant_id, seller_id)
+    if not pin:
+        return {"pin_status": "NO_PIN", "seller_id": seller_id, "drift": None, "pin": None}
+    drift = _pin_compare(pin, pay_to, network, asset, amount_minor)
+    if drift is None:
+        return {"pin_status": "PIN_OK", "seller_id": seller_id, "drift": None, "pin": _pin_public(pin)}
+    return {"pin_status": "PIN_MISMATCH", "seller_id": seller_id, "drift": drift, "pin": _pin_public(pin)}
+
+
+def _pin_check_tenant(params: dict) -> str:
+    """Tenant for a pin check: an explicit tenant_id in the body, else
+    the canonical payer (mirrors intent binding's _payg_tenant on the
+    x402 rail). Empty when neither is present, which means the pin
+    check is skipped and the endpoint behaves as it does today."""
+    tenant_id = (params.get("tenant_id") or "").strip()
+    if tenant_id:
+        return _pin_canonical_id(tenant_id)
+    payer = (params.get("payer") or "").strip()
+    if payer:
+        return _pin_canonical_id(payer)
+    return ""
+
+
+def _pin_mismatch_verdict(tenant_id: str) -> tuple[str, str]:
+    """(risk_level, recommendation) for a pin mismatch under the
+    tenant's mode: abort is HIGH / do_not_pay, step_up is MEDIUM /
+    review."""
+    if _pin_tenant_mode(tenant_id) == "step_up":
+        return "MEDIUM", "review"
+    return "HIGH", "do_not_pay"
+
+
+def handle_pin(params: dict, key_record: dict) -> dict:
+    """POST /v1/payg/pin: create or update a payTo pin.
+
+    Free, API-key authenticated (NOT x402). Admitted in lambda_handler
+    before the PAYG branch. Body: seller_id, payTo, network, asset,
+    max_amount (integer, minor units), optional pinned_from and
+    pin_mismatch_mode ('abort' or 'step_up', sets the per-tenant mode).
+    A re-pin is just a new call with the new values; it overwrites.
+    Never automatic: a drift never re-pins by itself.
+    """
+    params = params or {}
+    key_record = key_record or {}
+    body_tenant = (params.get("tenant_id") or "").strip()
+    key_tenant = (key_record.get("console_tenant_id") or "").strip()
+    if key_tenant and body_tenant and body_tenant != key_tenant:
+        return _err("tenant_id does not match this API key's tenant", 403)
+    tenant_id = body_tenant or key_tenant
+    if not tenant_id:
+        tenant_id = (key_record.get("email") or "").strip().lower() or (key_record.get("api_key") or "").strip()
+    if not tenant_id:
+        return _err("tenant_id is required (pass it in the body or use a key with a tenant on file)")
+    tenant_id = _pin_canonical_id(tenant_id)
+
+    seller_id = _pin_canonical_id(params.get("seller_id") or "")
+    pay_to = (params.get("payTo") or "").strip()
+    network = str(params.get("network") or "").strip()
+    asset = (params.get("asset") or "").strip()
+    if not seller_id:
+        return _err("seller_id is required")
+    if not pay_to or not re.match(r"^0x[0-9a-fA-F]{40}$", pay_to):
+        return _err("payTo is required and must be an EVM address (0x + 40 hex chars)")
+    if not network:
+        return _err("network is required (chain id, e.g. 8453 for Base)")
+    if not asset:
+        return _err("asset is required (token contract address)")
+    try:
+        max_amount = int(params.get("max_amount"))
+    except (TypeError, ValueError):
+        return _err("max_amount is required and must be an integer (minor units)")
+    if max_amount < 0:
+        return _err("max_amount must be >= 0")
+
+    mode = (params.get("pin_mismatch_mode") or "").strip().lower()
+    if mode and mode not in ("abort", "step_up"):
+        return _err("pin_mismatch_mode must be 'abort' or 'step_up'")
+
+    table = _pin_table()
+    if table is None:
+        return _err("pin store unavailable", 503)
+    item = {
+        "tenant_id":   tenant_id,
+        "seller_id":   seller_id,
+        "payTo":       pay_to.lower(),
+        "network":     network,
+        "asset":       asset.lower(),
+        "max_amount":  max_amount,
+        "pinned_at":   datetime.now(timezone.utc).isoformat(),
+        "pinned_from": (params.get("pinned_from") or "api")[:120],
+    }
+    try:
+        table.put_item(Item=item)
+        if mode:
+            table.put_item(Item={
+                "tenant_id":         tenant_id,
+                "seller_id":         _PIN_SETTINGS_SELLER,
+                "pin_mismatch_mode": mode,
+                "updated_at":        datetime.now(timezone.utc).isoformat(),
+            })
+    except Exception as exc:
+        logger.error("pin store failed tenant=%s seller=%s: %s", tenant_id, seller_id, exc)
+        return _err("could not store pin (is the relayshield_pinned_payees table provisioned?)", 500)
+    logger.info("pin stored tenant=%s seller=%s payTo=%s network=%s",
+                tenant_id, seller_id, pay_to[:10], network)
+    return _ok({
+        "pin": _pin_public(item),
+        "pin_mismatch_mode": mode if mode else _pin_tenant_mode(tenant_id),
+    })
+
+
+def handle_pin_check(params: dict) -> dict:
+    """POST /v1/payg/pin-check: standalone pin comparison, x402 $0.02.
+
+    Body: tenant_id (or payer), seller_id, payTo, network, asset,
+    amount (integer, minor units). Returns PIN_OK (LOW / proceed),
+    PIN_MISMATCH (HIGH / do_not_pay, or MEDIUM / review when the
+    tenant mode is step_up), or NO_PIN (UNKNOWN / review, a clear 'no
+    pin set' - never a block, never an invented pin).
+    """
+    params = params or {}
+    tenant_id = _pin_check_tenant(params)
+    seller_id = _pin_canonical_id(params.get("seller_id") or "")
+    pay_to = (params.get("payTo") or "").strip()
+    if not tenant_id:
+        return _err("tenant_id (or payer) is required")
+    if not seller_id:
+        return _err("seller_id is required")
+    if not pay_to:
+        return _err("payTo is required")
+    network = str(params.get("network") or "8453").strip()
+    asset = (params.get("asset") or _BASE_USDC_ASSET).strip()
+    amount = params.get("amount")
+    try:
+        amount_minor = int(amount) if amount is not None else None
+    except (TypeError, ValueError):
+        return _err("amount must be an integer (minor units)")
+    if amount_minor is not None and amount_minor < 0:
+        return _err("amount must be >= 0")
+
+    pin_block = _check_pin(tenant_id, seller_id, pay_to, network, asset, amount_minor)
+    base = {
+        "seller_id": seller_id,
+        "tenant_id": tenant_id,
+        "payTo":     pay_to.lower(),
+        "network":   network,
+        "asset":     asset.lower(),
+        "amount":    amount_minor,
+        "pin":       pin_block["pin"],
+        "drift":     pin_block["drift"],
+    }
+    if pin_block["pin_status"] == "NO_PIN":
+        return _ok({
+            **base,
+            "pin_status":   "NO_PIN",
+            "risk_level":   "UNKNOWN",
+            "recommendation": "review",
+            "note": ("No pin is set for this seller. Pin the seller's payment details "
+                     "before paying, or proceed on the reputation screen alone."),
+        })
+    if pin_block["pin_status"] == "PIN_OK":
+        return _ok({
+            **base,
+            "pin_status":   "PIN_OK",
+            "risk_level":   "LOW",
+            "recommendation": "proceed",
+            "note": ("Payment details match the seller pin."),
+        })
+    risk_level, recommendation = _pin_mismatch_verdict(tenant_id)
+    drift = pin_block["drift"] or {}
+    return _ok({
+        **base,
+        "pin_status":   "PIN_MISMATCH",
+        "risk_level":   risk_level,
+        "recommendation": recommendation,
+        "risk_flags":   ["PIN_MISMATCH: %s drifted (pinned %s, observed %s)" % (
+            drift.get("field"), drift.get("pinned"), drift.get("observed"))],
+        "note": ("Pin mismatch: the payment details do not match the seller pin. "
+                 "Do not pay until the seller is re-pinned from a trusted discovery."),
+    })
+
+
+def handle_counterparty_screen_pinned(params: dict) -> dict:
+    """POST /v1/payg/counterparty-screen with the integrated pin check.
+
+    The pin is compared FIRST, before the corpus/GoPlus layers. A
+    mismatch short-circuits: the screen never runs on a payment whose
+    details drifted from the pin. A match (or no pin) falls through to
+    handle_counterparty_screen, and the pin block is merged into its
+    response. The integrated check is bundled into the $0.10 price.
+    """
+    params = params or {}
+    tenant_id = _pin_check_tenant(params)
+    seller_id = _pin_canonical_id(params.get("seller_id") or "")
+    address = (params.get("address") or "").strip()
+    pin_block = None
+    if tenant_id and seller_id and address:
+        chain_id = str(params.get("chain_id") or "8453").strip()
+        asset = (params.get("asset") or _BASE_USDC_ASSET).strip()
+        amount_minor = _usdc_to_minor(params.get("amount_usdc"))
+        pin_block = _check_pin(tenant_id, seller_id, address, chain_id, asset, amount_minor)
+        if pin_block["pin_status"] == "PIN_MISMATCH":
+            risk_level, recommendation = _pin_mismatch_verdict(tenant_id)
+            drift = pin_block["drift"] or {}
+            logger.info("counterparty-screen pin mismatch tenant=%s seller=%s field=%s",
+                        tenant_id, seller_id, drift.get("field"))
+            return _ok({
+                "address":        address.lower(),
+                "chain":          _detect_chain_api(address),
+                "chain_id":       chain_id,
+                "amount_usdc":    params.get("amount_usdc"),
+                "risk_level":     risk_level,
+                "recommendation": recommendation,
+                "risk_flags":     ["PIN_MISMATCH: %s drifted (pinned %s, observed %s)" % (
+                    drift.get("field"), drift.get("pinned"), drift.get("observed"))],
+                "pin":            pin_block,
+                "corpus":         {"sightings": 0, "first_seen": None, "last_seen": None, "citations": []},
+                "goplus":         {"risk_flags": []},
+                "note":           ("Pin mismatch: the payment details do not match the seller pin. "
+                                   "Do not pay until the seller is re-pinned from a trusted discovery."),
+            })
+    # Match or no pin: run the normal screen and merge the pin block in.
+    result = handle_counterparty_screen(params)
+    if pin_block is not None:
+        try:
+            body = json.loads(result.get("body", "{}"))
+            data = body.get("data", {})
+            if isinstance(data, dict):
+                data["pin"] = pin_block
+                result["body"] = json.dumps(body)
+        except Exception as exc:
+            logger.warning("counterparty-screen pin merge failed: %s", exc)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -13915,6 +14324,15 @@ PAYG_DESCRIPTIONS: dict[str, str] = {
         "families, cross-indicator links (shared exfil hosts, shared kit fingerprints), and an "
         "aggregate risk score with corpus citations. Call for campaign-level takedown intel."
     ),
+    "/v1/payg/pin-check": (
+        "Compare a payment to a stored seller pin before your agent pays it: pass the "
+        "seller, the payTo address, network, asset, and amount, and get PIN_OK when every "
+        "field matches the pin, PIN_MISMATCH when any field drifted, or NO_PIN when no pin "
+        "is set for that seller. A mismatch is HIGH / do_not_pay by default, or MEDIUM / "
+        "review when the tenant pin mode is step_up. Pins are created with POST "
+        "/v1/payg/pin. Advisory only - it never moves funds and never overrides the "
+        "human approval step in Coinbase Wallet."
+    ),
     "/v1/payg/counterparty-screen": (
         "Screen a payment counterparty address before your agent pays it: the RelayShield "
         "threat-intelligence corpus is checked first, and GoPlus address reputation is used "
@@ -14670,7 +15088,8 @@ def handle_payg_request(path: str, method: str, event: dict) -> dict:
         "/v1/payg/intent-bind":          handle_payg_intent_bind,
         "/v1/payg/intent-settle-check":  handle_payg_intent_settle_check,
         "/v1/payg/campaign-scan":        handle_campaign_scan,
-        "/v1/payg/counterparty-screen": handle_counterparty_screen,
+        "/v1/payg/pin-check":         handle_pin_check,
+        "/v1/payg/counterparty-screen": handle_counterparty_screen_pinned,
         # Agent passport issuance (added 2026-10-22): admitted to this
         # dispatcher by the passport branch in lambda_handler.
         "/v1/passport/issue":           handle_passport_issue,
@@ -19263,6 +19682,18 @@ def lambda_handler(event: dict, context) -> dict:
     # Stripe metered billing routes (RS API key verified inside Lambda)
     if path.startswith("/v1/metered/"):
         return handle_metered_request(path, method, event)
+
+    # PayTo pin management - free, API-key authenticated (NOT an x402
+    # endpoint). Admitted before the PAYG branch because /v1/payg/pin
+    # lives under /v1/payg/ and handle_payg_request would otherwise
+    # demand an x402 payment proof for it.
+    if method == "POST" and path in ("/v1/payg/pin", "/v1/payg/pin/"):
+        headers    = event.get("headers") or {}
+        api_key    = _header(headers, "X-RS-API-KEY") or _header(headers, "X-API-Key")
+        key_record = _verify_rs_api_key(api_key) if api_key else None
+        if not key_record:
+            return _err("Active RS API key required. Pass it as X-RS-API-KEY.", 401)
+        return handle_pin(_body(event), key_record)
 
     # PAYG routes (x402 payment verified inside Lambda)
     if path.startswith("/v1/payg/"):

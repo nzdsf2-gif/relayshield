@@ -14140,6 +14140,60 @@ BAZAAR_EXTENSIONS: dict[str, dict] = {
             },
         },
     ),
+    "/v1/payg/counterparty-screen": _bazaar_body_ext(
+        input_example={"address": "0x0000000000000000000000000000000000000000", "chain_id": "8453", "amount_usdc": "25.00", "source": "coinbase-wallet-mcp"},
+        input_schema={
+            "type": "object",
+            "properties": {
+                "address": {"type": "string", "description": "Payee wallet address to screen before paying (EVM 0x, Solana, TON, or Bitcoin)"},
+                "chain_id": {"type": "string", "description": "Chain id, e.g. 8453 for Base"},
+                "amount_usdc": {"type": "string", "description": "Payment amount in USDC"},
+                "source": {"type": "string", "description": "Calling agent or wallet, e.g. coinbase-wallet-mcp"},
+            },
+            "required": ["address"],
+        },
+        output_example={
+            "ok": True,
+            "data": {
+                "address": "0x0000000000000000000000000000000000000000",
+                "chain": "evm",
+                "chain_id": "8453",
+                "risk_level": "LOW",
+                "recommendation": "proceed",
+                "risk_flags": [],
+                "corpus": {"sightings": 0, "first_seen": None, "last_seen": None, "citations": []},
+                "goplus": {"risk_flags": []},
+            },
+        },
+    ),
+    "/v1/payg/pin-check": _bazaar_body_ext(
+        input_example={"tenant_id": "relayshield", "seller_id": "example-seller", "payTo": "0x0000000000000000000000000000000000000000", "network": "8453", "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bd029029", "amount": 100000},
+        input_schema={
+            "type": "object",
+            "properties": {
+                "tenant_id": {"type": "string", "description": "Tenant id, or payer on the x402 rail"},
+                "seller_id": {"type": "string", "description": "Seller whose pinned payTo is checked"},
+                "payTo": {"type": "string", "description": "Observed payTo address (EVM 0x)"},
+                "network": {"type": "string", "description": "Chain id, e.g. 8453 for Base"},
+                "asset": {"type": "string", "description": "Token contract address, e.g. USDC on Base"},
+                "amount": {"type": "integer", "description": "Payment amount in minor units"},
+            },
+            "required": ["seller_id", "payTo"],
+        },
+        output_example={
+            "ok": True,
+            "data": {
+                "seller_id": "example-seller",
+                "tenant_id": "relayshield",
+                "payTo": "0x0000000000000000000000000000000000000000",
+                "network": "8453",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bd029029",
+                "amount": 100000,
+                "pin_status": "PIN_OK",
+                "drift": None,
+            },
+        },
+    ),
 }
 
 # Rich, natural-language descriptions for CDP Bazaar semantic search — added

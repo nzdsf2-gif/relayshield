@@ -311,6 +311,11 @@ X402_V2_ENABLED_PATHS: set[str] = {
     # Phone reputation (added 2026-10-21): last v1 holdout, migrated with
     # its spec x402_version flipped to 2 in the same change.
     "/v1/payg/phone-reputation",
+    # Counterparty-screen and pin-check (added 2026-11-09/10) —
+    # promoted to v2 2026-11-11 so x402scan indexes them; they were
+    # returning v1 challenges because they were never added here.
+    "/v1/payg/counterparty-screen",
+    "/v1/payg/pin-check",
 }
 
 # Intent binding (staged 2026-10-23, finished 2026-10-24 -- NOT

@@ -806,6 +806,7 @@ APPROVED_FAMILIES = frozenset({
     "phantomsub",
     "athena-stealthroute",
     "skyw4lker",
+    "madape",
 })
 
 

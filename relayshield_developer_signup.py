@@ -2558,6 +2558,47 @@ curl -X POST https://api.relayshield.net/v1/webhook/configure \
   <p style="margin-top:1rem;font-size:.88rem;color:var(--muted)">Background reading: the TAP verifier launch post on <a href="https://blog.relayshield.net/" style="color:var(--accent)">blog.relayshield.net</a> (direct post link added when it publishes).</p>
 </div>
 
+<!-- Hosted MCP Proxy Firewall section for the developers page.
+     Insert after the TAP Verifier section in relayshield_developer_signup.py.
+     Uses the same classes as the existing price cards: section, section-title,
+     price-grid, price-card, price, desc, endpoint.
+     Checkout for the Firewall and the combined bundle goes through the
+     RelayShield console (mcpfw.relayshield.net), not a buy.stripe.com link,
+     because the console creates the tenant and provisions the proxy.
+     No em dashes. Figures are the approved ones. -->
+
+<div class="section" style="margin-top:2rem">
+  <h2 class="section-title" id="hosted-proxy-firewall">Hosted MCP Proxy Firewall <span style="background:var(--accent);color:#fff;font-size:.7rem;padding:.15rem .5rem;border-radius:4px;margin-left:.5rem;vertical-align:middle">NEW</span></h2>
+  <p style="color:var(--muted);font-size:.95rem;margin:.5rem 0 1.25rem">A wallet agent is an agent with a bank account. It sends funds, swaps tokens, and signs batched contract calls at machine speed. The Hosted MCP Proxy Firewall sits between your wallet agent and its MCP servers and screens every write call against RelayShield&apos;s live threat intelligence corpus (139 monitored Telegram marketplaces, 800K+ indicators, 10.9M citations) and your tenant&apos;s intent binding, before the call reaches the wallet. It works with Coinbase Wallet MCP and the MetaMask Agent Wallet. Every paying tenant gets a dedicated EC2 instance, single tenant by construction, with its own URL (your-tenant-id.proxy.relayshield.net), TLS handled by Caddy, and a per-tenant proxy token checked on every request. There is nothing to install, nothing to patch, nothing to keep running.</p>
+  <div class="price-grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr))">
+    <div class="price-card" style="border-color:var(--accent)">
+      <div class="endpoint" style="color:var(--accent)">Firewall, direct</div>
+      <div class="price">$49<span class="per"> / mo</span></div>
+      <div class="desc">For a single developer or a small team. One dedicated hosted proxy instance, 20,000 screened calls included, $0.002 per call above that. Your own URL and per-tenant token. Works with Coinbase Wallet MCP and MetaMask.</div>
+      <a href="https://mcpfw.relayshield.net" style="display:block;margin-top:1rem;background:var(--accent);border:1px solid var(--accent);color:#fff;text-align:center;padding:.5rem;border-radius:6px;font-size:.85rem;font-weight:600;text-decoration:none">Subscribe via the console</a>
+    </div>
+    <div class="price-card" style="border-color:var(--accent)">
+      <div class="endpoint" style="color:var(--accent)">Firewall, MSP</div>
+      <div class="price">$69<span class="per"> / mo per client org</span></div>
+      <div class="desc">For MSPs and distributors. One dedicated hosted proxy instance per client org, 20,000 screened calls included per org, $0.002 per call above that. One subscription per client org. Manage all your tenants from the console.</div>
+      <a href="https://mcpfw.relayshield.net" style="display:block;margin-top:1rem;background:var(--accent);border:1px solid var(--accent);color:#fff;text-align:center;padding:.5rem;border-radius:6px;font-size:.85rem;font-weight:600;text-decoration:none">Subscribe via the console</a>
+    </div>
+    <div class="price-card" style="border-color:var(--accent)">
+      <div class="endpoint" style="color:var(--accent)">Agent Verifiers Bundle</div>
+      <div class="price">$79<span class="per"> / mo</span></div>
+      <div class="desc">TAP Verifier, PAP, Passport identity, intent binding, and settle check, plus threat corpus screening. 100 free verifications per month. Verifier calls count toward the Firewall&apos;s 20,000 screened calls when bundled.</div>
+      <a href="https://mcpfw.relayshield.net" style="display:block;margin-top:1rem;background:var(--accent);border:1px solid var(--accent);color:#fff;text-align:center;padding:.5rem;border-radius:6px;font-size:.85rem;font-weight:600;text-decoration:none">Subscribe via the console</a>
+    </div>
+    <div class="price-card" style="border-color:var(--accent)">
+      <div class="endpoint" style="color:var(--accent)">Firewall + Verifiers, combined</div>
+      <div class="price">$109<span class="per"> / mo</span></div>
+      <div class="desc">For a single developer. The hosted Firewall plus the full Agent Verifiers Bundle in one license. Saves $19 against buying them separately ($49 + $79). 20,000 screened calls included, $0.002 per call above that.</div>
+      <a href="https://mcpfw.relayshield.net" style="display:block;margin-top:1rem;background:var(--accent);border:1px solid var(--accent);color:#fff;text-align:center;padding:.5rem;border-radius:6px;font-size:.85rem;font-weight:600;text-decoration:none">Subscribe via the console</a>
+    </div>
+  </div>
+  <p style="margin-top:1rem;font-size:.88rem;color:var(--muted)">Read the launch post on <a href="https://blog.relayshield.net/2026-11-13-hosted-mcp-proxy-firewall" style="color:var(--accent)">blog.relayshield.net</a>. Questions: <a href="mailto:support@relayshield.net" style="color:var(--accent)">support@relayshield.net</a>.</p>
+</div>
+
 <div class="section">
   <h2 class="section-title" id="agent-identity-tad">Agent identity and Trusted Agent Delegation</h2>
   <div class="section-sub">Cloudflare and Tools for Humanity published the Trusted Agent Delegation (TAD) framework as a proposal. RelayShield's existing primitives cover the same risk-scaled shape it proposes.</div>

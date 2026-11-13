@@ -51,8 +51,12 @@ What it does, in order:
        Elastic IP. (Associate must run after the instance is running;
        it fails on a pending instance.)
     7. Create (or update on retry) the Cloudflare DNS A record
-       <tenant-id>.proxy.relayshield.net -> Elastic IP.
-    8. Poll https://<tenant-id>.proxy.relayshield.net/_rs/health (no
+       <sanitized-tenant-id>.proxy.relayshield.net -> Elastic IP.
+       The subdomain sanitizes the tenant id (underscores become
+       hyphens) because Let's Encrypt refuses hostnames containing
+       underscores; the tenant id itself keeps its underscores
+       everywhere else.
+    8. Poll https://<sanitized-tenant-id>.proxy.relayshield.net/_rs/health (no
        auth) every 15s for up to 10 minutes until HTTP 200.
     9. On health 200: mark the registry record "active", write
        hosted_proxy_url and hosted_proxy_status into the tenant's
@@ -161,6 +165,20 @@ _SES = boto3.client("ses", region_name=REGION)
 def _log(message):
     """Log to stdout (CloudWatch). Never pass a secret value here."""
     print("relayshield-hosted-provision: %s" % message)
+
+
+def _dns_subdomain(tenant_id):
+    """Return the DNS subdomain for a tenant.
+
+    Tenant ids contain underscores (tnt_...), which are not valid in
+    DNS hostnames and which Let's Encrypt refuses to issue for
+    ("Domain name contains an invalid character"). The subdomain
+    replaces underscores with hyphens, so tnt_test_provision_001
+    becomes tnt-test-provision-001.proxy.relayshield.net. The
+    tenant_id itself (with underscores) stays the DynamoDB key and
+    the Secrets Manager secret name; only the DNS name is sanitized.
+    """
+    return tenant_id.replace("_", "-") + ".proxy.relayshield.net"
 
 
 # ---------------------------------------------------------------------------
@@ -999,7 +1017,7 @@ def lambda_handler(event, context):
             "event must carry tenant_id, subscription_id, and email")
     plan = _resolve_plan(event)
     upstream_url = event.get("upstream_url") or DEFAULT_UPSTREAM_URL
-    subdomain = tenant_id + ".proxy.relayshield.net"
+    subdomain = _dns_subdomain(tenant_id)
     proxy_url = "https://" + subdomain
     secret_name = "relayshield/hosted/" + tenant_id
 

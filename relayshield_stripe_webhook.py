@@ -24,6 +24,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -137,6 +138,26 @@ TI_PRICE_IDS = frozenset({
     "price_1TiIcqL2dcjOeFiY2wTZV8Kb",  # $499/mo MSP
     "price_1TiIcqL2dcjOeFiYDcuBewo2",  # $999/mo MSSP
 })
+
+# Hosted MCP Proxy Firewall price IDs -> license plan. When a subscription
+# is created with one of these prices AND the subscription metadata carries
+# hosted_proxy=true, the webhook invokes relayshield-hosted-provision
+# (async) to stand up a dedicated EC2 proxy for the tenant. The $109
+# bundle maps to plan "sme" (direct developer). The $69 MSP overage price
+# (price_1UWRhDL2dcjOeFiY0kQaYoPL, $0.002/call metered) rides on the $69
+# subscription and is not a standalone plan trigger.
+HOSTED_PROXY_PRICE_TO_PLAN = {
+    "price_1UPNO3L2dcjOeFiYMHoSwomW": "sme",   # Direct Firewall $49/mo
+    "price_1UWRhCL2dcjOeFiYISogjCEq": "msp",   # MSP Firewall $69/mo per client org
+    "price_1Ub2rOL2dcjOeFiY5jiiKIbm": "sme",   # Direct combined bundle $109/mo
+}
+HOSTED_PROXY_FUNCTION_NAME = "relayshield-hosted-provision"
+HOSTED_PROXY_REGISTRY_TABLE = "relayshield_hosted_proxies"
+# Customer-facing support address. SES From stays the verified identity
+# relayshieldadmin@gmail.com (relayshield.net is not a verified SES
+# sender); replies go to support@, which forwards to Gmail.
+SUPPORT_EMAIL = "support@relayshield.net"
+SES_SENDER = "relayshieldadmin@gmail.com"
 
 # Max emails per subscriber (personal) or per employee (business)
 EMAIL_LIMITS = {
@@ -732,7 +753,8 @@ def send_welcome_email_ses(to_email: str, subscription_tier: str) -> bool:
 """
     try:
         _get_ses_client().send_email(
-            Source="RelayShield <andrew@relayshield.net>",
+            Source="RelayShield <relayshieldadmin@gmail.com>",
+            ReplyToAddresses=["support@relayshield.net"],
             Destination={"ToAddresses": [to_email]},
             Message={
                 "Subject": {"Data": subject, "Charset": "UTF-8"},
@@ -744,6 +766,272 @@ def send_welcome_email_ses(to_email: str, subscription_tier: str) -> bool:
     except Exception as exc:
         logger.error("SES welcome email failed for %s: %s", to_email, exc)
         return False
+
+
+# ---------------------------------------------------------------------------
+# Hosted MCP Proxy Firewall (Step 4): subscription -> provision wiring
+# ---------------------------------------------------------------------------
+
+_lambda_client = None
+
+
+def _get_lambda_client():
+    global _lambda_client
+    if _lambda_client is None:
+        _lambda_client = boto3.client("lambda", region_name="us-east-1")
+    return _lambda_client
+
+
+def _hosted_proxy_plan_for_subscription(subscription: dict) -> str | None:
+    """Return the license plan (sme/msp) when this subscription is a hosted
+    proxy subscription, else None. Requires a Firewall price on one of the
+    subscription items AND hosted_proxy=true in the subscription metadata."""
+    metadata = subscription.get("metadata") or {}
+    if str(metadata.get("hosted_proxy", "")).lower() != "true":
+        return None
+    items = (subscription.get("items") or {}).get("data") or []
+    for item in items:
+        price_id = ((item.get("price") or {}).get("id")) or ""
+        plan = HOSTED_PROXY_PRICE_TO_PLAN.get(price_id)
+        if plan:
+            return plan
+    return None
+
+
+def _tenant_id_for_subscription(subscription: dict, customer_email: str) -> str:
+    """Tenant id from the subscription metadata (tenant_id), else derived
+    deterministically from the Stripe customer id. The Lambda accepts any
+    tenant id string; it keeps underscores in DynamoDB and the secret name
+    and sanitizes them to hyphens only for the DNS subdomain."""
+    metadata = subscription.get("metadata") or {}
+    tenant_id = (metadata.get("tenant_id") or "").strip()
+    if tenant_id:
+        return tenant_id
+    customer_id = (subscription.get("customer") or "").strip()
+    safe = re.sub(r"[^A-Za-z0-9]+", "_", customer_id).strip("_")
+    if safe:
+        return "tnt_" + safe
+    safe_email = re.sub(r"[^A-Za-z0-9]+", "_", customer_email or "").strip("_")
+    return "tnt_" + safe_email if safe_email else "tnt_unknown"
+
+
+def _invoke_hosted_provision(tenant_id: str, subscription: dict, plan: str,
+                             customer_email: str) -> bool:
+    """Invoke relayshield-hosted-provision async (fire-and-forget). Returns
+    True when the invoke was accepted (202). The Lambda owns idempotency
+    (conditional claim in the registry), so a duplicate Stripe delivery is
+    safe. Never provisions inline; the webhook returns 200 fast."""
+    subscription_id = subscription.get("id") or ""
+    price_id = ""
+    items = (subscription.get("items") or {}).get("data") or []
+    for item in items:
+        pid = ((item.get("price") or {}).get("id")) or ""
+        if pid in HOSTED_PROXY_PRICE_TO_PLAN:
+            price_id = pid
+            break
+    payload = {
+        "action": "provision",
+        "tenant_id": tenant_id,
+        "subscription_id": subscription_id,
+        "customer_email": customer_email,
+        "plan": plan,
+        "hosted": True,
+        "stripe_customer_id": subscription.get("customer") or "",
+        "price_id": price_id,
+    }
+    try:
+        resp = _get_lambda_client().invoke(
+            FunctionName=HOSTED_PROXY_FUNCTION_NAME,
+            InvocationType="Event",
+            Payload=json.dumps(payload),
+        )
+        logger.info("Invoked hosted provision for tenant %s (status %s)",
+                    tenant_id, resp.get("StatusCode"))
+        return resp.get("StatusCode") == 202
+    except Exception as exc:
+        logger.exception("Hosted provision invoke failed for tenant %s: %s",
+                         tenant_id, exc)
+        return False
+
+
+def _get_customer_email(subscription: dict, stripe_secret_key: str) -> str:
+    """Best-effort customer email for a subscription: metadata first, then
+    the Stripe customer object. Returns '' when it cannot be determined."""
+    metadata = subscription.get("metadata") or {}
+    email = (metadata.get("customer_email") or metadata.get("email") or "").strip()
+    if email:
+        return email
+    customer_id = subscription.get("customer") or ""
+    if not customer_id or not stripe_secret_key:
+        return ""
+    try:
+        credentials = base64.b64encode(f"{stripe_secret_key}:".encode()).decode()
+        req = urllib.request.Request(
+            f"https://api.stripe.com/v1/customers/{customer_id}",
+            headers={"Authorization": f"Basic {credentials}"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return (json.loads(resp.read()).get("email") or "").strip()
+    except Exception as exc:
+        logger.warning("Could not fetch Stripe customer %s email: %s", customer_id, exc)
+        return ""
+
+
+def _tenant_id_for_registry(subscription_id: str) -> str:
+    """Resolve the registry tenant_id for a subscription id via the GSI
+    subscription-index. Returns '' when no record exists (nothing to
+    terminate)."""
+    try:
+        table = boto3.resource("dynamodb", region_name="us-east-1").Table(
+            HOSTED_PROXY_REGISTRY_TABLE)
+        resp = table.query(
+            IndexName="subscription-index",
+            KeyConditionExpression="subscription_id = :s",
+            ExpressionAttributeValues={":s": subscription_id},
+            Limit=1,
+        )
+        items = resp.get("Items") or []
+        if items:
+            return items[0].get("tenant_id") or ""
+    except Exception as exc:
+        logger.warning("Registry lookup failed for subscription %s: %s",
+                       subscription_id, exc)
+    return ""
+
+
+def _send_hosted_cancellation_email(to_email: str, terminate_after_ts: int) -> bool:
+    """Tell the tenant their hosted proxy will be terminated after the grace
+    period. Best-effort; a failure does not fail the webhook."""
+    if not to_email:
+        return False
+    deadline = datetime.fromtimestamp(terminate_after_ts, tz=timezone.utc).strftime("%B %d, %Y")
+    subject = "Your RelayShield hosted proxy will be terminated"
+    body_html = f"""
+<html><body style="font-family:sans-serif;max-width:600px;margin:40px auto;color:#1a1a1a;">
+  <h2 style="color:#0f172a;">Your hosted proxy subscription has ended</h2>
+  <p>Hi,</p>
+  <p>Your RelayShield hosted MCP Proxy Firewall subscription has been cancelled. Your
+  dedicated proxy will stay up for a 7-day grace period and will be terminated on
+  <strong>{deadline}</strong>.</p>
+  <p>If this was a mistake, resubscribe before that date and your proxy will be restored.</p>
+  <p>Questions? Reply to this email.</p>
+  <hr style="border:none;border-top:1px solid #e5e7eb;margin:32px 0;">
+  <p style="font-size:12px;color:#6b7280;">
+    RelayShield LLC · relayshield.net<br>
+    140 Hidden Road, Andover MA 01810
+  </p>
+</body></html>
+"""
+    try:
+        _get_ses_client().send_email(
+            Source=f"RelayShield <{SES_SENDER}>",
+            ReplyToAddresses=[SUPPORT_EMAIL],
+            Destination={"ToAddresses": [to_email]},
+            Message={
+                "Subject": {"Data": subject, "Charset": "UTF-8"},
+                "Body": {"Html": {"Data": body_html, "Charset": "UTF-8"}},
+            },
+        )
+        logger.info("Hosted cancellation email sent via SES to %s", to_email)
+        return True
+    except Exception as exc:
+        logger.error("SES hosted cancellation email failed for %s: %s", to_email, exc)
+        return False
+
+
+def process_hosted_subscription_event(stripe_event: dict) -> dict:
+    """Handle customer.subscription.created / deleted / updated for hosted
+    proxy subscriptions. Returns the HTTP-shaped response (always 200 for a
+    verified event). Non-proxy subscriptions are acknowledged and ignored."""
+    event_type = stripe_event.get("type", "")
+    subscription = stripe_event.get("data", {}).get("object", {}) or {}
+    subscription_id = subscription.get("id") or ""
+    logger.info("Hosted subscription event %s for %s", event_type, subscription_id)
+
+    if event_type == "customer.subscription.created":
+        plan = _hosted_proxy_plan_for_subscription(subscription)
+        if not plan:
+            return {"statusCode": 200,
+                    "body": json.dumps({"message": "Not a hosted proxy subscription, ignored"})}
+        stripe_secret_key = ""
+        try:
+            stripe_secret_key = get_secret(STRIPE_SECRET_KEY_NAME)
+        except Exception as exc:
+            logger.warning("Could not retrieve Stripe secret key: %s", exc)
+        customer_email = _get_customer_email(subscription, stripe_secret_key)
+        tenant_id = _tenant_id_for_subscription(subscription, customer_email)
+        ok = _invoke_hosted_provision(tenant_id, subscription, plan, customer_email)
+        return {"statusCode": 200,
+                "body": json.dumps({"message": "Hosted provision invoked" if ok else "Hosted provision invoke failed",
+                                    "tenant_id": tenant_id})}
+
+    if event_type == "customer.subscription.deleted":
+        tenant_id = _tenant_id_for_registry(subscription_id)
+        if not tenant_id:
+            return {"statusCode": 200,
+                    "body": json.dumps({"message": "No hosted proxy record for subscription, ignored"})}
+        terminate_after = int(time.time()) + 7 * 24 * 3600
+        table = boto3.resource("dynamodb", region_name="us-east-1").Table(
+            HOSTED_PROXY_REGISTRY_TABLE)
+        try:
+            table.update_item(
+                Key={"tenant_id": tenant_id},
+                UpdateExpression="SET #s = :s, terminate_after = :t",
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues={":s": "terminating", ":t": terminate_after},
+            )
+        except Exception as exc:
+            logger.warning("Could not mark hosted proxy terminating for %s: %s",
+                           tenant_id, exc)
+            return {"statusCode": 200,
+                    "body": json.dumps({"message": "Terminate marking failed"})}
+        stripe_secret_key = ""
+        try:
+            stripe_secret_key = get_secret(STRIPE_SECRET_KEY_NAME)
+        except Exception as exc:
+            logger.warning("Could not retrieve Stripe secret key: %s", exc)
+        customer_email = _get_customer_email(subscription, stripe_secret_key)
+        _send_hosted_cancellation_email(customer_email, terminate_after)
+        return {"statusCode": 200,
+                "body": json.dumps({"message": "Hosted proxy terminating", "tenant_id": tenant_id})}
+
+    if event_type == "customer.subscription.updated":
+        if not subscription.get("cancel_at_period_end"):
+            return {"statusCode": 200,
+                    "body": json.dumps({"message": "Subscription updated, no cancellation, ignored"})}
+        tenant_id = _tenant_id_for_registry(subscription_id)
+        if not tenant_id:
+            return {"statusCode": 200,
+                    "body": json.dumps({"message": "No hosted proxy record for subscription, ignored"})}
+        period_end = subscription.get("current_period_end") or int(time.time())
+        terminate_after = int(period_end) + 7 * 24 * 3600
+        table = boto3.resource("dynamodb", region_name="us-east-1").Table(
+            HOSTED_PROXY_REGISTRY_TABLE)
+        try:
+            table.update_item(
+                Key={"tenant_id": tenant_id},
+                UpdateExpression="SET #s = :s, terminate_after = :t",
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues={":s": "terminating", ":t": terminate_after},
+            )
+        except Exception as exc:
+            logger.warning("Could not mark hosted proxy terminating for %s: %s",
+                           tenant_id, exc)
+            return {"statusCode": 200,
+                    "body": json.dumps({"message": "Terminate marking failed"})}
+        stripe_secret_key = ""
+        try:
+            stripe_secret_key = get_secret(STRIPE_SECRET_KEY_NAME)
+        except Exception as exc:
+            logger.warning("Could not retrieve Stripe secret key: %s", exc)
+        customer_email = _get_customer_email(subscription, stripe_secret_key)
+        _send_hosted_cancellation_email(customer_email, terminate_after)
+        return {"statusCode": 200,
+                "body": json.dumps({"message": "Hosted proxy terminating at period end",
+                                    "tenant_id": tenant_id})}
+
+    return {"statusCode": 200,
+            "body": json.dumps({"message": f"Event type '{event_type}' acknowledged, not processed"})}
 
 
 # ---------------------------------------------------------------------------
@@ -845,8 +1133,16 @@ def lambda_handler(event, context):
     event_type = stripe_event.get("type", "")
     logger.info("Received Stripe event type: %s", event_type)
 
-    # Only act on checkout completion — acknowledge all others silently
-    # (Stripe requires a 2xx response for all webhook deliveries)
+    # Checkout completion goes through the SQS queue (or inline when no queue).
+    # Hosted proxy subscription lifecycle events are handled inline here:
+    # created invokes the provision Lambda async, deleted/updated-with-cancel
+    # mark the registry terminating with a 7-day grace period. All other
+    # types are acknowledged silently (Stripe requires a 2xx for every
+    # webhook delivery).
+    if event_type in ("customer.subscription.created",
+                      "customer.subscription.deleted",
+                      "customer.subscription.updated"):
+        return process_hosted_subscription_event(stripe_event)
     if event_type != "checkout.session.completed":
         return {
             "statusCode": 200,

@@ -100,9 +100,9 @@ let n = 0; const ok = (name) => console.log(`ok ${++n} ${name}`);
   assert.match(scripts[0], /src="https:\/\/cdn\.shopify\.com\/shopifycloud\/app-bridge\.js"/);
   assert.doesNotMatch(scripts[0], /async|defer|module/);
   assert.match(r.headers.get("content-security-policy"), /frame-ancestors https:\/\/\*\.myshopify\.com https:\/\/admin\.shopify\.com/);
-  assert.ok(html.includes(`<body data-shop="${SHOP}">`));
+  assert.ok(html.includes(`<body data-shop="${SHOP}" data-needs-sync="0">`) || html.includes(`<body data-shop="${SHOP}" data-needs-sync="1">`));
   const anon = await (await get(env, "/")).text();
-  assert.ok(anon.includes('<body data-shop="">'));
+  assert.ok(anon.includes('<body data-shop="" data-needs-sync="0">'));
   ok("meta key, first-script CDN App Bridge, frame-ancestors, and the authed flag are all present");
 }
 
@@ -174,9 +174,9 @@ function stubWith(handler) {
   html = await page(gql({ data: { currentAppInstallation: { activeSubscriptions: [] } } }));
   assert.match(html, /No active plan yet/);
   html = await page(gql({ errors: [{ message: "boom" }] }));
-  assert.match(html, /Plan status is unavailable/);
+  assert.match(html, /could not confirm your plan/);
   html = await page(gql({}, 500));
-  assert.match(html, /Plan status is unavailable/);
+  assert.match(html, /could not confirm your plan/);
   const env = mkEnv(installed()); stubWith(gql({ data: { currentAppInstallation: { activeSubscriptions: [] } } }));
   await get(env, `/?id_token=${idToken()}&shop=${SHOP}`);
   const q = calls.find((c) => c.url.endsWith("/graphql.json"));
@@ -242,5 +242,103 @@ function stubWith(handler) {
   assert.equal(rec.webhooks_v2, true, "other fields kept");
   assert.equal(JSON.parse(env._m.get(`screenings:${SHOP}`)).length, 1, "screening still recorded");
   ok("a 401 from the Admin API drops the stored token and still records the screening");
+}
+
+// 14. Existing orders are synced in batches, once, and the shop is then marked synced.
+{
+  const nodes = Array.from({ length: 10 }, (_, i) => ({ legacyResourceId: String(100 + i), name: `#${1000 + i}`, email: `buyer${i}@example.com` }));
+  const env = mkEnv(installed()); let composite = 0;
+  stubWith((url, init) => {
+    if (url.endsWith("/graphql.json") && String(init.body).includes("orders(")) return new Response(JSON.stringify({ data: { orders: { nodes } } }));
+    if (url.includes("execute-api")) { composite++; return new Response(JSON.stringify({ ok: true, data: { level: "unknown", score: 10, signals: [] } })); }
+    return null;
+  });
+  const H = { Authorization: `Bearer ${idToken()}` };
+  assert.equal((await post(env, "/api/sync", "", {})).status, 401);
+  assert.equal(composite, 0, "no screening without a session");
+  let html = await (await get(env, `/?id_token=${idToken()}&shop=${SHOP}`)).text();
+  assert.match(html, /data-needs-sync="1"/);
+  let j = await (await post(env, "/api/sync", "", H)).json();
+  assert.deepEqual([j.ok, j.synced, j.remaining, j.failed], [true, 8, 2, 0]);
+  assert.ok(!JSON.parse(env._m.get(`shop:${SHOP}`)).orders_synced_at, "not marked synced while orders remain");
+  j = await (await post(env, "/api/sync", "", H)).json();
+  assert.deepEqual([j.synced, j.remaining], [2, 0]);
+  const list = JSON.parse(env._m.get(`screenings:${SHOP}`));
+  assert.equal(list.length, 10); assert.equal(new Set(list.map((x) => x.order_id)).size, 10, "no duplicates");
+  assert.ok(JSON.parse(env._m.get(`shop:${SHOP}`)).orders_synced_at, "marked synced");
+  assert.ok(!JSON.stringify(list).includes("buyer0@example.com"), "raw email never stored");
+  j = await (await post(env, "/api/sync", "", H)).json();
+  assert.equal(j.synced, 0); assert.equal(composite, 10, "second pass screens nothing again");
+  html = await (await get(env, `/?id_token=${idToken()}&shop=${SHOP}`)).text();
+  assert.match(html, /data-needs-sync="0"/); assert.match(html, /#1009/);
+  ok("existing orders are screened in batches, once each, recorded without raw emails, and the shop is then marked synced");
+}
+// 15. The reviewer's path: orders exist, app is uninstalled then reinstalled, dashboard must not stay empty.
+{
+  const nodes = Array.from({ length: 6 }, (_, i) => ({ legacyResourceId: String(200 + i), name: `#${2000 + i}`, email: `b${i}@example.com` }));
+  const env = mkEnv({ ...installed({ orders_synced_at: "x" }), [`screenings:${SHOP}`]: [{ order_id: 200 }] });
+  stubWith((url, init) => {
+    if (url.endsWith("/admin/oauth/access_token")) return new Response(JSON.stringify({ access_token: "shpat_new", refresh_token: "r", expires_in: 3600 }));
+    if (url.endsWith("/graphql.json") && String(init.body).includes("orders(")) return new Response(JSON.stringify({ data: { orders: { nodes } } }));
+    if (url.includes("execute-api")) return new Response(JSON.stringify({ ok: true, data: { level: "unknown", score: 0, signals: [] } }));
+    return null;
+  });
+  const raw = "{}";
+  await post(env, "/webhooks/app-uninstalled", raw, { "X-Shopify-Hmac-Sha256": sign(raw), "X-Shopify-Shop-Domain": SHOP });
+  assert.ok(!env._m.has(`screenings:${SHOP}`));
+  const html = await (await get(env, `/?id_token=${idToken()}&shop=${SHOP}`)).text();
+  assert.match(html, /data-needs-sync="1"/, "reinstalled shop is flagged for sync on first signed-in load");
+  const j = await (await post(env, "/api/sync", "", { Authorization: `Bearer ${idToken()}` })).json();
+  assert.equal(j.synced, 6);
+  const after = await (await get(env, `/?id_token=${idToken()}&shop=${SHOP}`)).text();
+  assert.doesNotMatch(after, /No orders screened yet/);
+  for (let i = 0; i < 6; i++) assert.ok(after.includes(`#${2000 + i}`));
+  ok("uninstall, reinstall, first load: the six existing orders appear instead of 'No orders screened yet'");
+}
+// 16. A refused orders read is reported, never marks the shop synced, never breaks the page.
+{
+  const env = mkEnv(installed());
+  stubWith((url, init) => url.endsWith("/graphql.json") && String(init.body).includes("orders(")
+    ? new Response(JSON.stringify({ errors: [{ message: "Access denied" }] })) : null);
+  const r = await post(env, "/api/sync", "", { Authorization: `Bearer ${idToken()}` });
+  assert.equal(r.status, 502); assert.equal((await r.json()).error, "orders_unavailable");
+  assert.ok(!JSON.parse(env._m.get(`shop:${SHOP}`)).orders_synced_at);
+  assert.equal((await get(env, `/?id_token=${idToken()}&shop=${SHOP}`)).status, 200);
+  ok("a refused orders query returns 502, leaves the shop unsynced, and the dashboard still renders");
+}
+// 17. Sync writes the same tag a webhook would, and skips orders the webhook already recorded.
+{
+  const nodes = [{ legacyResourceId: "300", name: "#3000", email: "x@example.com" }, { legacyResourceId: "301", name: "#3001", email: "y@example.com" }];
+  const env = mkEnv({ ...installed(), [`screenings:${SHOP}`]: [{ order_id: 301, level: "unknown" }] });
+  stubWith((url, init) => {
+    if (url.endsWith("/graphql.json") && String(init.body).includes("orders(")) return new Response(JSON.stringify({ data: { orders: { nodes } } }));
+    if (url.includes("execute-api")) return new Response(JSON.stringify({ ok: true, data: { level: "high", score: 90, signals: [] } }));
+    if (url.includes("/orders/300.json") && (init.method || "GET") === "GET") return new Response(JSON.stringify({ order: { tags: "" } }));
+    return null;
+  });
+  const j = await (await post(env, "/api/sync", "", { Authorization: `Bearer ${idToken()}` })).json();
+  assert.equal(j.synced, 1, "order 301 was already recorded");
+  const put = calls.find((c) => c.url.includes("/orders/300.json") && c.init.method === "PUT");
+  assert.ok(put && JSON.parse(put.init.body).order.tags.includes("relayshield-high-risk"));
+  assert.ok(!calls.some((c) => c.url.includes("/orders/301")), "recorded order not touched");
+  const screened = calls.filter((c) => c.url.includes("execute-api")).map((c) => JSON.parse(c.init.body));
+  assert.equal(screened.length, 1);
+  assert.equal(screened[0].email.from_address, "x@example.com", "the buyer email reaches the screening call");
+  assert.equal(screened[0].url, `https://${SHOP}`);
+  ok("sync tags a high-risk existing order like the webhook does and leaves already-recorded orders alone");
+}
+// 18. Sync works on a shop that has no token yet (reinstall: sync can arrive before any other call).
+{
+  const env = mkEnv();
+  stubWith((url, init) => {
+    if (url.endsWith("/admin/oauth/access_token")) return new Response(JSON.stringify({ access_token: "shpat_new", refresh_token: "r", expires_in: 3600 }));
+    if (url.endsWith("/graphql.json") && String(init.body).includes("orders(")) return new Response(JSON.stringify({ data: { orders: { nodes: [{ legacyResourceId: "400", name: "#4000", email: "z@example.com" }] } } }));
+    if (url.includes("execute-api")) return new Response(JSON.stringify({ ok: true, data: { level: "unknown", score: 1, signals: [] } }));
+    return null;
+  });
+  const j = await (await post(env, "/api/sync", "", { Authorization: `Bearer ${idToken()}` })).json();
+  assert.equal(j.ok, true); assert.equal(j.synced, 1);
+  assert.equal(JSON.parse(env._m.get(`shop:${SHOP}`)).access_token, "shpat_new");
+  ok("sync exchanges a token first when the shop has none");
 }
 console.log(`\n${n} passed`);

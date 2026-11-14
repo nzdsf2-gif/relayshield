@@ -569,6 +569,132 @@ async function readRawBody(request) {
   return request.text();
 }
 
+/* Screens one order and writes the tag and note to Shopify. Shared by the
+ * orders/create webhook and by the order sync, so the two can never disagree.
+ * Returns null when screening itself failed (fail open: nothing is recorded and
+ * nothing is tagged); otherwise { record } for the caller to store. */
+export async function screenAndApply(env, shop, rec, order, settingsIn) {
+  const signals = extractOrderSignals(order, shop);
+  let verdict;
+  try {
+    const keyInfo = await provisionShopKey(env, shop);
+    verdict = await screenOrder(signals, keyInfo);
+  } catch (e) {
+    console.log(`screening failed order=${order.id}: ${e.message}`);
+    return null;
+  }
+  const level = ["high", "medium", "unknown"].includes(verdict.level) ? verdict.level : "unknown";
+  const reasons = (verdict.signals || []).flatMap((s) => s.reasons || []);
+  let token = rec.access_token;
+  try {
+    token = await getFreshAccessToken(env, shop);
+  } catch (e) {
+    console.log(`token refresh failed order=${order.id}: ${e.message}`);
+  }
+  try {
+    const settings = settingsIn || (await getSettings(env, shop));
+    await applyVerdictToOrder(shop, token, order, level, verdict.score, reasons, settings);
+  } catch (e) {
+    console.log(`admin action failed order=${order.id}: ${e.message}`);
+    // 401 means the stored token was revoked (uninstall then reinstall, or the
+    // merchant removed the app). Drop it so the next authenticated dashboard
+    // load exchanges a fresh one instead of trusting a dead token forever.
+    if (/-> 401:/.test(e.message)) await dropStaleToken(env, shop);
+  }
+  return {
+    record: {
+      order_id: order.id,
+      order_name: order.name,
+      email_hash: await hashBuyerEmail(signals.email.from_address),
+      level,
+      score: verdict.score,
+      top_reason: reasons[0] || null,
+      screened_at: new Date().toISOString(),
+    },
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* order sync: screen orders that already exist in the shop            */
+/* ------------------------------------------------------------------ */
+
+/* The orders/create webhook only fires for NEW orders. A shop that installs,
+ * or reinstalls after the uninstall wipe, with orders already in Shopify would
+ * otherwise show an empty dashboard forever. This reads recent orders and
+ * screens the ones not yet recorded, a small batch per call (Workers cap the
+ * outbound requests one invocation may make); the page calls it until
+ * `remaining` is 0. Shopify returns the last 60 days without read_all_orders. */
+const SYNC_BATCH = 8;
+const SYNC_CONCURRENCY = 4;
+const SYNC_LOOKBACK = 50;
+
+export async function fetchRecentOrders(shop, token) {
+  const resp = await fetch(`${adminBase(shop)}/graphql.json`, {
+    method: "POST",
+    headers: { "X-Shopify-Access-Token": token, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      query: "query($first:Int!){ orders(first:$first, sortKey:CREATED_AT, reverse:true){ nodes { legacyResourceId name email } } }",
+      variables: { first: SYNC_LOOKBACK },
+    }),
+  });
+  if (!resp.ok) throw new Error(`orders query -> ${resp.status}`);
+  const data = await resp.json();
+  if (data.errors || !data.data || !data.data.orders) {
+    throw new Error(`orders query refused: ${JSON.stringify(data.errors || "no data").slice(0, 200)}`);
+  }
+  return data.data.orders.nodes.map((n) => ({
+    id: Number(n.legacyResourceId),
+    name: n.name,
+    email: n.email || "",
+  }));
+}
+
+export async function syncOrders(env, shop) {
+  const rec = await getShopRecord(env, shop);
+  if (!rec || !rec.access_token) throw new Error("Shop not installed");
+  const token = await getFreshAccessToken(env, shop);
+  const orders = await fetchRecentOrders(shop, token);
+  const list = (await kvGet(env, screeningsKey(shop))) || [];
+  const seen = new Set(list.map((s) => s.order_id));
+  const todo = orders.filter((o) => o.id && !seen.has(o.id));
+  const batch = todo.slice(0, SYNC_BATCH);
+  const settings = await getSettings(env, shop);
+  const records = [];
+  let failed = 0;
+  for (let i = 0; i < batch.length; i += SYNC_CONCURRENCY) {
+    const outcomes = await Promise.all(batch.slice(i, i + SYNC_CONCURRENCY).map(async (o) => {
+      try { return await screenAndApply(env, shop, rec, o, settings); } catch { return null; }
+    }));
+    for (const out of outcomes) { if (out) records.push(out.record); else failed++; }
+  }
+  // One write for the whole batch: recordScreening is read-modify-write, so
+  // calling it from concurrent tasks would drop records.
+  if (records.length) {
+    await kvPut(env, screeningsKey(shop), [...records.reverse(), ...list].slice(0, SCREENINGS_CAP), SCREENINGS_TTL_SECONDS);
+  }
+  const remaining = todo.length - batch.length;
+  if (remaining === 0 && failed === 0) {
+    const fresh = (await getShopRecord(env, shop)) || rec;
+    await kvPut(env, shopKey(shop), { ...fresh, orders_synced_at: new Date().toISOString() });
+  }
+  return { synced: records.length, failed, remaining, total_seen: orders.length };
+}
+
+async function handleSync(request, env, url) {
+  const auth = request.headers.get("Authorization") || "";
+  const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+  const shop = await verifySessionToken(env, bearer);
+  if (!shop) return json({ ok: false }, 401);
+  const inst = await ensureInstalled(env, shop, bearer, url.origin);
+  if (!inst.installed) return json({ ok: false, error: "not_installed" }, 503);
+  try {
+    return json({ ok: true, ...(await syncOrders(env, shop)) });
+  } catch (e) {
+    console.log(`order sync failed shop=${shop}: ${e.message}`);
+    return json({ ok: false, error: "orders_unavailable" }, 502);
+  }
+}
+
 async function handleOrdersCreate(request, env) {
   const raw = await readRawBody(request);
   const hmac = request.headers.get("X-Shopify-Hmac-Sha256") || "";
@@ -589,44 +715,10 @@ async function handleOrdersCreate(request, env) {
     return json({ ok: true, deduped: true });
   }
 
-  const signals = extractOrderSignals(order, shop);
-  let verdict;
-  try {
-    const keyInfo = await provisionShopKey(env, shop);
-    verdict = await screenOrder(signals, keyInfo);
-  } catch (e) {
-    console.log(`screening failed order=${order.id}: ${e.message}`);
-    return json({ ok: true, screened: false, error: "screening unavailable" });
-  }
-
-  const level = ["high", "medium", "unknown"].includes(verdict.level) ? verdict.level : "unknown";
-  const reasons = (verdict.signals || []).flatMap((s) => s.reasons || []);
-  let token = rec.access_token;
-  try {
-    token = await getFreshAccessToken(env, shop);
-  } catch (e) {
-    console.log(`token refresh failed order=${order.id}: ${e.message}`);
-  }
-  try {
-    const settings = await getSettings(env, shop);
-    await applyVerdictToOrder(shop, token, order, level, verdict.score, reasons, settings);
-  } catch (e) {
-    console.log(`admin action failed order=${order.id}: ${e.message}`);
-    // 401 means the stored token was revoked (uninstall then reinstall, or the
-    // merchant removed the app). Drop it so the next authenticated dashboard
-    // load exchanges a fresh one instead of trusting a dead token forever.
-    if (/-> 401:/.test(e.message)) await dropStaleToken(env, shop);
-  }
-  await recordScreening(env, shop, {
-    order_id: order.id,
-    order_name: order.name,
-    email_hash: await hashBuyerEmail(signals.email.from_address),
-    level,
-    score: verdict.score,
-    top_reason: reasons[0] || null,
-    screened_at: new Date().toISOString(),
-  });
-  return json({ ok: true, screened: true, level, score: verdict.score });
+  const outcome = await screenAndApply(env, shop, rec, order);
+  if (!outcome) return json({ ok: true, screened: false, error: "screening unavailable" });
+  await recordScreening(env, shop, outcome.record);
+  return json({ ok: true, screened: true, level: outcome.record.level, score: outcome.record.score });
 }
 
 /* GDPR: we store only hashed buyer emails plus screening metadata keyed by
@@ -705,7 +797,7 @@ export function renderDashboard(shop, screenings, apiKey, host, extras = {}) {
   const counts = { high: 0, medium: 0, unknown: 0 };
   for (const s of screenings) if (counts[s.level] !== undefined) counts[s.level]++;
   const planText = !shop ? "Sign in through Shopify Admin to see your plan."
-    : plan === null ? "Plan status is unavailable right now."
+    : plan === null ? "We could not confirm your plan just now. Use the button below to choose or review it."
     : plan.active ? `Current plan: <strong>${esc(plan.name)}</strong>${plan.test ? " (test charge)" : ""}`
     : "No active plan yet.";
   const orderCell = (s) => storeHandle && s.order_id
@@ -798,7 +890,7 @@ export function renderDashboard(shop, screenings, apiKey, host, extras = {}) {
   .btn[disabled] { opacity: .6; cursor: default; }
 </style>
 </head>
-<body data-shop="${esc(shop)}">
+<body data-shop="${esc(shop)}" data-needs-sync="${extras.needsSync ? "1" : "0"}">
 <div class="wrap">
   <h1>RelayShield Order Screening</h1>
   <p>Screening orders for <strong>${esc(shop)}</strong> against the RelayShield threat-intelligence corpus.</p>
@@ -827,7 +919,9 @@ export function renderDashboard(shop, screenings, apiKey, host, extras = {}) {
       <option value="medium">Needs review</option>
       <option value="unknown">No flags found</option>
     </select>
+    <button type="button" class="btn" id="sync-btn">Sync orders</button>
     <button type="button" class="btn" id="refresh-btn">Refresh</button>
+    <span id="sync-status" role="status" aria-live="polite"></span>
   </div>
   <table>
     <thead><tr><th>Order</th><th>Screened</th><th>Verdict</th><th>Score</th><th>Top signal</th></tr></thead>
@@ -855,6 +949,47 @@ export function renderDashboard(shop, screenings, apiKey, host, extras = {}) {
     u.searchParams.delete("id_token");
     location.replace(u.toString());
   });
+  function getToken() {
+    if (!(window.shopify && typeof window.shopify.idToken === "function")) return Promise.reject(new Error("no app bridge"));
+    return window.shopify.idToken();
+  }
+  var syncing = false;
+  function runSync() {
+    if (syncing) return;
+    syncing = true;
+    var btn = document.getElementById("sync-btn"), status = document.getElementById("sync-status");
+    var total = 0, rounds = 0;
+    btn.disabled = true;
+    status.textContent = "Syncing orders...";
+    function step() {
+      return getToken().then(function(token) {
+        return fetch("/api/sync", { method: "POST", headers: { "Authorization": "Bearer " + token } });
+      }).then(function(r) {
+        if (!r.ok) throw new Error("status " + r.status);
+        return r.json();
+      }).then(function(j) {
+        total += j.synced; rounds++;
+        status.textContent = "Screened " + total + " existing order" + (total === 1 ? "" : "s") + (j.remaining > 0 ? ", more to go..." : ".");
+        if (j.remaining > 0 && j.synced > 0 && rounds < 8) return step();
+      });
+    }
+    step().then(function() {
+      if (total > 0) {
+        var u = new URL(location.href);
+        u.searchParams.delete("id_token");
+        location.replace(u.toString());
+      } else {
+        status.textContent = "Your recent orders are all screened.";
+      }
+    }).catch(function() {
+      status.textContent = "Could not read your orders from Shopify. Try again, or contact support.";
+    }).then(function() { syncing = false; btn.disabled = false; });
+  }
+  document.getElementById("sync-btn").addEventListener("click", runSync);
+  if (document.body.getAttribute("data-needs-sync") === "1" && document.body.getAttribute("data-shop")) {
+    // Orders that already exist are not delivered by webhook. Sync them once on the first signed-in load.
+    setTimeout(runSync, 300);
+  }
   document.getElementById("save-settings").addEventListener("click", function() {
     var btn = this, status = document.getElementById("settings-status");
     if (!(window.shopify && typeof window.shopify.idToken === "function")) {
@@ -914,9 +1049,11 @@ async function handleDashboard(request, env) {
   const screenings = shop ? ((await kvGet(env, screeningsKey(shop))) || []) : [];
   const settings = shop ? await getSettings(env, shop) : DEFAULT_SETTINGS;
   const plan = shop ? await getPlanStatus(env, shop) : null;
+  const shopRec = shop ? await getShopRecord(env, shop) : null;
+  const needsSync = Boolean(shop && shopRec && shopRec.access_token && !shopRec.orders_synced_at);
   const host = url.searchParams.get("host") || "";
   return new Response(renderDashboard(shop || "", screenings, env.SHOPIFY_API_KEY, host, {
-    settings, plan, appHandle: env.SHOPIFY_APP_HANDLE,
+    settings, plan, needsSync, appHandle: env.SHOPIFY_APP_HANDLE,
   }), {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
@@ -944,6 +1081,9 @@ export default {
       }
       if (url.pathname === "/webhooks/app-uninstalled" && request.method === "POST") {
         return handleAppUninstalled(request, env);
+      }
+      if (url.pathname === "/api/sync" && request.method === "POST") {
+        return handleSync(request, env, url);
       }
       if (url.pathname === "/api/settings" && request.method === "POST") {
         return handleSettingsSave(request, env);

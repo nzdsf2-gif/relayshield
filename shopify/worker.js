@@ -222,21 +222,23 @@ export function verdictActions(level, settings) {
   const cfg = normalizeSettings(settings);
   if (level === "high") return { tags: ["relayshield-high-risk"], note: cfg.add_note };
   if (level === "medium" && cfg.tag_medium) return { tags: ["relayshield-review"], note: cfg.add_note };
-  return { tags: [], note: false };
+  // Unknown, or medium with tagging off: no tag, but the score line still goes in the order note
+  // (merged from the live Worker's 2026-11-03 behaviour).
+  return { tags: [], note: cfg.add_note };
 }
 
-export function buildTimelineNote(orderName, level, score, reasons) {
-  const lines = [
-    `RelayShield screened order ${orderName}.`,
-    `Composite risk score: ${score}/100 (${level}).`,
-  ];
-  const shown = (reasons || []).filter(Boolean).slice(0, 5);
-  if (shown.length) lines.push(`Signals: ${shown.join("; ")}.`);
-  lines.push(
-    "A clean result means no known red flags were found, not proof of safety. " +
-    "Nothing was changed on this order automatically; review before fulfilling if anything looks off."
-  );
-  return lines.join(" ");
+/* The order note is the only merchant-visible field an app can write that
+ * Shopify turns into a timeline entry. The REST Event resource is GET-only:
+ * there is no POST /orders/{id}/events.json endpoint, and timeline comments
+ * are read-only for apps. So the screening line goes into the order note,
+ * appended to any merchant note already there, never overwriting it.
+ * (Recovered from the live Worker's uncommitted 2026-11-03 edits.) */
+export function buildOrderNoteLine(orderName, level, score, reasons) {
+  const shown = (reasons || []).filter(Boolean).slice(0, 3);
+  let line = `RelayShield screened order ${orderName}: composite risk ${score}/100 (${level}).`;
+  if (shown.length) line += ` Signals: ${shown.join("; ")}.`;
+  line += " This is a risk signal, not proof of safety; review before fulfilling. Nothing was changed automatically.";
+  return line;
 }
 
 /* ------------------------------------------------------------------ */
@@ -267,22 +269,24 @@ export async function applyVerdictToOrder(shop, token, order, level, score, reas
   const actions = verdictActions(level, settings);
   if (!actions.tags.length && !actions.note) return { skipped: true };
   const results = {};
+  // One GET gives both the current tags and the current merchant note; one PUT writes both.
+  const current = ((await adminApi(shop, token, `/orders/${order.id}.json`)) || {}).order || {};
+  const orderBody = { id: order.id };
   if (actions.tags.length) {
-    const current = await adminApi(shop, token, `/orders/${order.id}.json`);
-    const existing = String(current.order.tags || "")
-      .split(",").map((t) => t.trim()).filter(Boolean);
+    const existing = String(current.tags || "").split(",").map((t) => t.trim()).filter(Boolean);
     const merged = [...new Set([...existing, ...actions.tags])];
-    await adminApi(shop, token, `/orders/${order.id}.json`, "PUT", {
-      order: { id: order.id, tags: merged.join(", ") },
-    });
+    orderBody.tags = merged.join(", ");
     results.tags = merged;
   }
   if (actions.note) {
-    await adminApi(shop, token, `/orders/${order.id}/events.json`, "POST", {
-      event: { message: buildTimelineNote(order.name, level, score, reasons) },
-    });
+    const noteLine = buildOrderNoteLine(order.name, level, score, reasons);
+    const existingNote = String(current.note || "");
+    orderBody.note = existingNote.includes(noteLine)
+      ? existingNote
+      : existingNote ? `${existingNote}\n${noteLine}` : noteLine;
     results.note = true;
   }
+  await adminApi(shop, token, `/orders/${order.id}.json`, "PUT", { order: orderBody });
   return results;
 }
 
@@ -526,29 +530,146 @@ export function pricingPlansUrl(shop, handle) {
   return `https://admin.shopify.com/store/${store}/charges/${handle || DEFAULT_APP_HANDLE}/pricing_plans`;
 }
 
-/* Reads this shop's active subscription. Read-only: under Managed Pricing
- * Shopify creates and changes the charge, so there is nothing to write here.
- * Never throws; null means "could not tell", which the page shows as unknown
- * rather than as "no plan". */
-export async function getPlanStatus(env, shop) {
+/* ------------------------------------------------------------------ */
+/* billing: Shopify App Pricing, read-only                             */
+/* ------------------------------------------------------------------ */
+/* Recovered from the live Worker's uncommitted 2026-11-03 edits and changed in
+ * three ways, each deliberate:
+ *  1. The FREE allowance is 100 screenings per shop for its LIFETIME (Andrew,
+ *     2026-11-15: "try before you buy"; a monthly reset invites abuse). The
+ *     PAID allowance stays 2000 per calendar month.
+ *  2. The lifetime counter is keyed by a hash of the shop domain and is NOT
+ *     deleted by uninstall, so reinstalling does not buy a fresh 100.
+ *  3. The subscription query asks only for id, name and status. The live copy
+ *     also asked for lineItems.plan.pricingDetails, which nothing used, and a
+ *     refused query there threw and produced "Plan status unknown".
+ * No appSubscriptionCreate, no Stripe, no external checkout: Shopify hosts plan
+ * selection. On any billing error the gate fails open to FREE limits, never to
+ * paid, so an outage cannot grant paid screening. */
+export const FREE_SCREENING_LIMIT = 100;
+export const PAID_SCREENING_LIMIT = 2000;
+const PAID_PLAN_NAME = "Paid";
+const MONTHLY_COUNT_TTL_SECONDS = 62 * 24 * 60 * 60;
+
+function billingMonthKey(d) {
+  const dt = d || new Date();
+  return dt.getUTCFullYear() + "-" + String(dt.getUTCMonth() + 1).padStart(2, "0");
+}
+const monthlyCountKey = (shop, month) => `screenings-count:${shop}:${month}`;
+const lifetimeCountKey = async (shop) => `screenings-total:${await sha256Hex(String(shop).toLowerCase())}`;
+
+async function readCount(env, key) {
+  try {
+    const raw = await env.RS_KV.get(key);
+    const n = raw ? JSON.parse(raw).count : 0;
+    return typeof n === "number" && n >= 0 ? n : 0;
+  } catch { return 0; }
+}
+
+export async function getUsage(env, shop) {
+  return {
+    month: await readCount(env, monthlyCountKey(shop, billingMonthKey())),
+    lifetime: await readCount(env, await lifetimeCountKey(shop)),
+  };
+}
+
+/* Adds `by` screenings to both counters. Best effort: a KV hiccup must never
+ * stop an order being handled. */
+export async function recordUsage(env, shop, by = 1) {
+  try {
+    const month = billingMonthKey();
+    const mk = monthlyCountKey(shop, month), lk = await lifetimeCountKey(shop);
+    const m = (await readCount(env, mk)) + by, l = (await readCount(env, lk)) + by;
+    await env.RS_KV.put(mk, JSON.stringify({ month, count: m }), { expirationTtl: MONTHLY_COUNT_TTL_SECONDS });
+    await env.RS_KV.put(lk, JSON.stringify({ count: l }));
+  } catch (e) {
+    console.log(`usage count failed shop=${shop}: ${e.message}`);
+  }
+}
+
+/* Throws on any failure; callers decide what unknown means. */
+export async function getActiveSubscription(shop, token) {
+  const resp = await fetch(`${adminBase(shop)}/graphql.json`, {
+    method: "POST",
+    headers: { "X-Shopify-Access-Token": token, "Content-Type": "application/json" },
+    body: JSON.stringify({ query: "{ currentAppInstallation { activeSubscriptions { id name status test } } }" }),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || (data.errors && data.errors.length) || !data.data) {
+    throw new Error(`subscription query failed: ${resp.status}`);
+  }
+  const subs = (data.data.currentAppInstallation && data.data.currentAppInstallation.activeSubscriptions) || [];
+  const paid = subs.find((x) => x.status === "ACTIVE" && x.name === PAID_PLAN_NAME);
+  return paid
+    ? { isPaid: true, name: paid.name, test: Boolean(paid.test), subscriptionId: paid.id }
+    : { isPaid: false, name: "Free", test: false, subscriptionId: null };
+}
+
+export function getShopPlan(active, usage) {
+  const isPaid = Boolean(active && active.isPaid);
+  const limit = isPaid ? PAID_SCREENING_LIMIT : FREE_SCREENING_LIMIT;
+  const used = isPaid ? usage.month : usage.lifetime;
+  return {
+    plan: isPaid ? PAID_PLAN_NAME : "Free",
+    isPaid,
+    test: Boolean(active && active.test),
+    limit,
+    used,
+    remaining: Math.max(0, limit - used),
+    overLimit: used >= limit,
+    period: isPaid ? "month" : "lifetime",
+  };
+}
+
+/* The plan for display: null means "could not tell", never "free". */
+export async function loadPlan(env, shop) {
   try {
     const token = await getFreshAccessToken(env, shop);
-    const resp = await fetch(`${adminBase(shop)}/graphql.json`, {
-      method: "POST",
-      headers: { "X-Shopify-Access-Token": token, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        query: "{ currentAppInstallation { activeSubscriptions { name status test currentPeriodEnd } } }",
-      }),
-    });
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    if (data.errors || !data.data) return null;
-    const subs = data.data.currentAppInstallation?.activeSubscriptions || [];
-    return subs.length ? { active: true, name: subs[0].name, test: Boolean(subs[0].test) } : { active: false };
+    return getShopPlan(await getActiveSubscription(shop, token), await getUsage(env, shop));
   } catch (e) {
     console.log(`plan status failed shop=${shop}: ${e.message}`);
     return null;
   }
+}
+
+/* The gate: fails open to FREE limits on a billing error. */
+export async function checkScreeningAllowed(env, shop, token) {
+  let active;
+  try { active = await getActiveSubscription(shop, token); }
+  catch (e) {
+    console.log(`billing check failed, using free limits: ${e.message}`);
+    active = { isPaid: false, name: "Free", test: false, subscriptionId: null };
+  }
+  const plan = getShopPlan(active, await getUsage(env, shop));
+  return { allowed: !plan.overLimit, plan };
+}
+
+async function handleBillingStatus(request, env) {
+  const auth = request.headers.get("Authorization") || "";
+  const shop = await verifySessionToken(env, auth.startsWith("Bearer ") ? auth.slice(7) : "");
+  if (!shop) return json({ ok: false }, 401);
+  const plan = await loadPlan(env, shop);
+  return json(plan ? { ok: true, ...plan } : { ok: true, billingUnknown: true });
+}
+
+/* Shopify's app_subscriptions/update payload carries no shop domain; the shop
+ * is in the X-Shopify-Shop-Domain header. The plan itself is always re-read
+ * from Shopify, so this only records that a subscription ended. */
+async function handleAppSubscriptionsUpdate(request, env) {
+  const raw = await readRawBody(request);
+  const hmac = request.headers.get("X-Shopify-Hmac-Sha256") || "";
+  if (!(await verifyShopifyHmac(env.SHOPIFY_API_SECRET, raw, hmac))) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+  let payload = {};
+  try { payload = JSON.parse(raw); } catch { payload = {}; }
+  const shop = request.headers.get("X-Shopify-Shop-Domain") || (payload && payload.shop_domain) || "";
+  const status = payload && payload.app_subscription ? payload.app_subscription.status : "";
+  if (isValidShopDomain(shop) && ["CANCELLED", "EXPIRED", "FROZEN", "DECLINED"].includes(status)) {
+    const rec = await getShopRecord(env, shop);
+    if (rec) await kvPut(env, shopKey(shop), { ...rec, plan: "Free", subscriptionId: null });
+  }
+  return new Response("ok");
 }
 
 async function handleAppUninstalled(request, env) {
@@ -657,7 +778,12 @@ export async function syncOrders(env, shop) {
   const list = (await kvGet(env, screeningsKey(shop))) || [];
   const seen = new Set(list.map((s) => s.order_id));
   const todo = orders.filter((o) => o.id && !seen.has(o.id));
-  const batch = todo.slice(0, SYNC_BATCH);
+  // The same allowance as the webhook: never screen past the plan's limit.
+  const gate = todo.length ? await checkScreeningAllowed(env, shop, token) : null;
+  if (gate && !gate.allowed) {
+    return { synced: 0, failed: 0, remaining: todo.length, total_seen: orders.length, overLimit: true, plan: gate.plan.plan };
+  }
+  const batch = todo.slice(0, gate ? Math.min(SYNC_BATCH, gate.plan.remaining) : SYNC_BATCH);
   const settings = await getSettings(env, shop);
   const records = [];
   let failed = 0;
@@ -672,12 +798,14 @@ export async function syncOrders(env, shop) {
   if (records.length) {
     await kvPut(env, screeningsKey(shop), [...records.reverse(), ...list].slice(0, SCREENINGS_CAP), SCREENINGS_TTL_SECONDS);
   }
+  if (records.length) await recordUsage(env, shop, records.length);
   const remaining = todo.length - batch.length;
+  const cappedByPlan = remaining > 0 && gate && batch.length === gate.plan.remaining && gate.plan.remaining < SYNC_BATCH;
   if (remaining === 0 && failed === 0) {
     const fresh = (await getShopRecord(env, shop)) || rec;
     await kvPut(env, shopKey(shop), { ...fresh, orders_synced_at: new Date().toISOString() });
   }
-  return { synced: records.length, failed, remaining, total_seen: orders.length };
+  return { synced: records.length, failed, remaining, total_seen: orders.length, overLimit: Boolean(cappedByPlan) };
 }
 
 async function handleSync(request, env, url) {
@@ -714,6 +842,16 @@ async function handleOrdersCreate(request, env) {
   if (existing.some((s) => s.order_id === order.id)) {
     return json({ ok: true, deduped: true });
   }
+
+  // Billing gate BEFORE screening: over the plan's allowance, nothing is screened,
+  // tagged or recorded, and the dashboard says why.
+  let gateToken = rec.access_token;
+  try { gateToken = await getFreshAccessToken(env, shop); } catch (e) {
+    console.log(`billing token refresh failed order=${order.id}: ${e.message}`);
+  }
+  const gate = await checkScreeningAllowed(env, shop, gateToken);
+  if (!gate.allowed) return json({ ok: true, screened: false, overLimit: true, plan: gate.plan.plan });
+  await recordUsage(env, shop, 1);
 
   const outcome = await screenAndApply(env, shop, rec, order);
   if (!outcome) return json({ ok: true, screened: false, error: "screening unavailable" });
@@ -796,10 +934,15 @@ export function renderDashboard(shop, screenings, apiKey, host, extras = {}) {
   const storeHandle = String(shop || "").replace(/\.myshopify\.com$/i, "");
   const counts = { high: 0, medium: 0, unknown: 0 };
   for (const s of screenings) if (counts[s.level] !== undefined) counts[s.level]++;
+  const usageText = (p) => p.isPaid
+    ? `${esc(p.used)} of ${esc(p.limit)} screenings used this month.`
+    : `${esc(p.used)} of ${esc(p.limit)} free checks used.`;
   const planText = !shop ? "Sign in through Shopify Admin to see your plan."
     : plan === null ? "We could not confirm your plan just now. Use the button below to choose or review it."
-    : plan.active ? `Current plan: <strong>${esc(plan.name)}</strong>${plan.test ? " (test charge)" : ""}`
-    : "Current plan: <strong>Free</strong>";
+    : `Current plan: <strong>${esc(plan.plan)}</strong>${plan.test ? " (test charge)" : ""}. ${usageText(plan)}` +
+      (plan.overLimit ? (plan.isPaid
+        ? " You have reached this month's limit; new orders are not screened until next month."
+        : " You have used all your free checks; new orders are not screened until you choose the Paid plan.") : "");
   const orderCell = (s) => storeHandle && s.order_id
     ? `<a href="https://admin.shopify.com/store/${esc(storeHandle)}/orders/${esc(s.order_id)}" target="_top">${esc(s.order_name)}</a>`
     : esc(s.order_name);
@@ -907,7 +1050,7 @@ export function renderDashboard(shop, screenings, apiKey, host, extras = {}) {
   <form class="panel" id="settings-form" onsubmit="return false">
     <h2>Screening settings</h2>
     <label class="check"><input type="checkbox" id="set-tag-medium"${settings.tag_medium ? " checked" : ""}> Tag medium-risk orders <code>relayshield-review</code></label>
-    <label class="check"><input type="checkbox" id="set-add-note"${settings.add_note ? " checked" : ""}> Add a timeline note to tagged orders</label>
+    <label class="check"><input type="checkbox" id="set-add-note"${settings.add_note ? " checked" : ""}> Add a RelayShield line to the order note</label>
     <p class="hint">High-risk orders are always tagged. RelayShield never cancels, refunds, or holds an order.</p>
     <p><button type="submit" class="btn btn-primary" id="save-settings">Save settings</button> <span id="settings-status" role="status" aria-live="polite"></span></p>
   </form>
@@ -958,7 +1101,7 @@ export function renderDashboard(shop, screenings, apiKey, host, extras = {}) {
     if (syncing) return;
     syncing = true;
     var btn = document.getElementById("sync-btn"), status = document.getElementById("sync-status");
-    var total = 0, rounds = 0;
+    var total = 0, rounds = 0, overLimit = false;
     btn.disabled = true;
     status.textContent = "Syncing orders...";
     function step() {
@@ -969,7 +1112,8 @@ export function renderDashboard(shop, screenings, apiKey, host, extras = {}) {
         return r.json();
       }).then(function(j) {
         total += j.synced; rounds++;
-        status.textContent = "Screened " + total + " existing order" + (total === 1 ? "" : "s") + (j.remaining > 0 ? ", more to go..." : ".");
+        if (j.overLimit) overLimit = true;
+        status.textContent = "Screened " + total + " existing order" + (total === 1 ? "" : "s") + (j.remaining > 0 && !j.overLimit ? ", more to go..." : ".");
         if (j.remaining > 0 && j.synced > 0 && rounds < 8) return step();
       });
     }
@@ -979,7 +1123,7 @@ export function renderDashboard(shop, screenings, apiKey, host, extras = {}) {
         u.searchParams.delete("id_token");
         location.replace(u.toString());
       } else {
-        status.textContent = "Your recent orders are all screened.";
+        status.textContent = overLimit ? "Your plan's screening limit is reached. Choose the Paid plan to screen more orders." : "Your recent orders are all screened.";
       }
     }).catch(function() {
       status.textContent = "Could not read your orders from Shopify. Try again, or contact support.";
@@ -1048,7 +1192,7 @@ async function handleDashboard(request, env) {
   if (shop) await ensureInstalled(env, shop, bearer, url.origin);
   const screenings = shop ? ((await kvGet(env, screeningsKey(shop))) || []) : [];
   const settings = shop ? await getSettings(env, shop) : DEFAULT_SETTINGS;
-  const plan = shop ? await getPlanStatus(env, shop) : null;
+  const plan = shop ? await loadPlan(env, shop) : null;
   const shopRec = shop ? await getShopRecord(env, shop) : null;
   const needsSync = Boolean(shop && shopRec && shopRec.access_token && !shopRec.orders_synced_at);
   const host = url.searchParams.get("host") || "";
@@ -1081,6 +1225,12 @@ export default {
       }
       if (url.pathname === "/webhooks/app-uninstalled" && request.method === "POST") {
         return handleAppUninstalled(request, env);
+      }
+      if (url.pathname === "/billing/status" && request.method === "GET") {
+        return handleBillingStatus(request, env);
+      }
+      if (url.pathname === "/webhooks/app-subscriptions-update" && request.method === "POST") {
+        return handleAppSubscriptionsUpdate(request, env);
       }
       if (url.pathname === "/api/sync" && request.method === "POST") {
         return handleSync(request, env, url);

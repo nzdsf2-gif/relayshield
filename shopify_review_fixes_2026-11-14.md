@@ -31,40 +31,50 @@ Other sync fixes from the first pass still stand: the `app/uninstalled` webhook 
 * Planted bugs: 14 across the two passes. Three survived their first run (a validation branch, the sync's token exchange, and the buyer email reaching the screening call). A test was added for each and all 14 are caught now.
 * The dashboard's JavaScript was run in headless Chromium: filter, Save, and a signed-in first load that syncs in two rounds and reloads to show all six orders. The look inside Shopify Admin is unchecked (Polaris CSS is blocked here).
 
+## What happened to steps 1 and 2 (my error, kept here so it is not repeated)
+
+Step 1 returned `403: the token cannot read Workers Scripts`. The recovery script saves whatever Cloudflare answers into its output file, so that file held the 403 error message, and the two `grep -c` zeros counted a error message, not the Worker. My step 2 copied that file and pushed it to `recover/shopify-live-2026-11-14`, because my block had no guard for a failed step 1. The branch file `shopify/live_worker_2026-11-14.js` is that error text. It is removed in step A below.
+
+The App URL screenshot you sent settles one thing: the app's App URL is `https://relayshield-order-screening.relayshieldadmin.workers.dev`, so it points at the `relayshield-order-screening` Worker, version `relayshield-order-screening-5` (UNVERIFIED from here: workers.dev is blocked from my container).
+
+It also showed something more useful. Your `git checkout main` printed `M shopify/worker.js` and `M shopify/wrangler.toml`: you have **uncommitted local edits to the Shopify Worker on your Mac**. That is the likeliest home of the "Plan status unknown" code, and it needs saving before anything else.
+
 ## Steps for you, in order
 
-**1. ANDREW RUNS THIS** (read-only: download the live Worker and look for the reviewer's strings). It will ask for a Cloudflare API token (hidden input). The token needs "Workers Scripts: Read".
+**A. ANDREW RUNS THIS** (save your uncommitted Shopify edits as a patch file on the recovery branch, and remove the error file). It stages only the two files it names.
 
 ```zsh
 cd ~/dev/relayshield
-sh tools/recover_live_worker.sh relayshield-order-screening shopify/worker.js
-grep -c "Plan status unknown" "${TMPDIR:-/tmp}/live-worker-relayshield-order-screening.js"
-grep -c "check your plan" "${TMPDIR:-/tmp}/live-worker-relayshield-order-screening.js"
+git checkout recover/shopify-live-2026-11-14
+git rm -q shopify/live_worker_2026-11-14.js
+git --no-pager diff HEAD --stat -- shopify/worker.js shopify/wrangler.toml
+git --no-pager diff HEAD -- shopify/worker.js shopify/wrangler.toml > shopify/local_uncommitted_2026-11-14.diff
+wc -l shopify/local_uncommitted_2026-11-14.diff
+git add shopify/local_uncommitted_2026-11-14.diff
+git commit -m "Save uncommitted local edits to the Shopify Worker, 2026-11-14"
+git push
 ```
 
-EXPECT: the script reports it downloaded the Worker, then the two `grep -c` lines each print a number. Tell me both numbers and anything the script printed under "THEY DIFFER".
-STOP IF: the script prints a 404 or "no deployed script by that name": the Worker has another name; open Cloudflare, Workers & Pages, and tell me the names you see. A grep number of `0` for both means the reviewer tested something else, and I need to know which URL the app uses (step 3).
-UNVERIFIED: this block has not run in your state.
+EXPECT: the stat lines show `shopify/worker.js` with a number of changed lines, `wc -l` prints a number above 0, and the push prints `recover/shopify-live-2026-11-14 -> recover/shopify-live-2026-11-14`.
+STOP IF: `wc -l` prints `0`: your local `worker.js` matches `main`, so the "Plan status unknown" code was deployed from somewhere else, and the only way left to read the live Worker is a Cloudflare token that can read Workers Scripts (step B). UNVERIFIED: this block has not run in your state.
 
-**2. ANDREW RUNS THIS** (after step 1: put the live copy on a branch so I can read it). It stages only the one file.
+**B. ANDREW CLICKS THIS, only if A printed 0 or you want proof of what is deployed** (Cloudflare dashboard, My Profile, API Tokens, Create Token, Create Custom Token): permission **Account, Workers Scripts, Read**, account `Relayshieldadmin@gmail.com's Account`. Use that token when `tools/recover_live_worker.sh` asks. The earlier token returned 403, so it lacked that permission.
 
-```zsh
-cd ~/dev/relayshield
-git checkout main
-git checkout -b recover/shopify-live-2026-11-14
-cp "${TMPDIR:-/tmp}/live-worker-relayshield-order-screening.js" shopify/live_worker_2026-11-14.js
-git add shopify/live_worker_2026-11-14.js
-git commit -m "Recover the live relayshield-order-screening Worker, 2026-11-14"
-git push -u origin recover/shopify-live-2026-11-14
-```
+**C. ANDREW CLICKS THIS** (the plan setup; Managed Pricing is now called **Shopify App Pricing**, which is probably why you could not find it). It is set in the **Partner Dashboard**, not the Dev Dashboard. From Shopify's documentation (read as search summaries, because shopify.dev is blocked from my container, so the labels may differ slightly on your screen):
 
-EXPECT: the push prints `recover/shopify-live-2026-11-14 -> recover/shopify-live-2026-11-14`.
-STOP IF: `cp` says no such file: step 1 did not finish. Do not continue to the deploy.
+1. `partners.shopify.com`, **App distribution**, **All apps**, click RelayShield Order Screening.
+2. Click **Distribution**. Beside **Shopify App Store listing**, click **Manage listing**.
+3. Under **Published languages**, edit your language, then open **Pricing content**, then the **Pricing** page.
+4. Add one public plan: billing period every 30 days, price **$29.00**, a display name, and a feature list. A plan only shows to merchants if it has a description in that language.
+5. Do not add a Free plan. If one is already there, delete it. The reviewer mentioned a Free plan, so a leftover one is a likely source.
+6. If the app is still on the older Billing API pricing, there may be a **Settings** option to choose Shopify App Pricing and confirm the switch; an app with no paying merchants can switch. Plans that are not compatible may have to be removed first.
 
-**3. ANDREW CLICKS THIS** (Dev Dashboard, `dev.shopify.com/dashboard`, the RelayShield Order Screening app, its configuration/versions page): read the **App URL** and tell me what it says. It should be the `relayshield-order-screening` Worker's address. If it points anywhere else, that is where the reviewer's strings came from. I cannot see this screen, so send a screenshot if the labels differ.
+If this path does not match your screen, send a screenshot of the **Manage listing** page and I will read the labels off it. Do not guess at buttons on a live listing.
 
-**4. ANDREW CLICKS THIS** (Partner Dashboard, `partners.shopify.com`, the listing's pricing settings): confirm **Managed pricing** is on and that the plans listed are exactly what you intend. You told me the price is a flat $29 per month; the reviewer's text mentions a "Free" plan too, so check whether a Free plan is still defined. If it is not what you want, change it there. Send me a screenshot of the plans if unsure.
+**D. ANDREW CLICKS THIS** (the app handle): open RelayShield Order Screening from the `relayshield-test` Shopify Admin and read the browser address bar. The part after `/apps/` is the app handle. Tell me what it is. If it is not `relayshield-order-screening`, the plan link needs it (Worker variable `SHOPIFY_APP_HANDLE`).
 
-**5. After I have merged the live copy with my branch, I will give you the deploy block.** It is a separate step on purpose: a deploy over unrecovered code is the one move here that cannot be undone from git. Then you check `relayshield-test` in the Shopify Admin: the plan panel, **View or change plan** opens Shopify's plan page, the settings box stays unticked after Save and Refresh, and an uninstall then reinstall shows the existing orders instead of "No orders screened yet".
+**E. I will merge your saved patch with my branch, then give you the deploy block.** Do not deploy before that: a deploy over unsaved code cannot be undone from git.
 
-**6. ANDREW CLICKS THIS** (reply to the reviewer, after step 5): for each item choose **Show resolved state** and paste a URL. The field wants a link, not a file, so upload a short screen recording or screenshots from step 5 somewhere with a shareable link; one recording of the reinstall path can serve all four. Then resubmit.
+**F. ANDREW CLICKS THIS** (after the deploy, on `relayshield-test`): the plan panel shows, **View or change plan** opens Shopify's plan page, the settings box stays unticked after Save and Refresh, and an uninstall then reinstall shows the existing orders instead of "No orders screened yet".
+
+**G. ANDREW CLICKS THIS** (reply to the reviewer, after F): for each item choose **Show resolved state** and paste a URL. The field wants a link, not a file, so upload a short screen recording or screenshots from F somewhere with a shareable link; one recording of the reinstall path can serve all four. Then resubmit.

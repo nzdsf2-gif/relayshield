@@ -16,6 +16,13 @@ const RS_COMPOSITE_URL =
   "https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod/v1/composite-check";
 const OAUTH_SCOPES = "read_orders,write_orders";
 const SCREEN_TIMEOUT_MS = 15000;
+/* Managed Pricing: plans are defined in the Partner Dashboard and Shopify hosts
+ * the plan picker, so the app never creates charges itself. The handle is the
+ * app's URL handle from the Partner Dashboard; override with the
+ * SHOPIFY_APP_HANDLE variable if it differs from this default. */
+const DEFAULT_APP_HANDLE = "relayshield-order-screening";
+const SUPPORT_URL = "https://support.relayshield.net";
+const PRIVACY_URL = "https://privacy.relayshield.net";
 const SCREENINGS_CAP = 100;
 /* Buyer screening records (email stored only as SHA-256 hash) expire after
  * 90 days so personal data is never kept longer than needed. */
@@ -107,6 +114,31 @@ async function kvDelete(env, key) {
 const shopKey = (shop) => `shop:${shop}`;
 const screeningsKey = (shop) => `screenings:${shop}`;
 const oauthStateKey = (state) => `oauth_state:${state}`;
+const settingsKey = (shop) => `settings:${shop}`;
+
+/* Everything stored for a shop; used by uninstall and shop/redact so the two
+ * can never drift apart. */
+async function deleteShopData(env, shop) {
+  await kvDelete(env, shopKey(shop));
+  await kvDelete(env, screeningsKey(shop));
+  await kvDelete(env, settingsKey(shop));
+}
+
+/* Merchant-editable behaviour. Both default on, which is what the app did
+ * before settings existed, so an existing shop sees no change. */
+export const DEFAULT_SETTINGS = { tag_medium: true, add_note: true };
+
+export function normalizeSettings(input) {
+  const src = input && typeof input === "object" ? input : {};
+  return {
+    tag_medium: typeof src.tag_medium === "boolean" ? src.tag_medium : DEFAULT_SETTINGS.tag_medium,
+    add_note: typeof src.add_note === "boolean" ? src.add_note : DEFAULT_SETTINGS.add_note,
+  };
+}
+
+export async function getSettings(env, shop) {
+  return normalizeSettings(await kvGet(env, settingsKey(shop)));
+}
 
 /* ------------------------------------------------------------------ */
 /* per-shop RelayShield key provisioning (design; P0 = keyless)       */
@@ -186,9 +218,10 @@ export async function screenOrder(signals, shopKeyInfo) {
 
 /* Verdict -> merchant-visible actions. Unknown never tags. Nothing here
  * cancels, refunds, or holds an order; that stays a merchant decision. */
-export function verdictActions(level) {
-  if (level === "high") return { tags: ["relayshield-high-risk"], note: true };
-  if (level === "medium") return { tags: ["relayshield-review"], note: true };
+export function verdictActions(level, settings) {
+  const cfg = normalizeSettings(settings);
+  if (level === "high") return { tags: ["relayshield-high-risk"], note: cfg.add_note };
+  if (level === "medium" && cfg.tag_medium) return { tags: ["relayshield-review"], note: cfg.add_note };
   return { tags: [], note: false };
 }
 
@@ -230,8 +263,8 @@ export async function adminApi(shop, token, path, method = "GET", body) {
   return resp.json();
 }
 
-export async function applyVerdictToOrder(shop, token, order, level, score, reasons) {
-  const actions = verdictActions(level);
+export async function applyVerdictToOrder(shop, token, order, level, score, reasons, settings) {
+  const actions = verdictActions(level, settings);
   if (!actions.tags.length && !actions.note) return { skipped: true };
   const results = {};
   if (actions.tags.length) {
@@ -341,6 +374,7 @@ async function handleCallback(request, env, url) {
  * approval; until granted, registration logs the 403 and continues. */
 const WEBHOOK_TOPICS = [
   ["orders/create", "/webhooks/orders-create"],
+  ["app/uninstalled", "/webhooks/app-uninstalled"],
 ];
 
 async function registerWebhooks(appOrigin, shop, token) {
@@ -399,7 +433,20 @@ function shopNeedsToken(rec) {
 export async function ensureInstalled(env, shop, idToken, appOrigin) {
   try {
     const rec = await getShopRecord(env, shop);
-    if (!shopNeedsToken(rec)) return { installed: true, fresh: false };
+    if (!shopNeedsToken(rec)) {
+      // Shops installed before app/uninstalled existed never registered it.
+      // Registering twice is harmless (Shopify answers 422, which is logged).
+      if (!rec.webhooks_v2) {
+        try {
+          const token = await getFreshAccessToken(env, shop);
+          await registerWebhooks(appOrigin, shop, token);
+          await kvPut(env, shopKey(shop), { ...(await getShopRecord(env, shop)), webhooks_v2: true });
+        } catch (e) {
+          console.log(`webhook backfill failed shop=${shop}: ${e.message}`);
+        }
+      }
+      return { installed: true, fresh: false };
+    }
     const data = await exchangeSessionToken(env, shop, idToken);
     await kvPut(env, shopKey(shop), {
       ...(rec || {}),
@@ -409,6 +456,7 @@ export async function ensureInstalled(env, shop, idToken, appOrigin) {
       rs_key_mode: (rec && rec.rs_key_mode) || "keyless",
       installed_at: (rec && rec.installed_at) || new Date().toISOString(),
       install_flow: "token_exchange",
+      webhooks_v2: true,
     });
     await registerWebhooks(appOrigin, shop, data.access_token);
     return { installed: true, fresh: true };
@@ -462,6 +510,61 @@ export async function getFreshAccessToken(env, shop) {
   return rec.access_token;
 }
 
+async function dropStaleToken(env, shop) {
+  const rec = await getShopRecord(env, shop);
+  if (!rec) return;
+  const { access_token, refresh_token, token_expires_at, ...rest } = rec;
+  await kvPut(env, shopKey(shop), rest);
+}
+
+/* ------------------------------------------------------------------ */
+/* plan status (Managed Pricing)                                       */
+/* ------------------------------------------------------------------ */
+
+export function pricingPlansUrl(shop, handle) {
+  const store = String(shop || "").replace(/\.myshopify\.com$/i, "");
+  return `https://admin.shopify.com/store/${store}/charges/${handle || DEFAULT_APP_HANDLE}/pricing_plans`;
+}
+
+/* Reads this shop's active subscription. Read-only: under Managed Pricing
+ * Shopify creates and changes the charge, so there is nothing to write here.
+ * Never throws; null means "could not tell", which the page shows as unknown
+ * rather than as "no plan". */
+export async function getPlanStatus(env, shop) {
+  try {
+    const token = await getFreshAccessToken(env, shop);
+    const resp = await fetch(`${adminBase(shop)}/graphql.json`, {
+      method: "POST",
+      headers: { "X-Shopify-Access-Token": token, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: "{ currentAppInstallation { activeSubscriptions { name status test currentPeriodEnd } } }",
+      }),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (data.errors || !data.data) return null;
+    const subs = data.data.currentAppInstallation?.activeSubscriptions || [];
+    return subs.length ? { active: true, name: subs[0].name, test: Boolean(subs[0].test) } : { active: false };
+  } catch (e) {
+    console.log(`plan status failed shop=${shop}: ${e.message}`);
+    return null;
+  }
+}
+
+async function handleAppUninstalled(request, env) {
+  const raw = await readRawBody(request);
+  const hmac = request.headers.get("X-Shopify-Hmac-Sha256") || "";
+  if (!(await verifyShopifyHmac(env.SHOPIFY_API_SECRET, raw, hmac))) {
+    return new Response("HMAC validation failed", { status: 401 });
+  }
+  const shop = request.headers.get("X-Shopify-Shop-Domain") || "";
+  if (!isValidShopDomain(shop)) return new Response("Bad shop header", { status: 400 });
+  // Delete everything: a reinstall must start clean, otherwise the dead token
+  // and the old screening history survive and the dashboard lies about both.
+  await deleteShopData(env, shop);
+  return json({ ok: true });
+}
+
 async function readRawBody(request) {
   return request.text();
 }
@@ -505,9 +608,14 @@ async function handleOrdersCreate(request, env) {
     console.log(`token refresh failed order=${order.id}: ${e.message}`);
   }
   try {
-    await applyVerdictToOrder(shop, token, order, level, verdict.score, reasons);
+    const settings = await getSettings(env, shop);
+    await applyVerdictToOrder(shop, token, order, level, verdict.score, reasons, settings);
   } catch (e) {
     console.log(`admin action failed order=${order.id}: ${e.message}`);
+    // 401 means the stored token was revoked (uninstall then reinstall, or the
+    // merchant removed the app). Drop it so the next authenticated dashboard
+    // load exchanges a fresh one instead of trusting a dead token forever.
+    if (/-> 401:/.test(e.message)) await dropStaleToken(env, shop);
   }
   await recordScreening(env, shop, {
     order_id: order.id,
@@ -533,8 +641,7 @@ async function handleGdpr(request, env, kind) {
   try { payload = JSON.parse(raw); } catch { /* ignore */ }
   const shop = payload.shop_domain || request.headers.get("X-Shopify-Shop-Domain") || "";
   if (kind === "shop-redact" && isValidShopDomain(shop)) {
-    await kvDelete(env, shopKey(shop));
-    await kvDelete(env, screeningsKey(shop));
+    await deleteShopData(env, shop);
   }
   if ((kind === "customers-redact" || kind === "customers-data-request") && payload.customer && payload.customer.email) {
     const emailHash = await hashBuyerEmail(payload.customer.email);
@@ -590,12 +697,23 @@ function esc(s) {
     .replace(/"/g, "&quot;");
 }
 
-export function renderDashboard(shop, screenings, apiKey, host) {
+export function renderDashboard(shop, screenings, apiKey, host, extras = {}) {
+  const settings = normalizeSettings(extras.settings);
+  const plan = extras.plan === undefined ? null : extras.plan;
+  const plansUrl = pricingPlansUrl(shop, extras.appHandle);
+  const storeHandle = String(shop || "").replace(/\.myshopify\.com$/i, "");
   const counts = { high: 0, medium: 0, unknown: 0 };
   for (const s of screenings) if (counts[s.level] !== undefined) counts[s.level]++;
+  const planText = !shop ? "Sign in through Shopify Admin to see your plan."
+    : plan === null ? "Plan status is unavailable right now."
+    : plan.active ? `Current plan: <strong>${esc(plan.name)}</strong>${plan.test ? " (test charge)" : ""}`
+    : "No active plan yet.";
+  const orderCell = (s) => storeHandle && s.order_id
+    ? `<a href="https://admin.shopify.com/store/${esc(storeHandle)}/orders/${esc(s.order_id)}" target="_top">${esc(s.order_name)}</a>`
+    : esc(s.order_name);
   const rows = screenings.map((s) => `
-      <tr>
-        <td>${esc(s.order_name)}</td>
+      <tr data-level="${esc(s.level)}">
+        <td>${orderCell(s)}</td>
         <td>${esc(s.screened_at)}</td>
         <td><span class="badge badge-${esc(s.level)}">${esc(s.level)}</span></td>
         <td>${esc(s.score)}/100</td>
@@ -670,6 +788,14 @@ export function renderDashboard(shop, screenings, apiKey, host) {
   table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; }
   th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid #eee; font-size: 14px; }
   .note { color: #5c5f62; font-size: 13px; margin-top: 16px; }
+  .panel { background: #fff; border-radius: 8px; padding: 16px 20px; margin: 16px 0; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+  .panel h2 { margin: 0 0 8px; font-size: 16px; }
+  .check { display: block; margin: 8px 0; font-size: 14px; }
+  .hint { color: #5c5f62; font-size: 13px; }
+  .toolbar { display: flex; gap: 8px; align-items: center; margin: 16px 0 8px; font-size: 14px; }
+  .btn { display: inline-block; padding: 7px 14px; border: 1px solid #8a8a8a; border-radius: 8px; background: #fff; color: #303030; font-size: 14px; font-weight: 600; text-decoration: none; cursor: pointer; }
+  .btn-primary { background: #303030; border-color: #303030; color: #fff; }
+  .btn[disabled] { opacity: .6; cursor: default; }
 </style>
 </head>
 <body data-shop="${esc(shop)}">
@@ -681,14 +807,96 @@ export function renderDashboard(shop, screenings, apiKey, host) {
     <div class="card"><div class="n">${counts.medium}</div><div>Needs review (tagged relayshield-review)</div></div>
     <div class="card"><div class="n">${counts.unknown}</div><div>No flags found (no tag)</div></div>
   </div>
+  <div class="panel">
+    <h2>Your plan</h2>
+    <p id="plan-text">${planText}</p>
+    <p><a class="btn btn-primary" id="manage-plan" href="${esc(plansUrl)}" target="_top">View or change plan</a></p>
+  </div>
+  <form class="panel" id="settings-form" onsubmit="return false">
+    <h2>Screening settings</h2>
+    <label class="check"><input type="checkbox" id="set-tag-medium"${settings.tag_medium ? " checked" : ""}> Tag medium-risk orders <code>relayshield-review</code></label>
+    <label class="check"><input type="checkbox" id="set-add-note"${settings.add_note ? " checked" : ""}> Add a timeline note to tagged orders</label>
+    <p class="hint">High-risk orders are always tagged. RelayShield never cancels, refunds, or holds an order.</p>
+    <p><button type="submit" class="btn btn-primary" id="save-settings">Save settings</button> <span id="settings-status" role="status" aria-live="polite"></span></p>
+  </form>
+  <div class="toolbar">
+    <label for="verdict-filter">Show</label>
+    <select id="verdict-filter">
+      <option value="all">All screened orders</option>
+      <option value="high">High risk</option>
+      <option value="medium">Needs review</option>
+      <option value="unknown">No flags found</option>
+    </select>
+    <button type="button" class="btn" id="refresh-btn">Refresh</button>
+  </div>
   <table>
     <thead><tr><th>Order</th><th>Screened</th><th>Verdict</th><th>Score</th><th>Top signal</th></tr></thead>
-    <tbody>${rows || '<tr><td colspan="5">No orders screened yet.</td></tr>'}</tbody>
+    <tbody id="rows">${rows || '<tr><td colspan="5">No orders screened yet.</td></tr>'}</tbody>
   </table>
+  <p class="hint" id="filter-empty" hidden>No orders match this filter.</p>
+  <p class="note"><a href="${SUPPORT_URL}" target="_blank" rel="noopener">Support</a> &middot; <a href="${PRIVACY_URL}" target="_blank" rel="noopener">Privacy policy</a></p>
   <p class="note">A result of "no flags found" means nothing is known against the order right now, not proof of safety. RelayShield never blocks, cancels, or refunds orders; high-risk orders are tagged for your review before fulfillment.</p>
 </div>
+<script>
+(function() {
+  var filter = document.getElementById("verdict-filter");
+  filter.addEventListener("change", function() {
+    var want = filter.value, shown = 0;
+    document.querySelectorAll("#rows tr[data-level]").forEach(function(tr) {
+      var show = want === "all" || tr.getAttribute("data-level") === want;
+      tr.hidden = !show;
+      if (show) shown++;
+    });
+    document.getElementById("filter-empty").hidden = shown !== 0 || !document.querySelector("#rows tr[data-level]");
+  });
+  document.getElementById("refresh-btn").addEventListener("click", function() {
+    // The id_token in the URL is short-lived; drop it so the page fetches a fresh one and reloads once.
+    var u = new URL(location.href);
+    u.searchParams.delete("id_token");
+    location.replace(u.toString());
+  });
+  document.getElementById("save-settings").addEventListener("click", function() {
+    var btn = this, status = document.getElementById("settings-status");
+    if (!(window.shopify && typeof window.shopify.idToken === "function")) {
+      status.textContent = "Open this app from Shopify Admin to change settings.";
+      return;
+    }
+    btn.disabled = true;
+    status.textContent = "Saving...";
+    window.shopify.idToken().then(function(token) {
+      return fetch("/api/settings", {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tag_medium: document.getElementById("set-tag-medium").checked,
+          add_note: document.getElementById("set-add-note").checked
+        })
+      });
+    }).then(function(r) {
+      status.textContent = r.ok ? "Saved." : "Could not save (" + r.status + "). Reload and try again.";
+      if (r.ok && window.shopify.toast) window.shopify.toast.show("Settings saved");
+    }).catch(function() {
+      status.textContent = "Could not save. Reload and try again.";
+    }).then(function() { btn.disabled = false; });
+  });
+})();
+</script>
 </body>
 </html>`;
+}
+
+async function handleSettingsSave(request, env) {
+  const auth = request.headers.get("Authorization") || "";
+  const shop = await verifySessionToken(env, auth.startsWith("Bearer ") ? auth.slice(7) : "");
+  if (!shop) return json({ ok: false }, 401);
+  let body;
+  try { body = await request.json(); } catch { return json({ ok: false, error: "bad json" }, 400); }
+  if (!body || typeof body.tag_medium !== "boolean" || typeof body.add_note !== "boolean") {
+    return json({ ok: false, error: "tag_medium and add_note must be booleans" }, 400);
+  }
+  const settings = normalizeSettings(body);
+  await kvPut(env, settingsKey(shop), settings);
+  return json({ ok: true, settings });
 }
 
 async function handleDashboard(request, env) {
@@ -704,8 +912,12 @@ async function handleDashboard(request, env) {
   // sessions, not a crawler that loads this URL.)
   if (shop) await ensureInstalled(env, shop, bearer, url.origin);
   const screenings = shop ? ((await kvGet(env, screeningsKey(shop))) || []) : [];
+  const settings = shop ? await getSettings(env, shop) : DEFAULT_SETTINGS;
+  const plan = shop ? await getPlanStatus(env, shop) : null;
   const host = url.searchParams.get("host") || "";
-  return new Response(renderDashboard(shop || "", screenings, env.SHOPIFY_API_KEY, host), {
+  return new Response(renderDashboard(shop || "", screenings, env.SHOPIFY_API_KEY, host, {
+    settings, plan, appHandle: env.SHOPIFY_APP_HANDLE,
+  }), {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
       "Content-Security-Policy": "frame-ancestors https://*.myshopify.com https://admin.shopify.com;",
@@ -729,6 +941,12 @@ export default {
       }
       if (url.pathname === "/webhooks/orders-create" && request.method === "POST") {
         return handleOrdersCreate(request, env);
+      }
+      if (url.pathname === "/webhooks/app-uninstalled" && request.method === "POST") {
+        return handleAppUninstalled(request, env);
+      }
+      if (url.pathname === "/api/settings" && request.method === "POST") {
+        return handleSettingsSave(request, env);
       }
       if (url.pathname === "/webhooks/gdpr" && request.method === "POST") {
         const topic = request.headers.get("X-Shopify-Topic") || "";

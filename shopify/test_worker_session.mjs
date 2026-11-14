@@ -54,12 +54,14 @@ let n = 0; const ok = (name) => console.log(`ok ${++n} ${name}`);
   assert.equal(body.get("client_secret"), SECRET);
   const rec = JSON.parse(env._m.get(`shop:${SHOP}`));
   assert.equal(rec.access_token, "shpat_new"); assert.equal(rec.install_flow, "token_exchange");
-  assert.ok(calls.some((c) => c.url.includes("/webhooks.json")), "orders/create webhook registered");
+  const topics = calls.filter((c) => c.url.includes("/webhooks.json")).map((c) => JSON.parse(c.init.body).webhook.topic);
+  assert.deepEqual(topics.sort(), ["app/uninstalled", "orders/create"]);
+  assert.equal(rec.webhooks_v2, true);
   ok("first load exchanges the session token, stores the token, registers the webhook");
 }
 // 2. An already-installed shop is NOT exchanged again (the dev store that exists today).
 {
-  const env = mkEnv({ [`shop:${SHOP}`]: { access_token: "shpat_old", refresh_token: "r", token_expires_at: Date.now() + 3600e3 } });
+  const env = mkEnv({ [`shop:${SHOP}`]: { access_token: "shpat_old", refresh_token: "r", token_expires_at: Date.now() + 3600e3, webhooks_v2: true } });
   stubFetch();
   const r = await get(env, "/api/session", { Authorization: `Bearer ${idToken()}` });
   assert.equal((await r.json()).installed, true);
@@ -102,5 +104,143 @@ let n = 0; const ok = (name) => console.log(`ok ${++n} ${name}`);
   const anon = await (await get(env, "/")).text();
   assert.ok(anon.includes('<body data-shop="">'));
   ok("meta key, first-script CDN App Bridge, frame-ancestors, and the authed flag are all present");
+}
+
+/* ---- helpers for the checks below ---- */
+const post = (env, path, body, headers = {}) =>
+  worker.default.fetch(new Request(`https://app.example${path}`, { method: "POST", body, headers }), env);
+const sign = (raw) => createHmac("sha256", SECRET).update(raw).digest("base64");
+const installed = (extra = {}) => ({ [`shop:${SHOP}`]: { access_token: "t", refresh_token: "r", token_expires_at: Date.now() + 3600e3, webhooks_v2: true, ...extra } });
+function stubWith(handler) {
+  calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url: String(url), init });
+    const r = handler(String(url), init);
+    return r || new Response("{}", { status: 201 });
+  };
+}
+
+// 6. Settings change what gets written to an order.
+{
+  assert.deepEqual(worker.verdictActions("high", { tag_medium: false, add_note: false }), { tags: ["relayshield-high-risk"], note: false });
+  assert.deepEqual(worker.verdictActions("medium", { tag_medium: false, add_note: true }), { tags: [], note: false });
+  assert.deepEqual(worker.verdictActions("medium"), { tags: ["relayshield-review"], note: true });
+  assert.deepEqual(worker.verdictActions("unknown", {}), { tags: [], note: false });
+  assert.deepEqual(worker.normalizeSettings({ tag_medium: "no", add_note: 0 }), { tag_medium: true, add_note: true });
+  ok("settings gate tags and notes, high risk is always tagged, junk values fall back to defaults");
+}
+// 7. POST /api/settings: session-token auth, boolean validation, persisted, shown on the page.
+{
+  const env = mkEnv(installed()); stubFetch();
+  const H = (t) => ({ Authorization: `Bearer ${t}`, "Content-Type": "application/json" });
+  assert.equal((await post(env, "/api/settings", "{}", {})).status, 401);
+  assert.equal((await post(env, "/api/settings", "{}", H(idToken({ exp: 1 })))).status, 401);
+  assert.equal((await post(env, "/api/settings", "not json", H(idToken()))).status, 400);
+  assert.equal((await post(env, "/api/settings", JSON.stringify({ tag_medium: "yes", add_note: true }), H(idToken()))).status, 400);
+  assert.equal((await post(env, "/api/settings", JSON.stringify({ tag_medium: true, add_note: "yes" }), H(idToken()))).status, 400);
+  assert.equal((await post(env, "/api/settings", JSON.stringify({ tag_medium: true }), H(idToken()))).status, 400);
+  assert.ok(!env._m.has(`settings:${SHOP}`), "nothing stored by refused requests");
+  const r = await post(env, "/api/settings", JSON.stringify({ tag_medium: false, add_note: true }), H(idToken()));
+  assert.equal(r.status, 200);
+  assert.deepEqual(JSON.parse(env._m.get(`settings:${SHOP}`)), { tag_medium: false, add_note: true });
+  const html = await (await get(env, `/?id_token=${idToken()}&shop=${SHOP}`)).text();
+  assert.doesNotMatch(html, /id="set-tag-medium" checked/);
+  assert.match(html, /id="set-add-note" checked/);
+  ok("settings save needs a valid session token and boolean fields, persist, and render back checked or unchecked");
+}
+// 8. The page has controls a merchant can use, even before a session exists.
+{
+  const env = mkEnv(installed()); stubFetch();
+  for (const path of [`/?id_token=${idToken()}&shop=${SHOP}`, "/"]) {
+    const html = await (await get(env, path)).text();
+    for (const id of ["manage-plan", "save-settings", "verdict-filter", "refresh-btn", "set-tag-medium", "set-add-note"])
+      assert.ok(html.includes(`id="${id}"`), `${id} present at ${path.slice(0, 12)}`);
+    assert.ok(html.includes("https://support.relayshield.net") && html.includes("https://privacy.relayshield.net"));
+    assert.match(html, /<button type="button" class="btn" id="refresh-btn">/);
+  }
+  const html = worker.renderDashboard(SHOP, [{ order_id: 99, order_name: "#1001", level: "high", score: 90, screened_at: "x" }], KEY, "");
+  assert.ok(html.includes(`href="https://admin.shopify.com/store/relayshield-test/orders/99" target="_top">#1001</a>`));
+  assert.ok(html.includes('<tr data-level="high">'));
+  ok("plan link, settings form, filter, refresh, support and privacy links render signed in or out; orders link to Admin");
+}
+// 9. Plan status comes from Shopify and is shown, never invented.
+{
+  const gql = (payload, status = 200) => (url) => url.endsWith("/graphql.json") ? new Response(JSON.stringify(payload), { status }) : null;
+  const page = async (handler) => { const env = mkEnv(installed()); stubWith(handler); return (await get(env, `/?id_token=${idToken()}&shop=${SHOP}`)).text(); };
+  let html = await page(gql({ data: { currentAppInstallation: { activeSubscriptions: [{ name: "Standard", status: "ACTIVE", test: false }] } } }));
+  assert.match(html, /Current plan: <strong>Standard<\/strong>/);
+  assert.match(html, /charges\/relayshield-order-screening\/pricing_plans/);
+  assert.doesNotMatch(html, /test charge/);
+  html = await page(gql({ data: { currentAppInstallation: { activeSubscriptions: [] } } }));
+  assert.match(html, /No active plan yet/);
+  html = await page(gql({ errors: [{ message: "boom" }] }));
+  assert.match(html, /Plan status is unavailable/);
+  html = await page(gql({}, 500));
+  assert.match(html, /Plan status is unavailable/);
+  const env = mkEnv(installed()); stubWith(gql({ data: { currentAppInstallation: { activeSubscriptions: [] } } }));
+  await get(env, `/?id_token=${idToken()}&shop=${SHOP}`);
+  const q = calls.find((c) => c.url.endsWith("/graphql.json"));
+  assert.ok(q.url.includes(`https://${SHOP}/admin/api/`) && q.init.method === "POST");
+  assert.equal(q.init.headers["X-Shopify-Access-Token"], "t");
+  assert.match(JSON.parse(q.init.body).query, /activeSubscriptions/);
+  assert.ok(!/appSubscriptionCreate/.test(JSON.stringify(calls)), "Managed Pricing: the app never creates a charge");
+  assert.equal(worker.pricingPlansUrl(SHOP, "my-handle"), "https://admin.shopify.com/store/relayshield-test/charges/my-handle/pricing_plans");
+  ok("plan status is read from Shopify, failures show as unknown, and the app never creates a charge");
+}
+// 10. app/uninstalled wipes the shop so a reinstall starts clean.
+{
+  const all = { ...installed(), [`screenings:${SHOP}`]: [{ order_id: 1 }], [`settings:${SHOP}`]: { tag_medium: false, add_note: false } };
+  const env = mkEnv(all); stubFetch();
+  const raw = "{}";
+  assert.equal((await post(env, "/webhooks/app-uninstalled", raw, { "X-Shopify-Hmac-Sha256": "bad", "X-Shopify-Shop-Domain": SHOP })).status, 401);
+  assert.ok(env._m.has(`shop:${SHOP}`), "forged request deletes nothing");
+  assert.equal((await post(env, "/webhooks/app-uninstalled", raw, { "X-Shopify-Hmac-Sha256": sign(raw), "X-Shopify-Shop-Domain": "evil.example" })).status, 400);
+  const r = await post(env, "/webhooks/app-uninstalled", raw, { "X-Shopify-Hmac-Sha256": sign(raw), "X-Shopify-Shop-Domain": SHOP });
+  assert.equal(r.status, 200);
+  for (const k of ["shop", "screenings", "settings"]) assert.ok(!env._m.has(`${k}:${SHOP}`), `${k} deleted`);
+  // shop/redact deletes the same set, through the shared helper
+  const env2 = mkEnv(all);
+  const red = JSON.stringify({ shop_domain: SHOP });
+  await post(env2, "/webhooks/gdpr", red, { "X-Shopify-Hmac-Sha256": sign(red), "X-Shopify-Topic": "shop/redact" });
+  for (const k of ["shop", "screenings", "settings"]) assert.ok(!env2._m.has(`${k}:${SHOP}`), `redact: ${k} deleted`);
+  ok("app/uninstalled and shop/redact delete token, history and settings; forged or malformed requests delete nothing");
+}
+// 11. A reinstall after uninstall exchanges a fresh token (the old one is gone).
+{
+  const env = mkEnv(); stubFetch();
+  const r = await get(env, "/api/session", { Authorization: `Bearer ${idToken()}` });
+  assert.equal((await r.json()).installed, true);
+  assert.ok(calls.some((c) => c.url.endsWith("/admin/oauth/access_token")));
+  ok("after an uninstall wipe, the next authenticated load exchanges a new token");
+}
+// 12. Shops installed before app/uninstalled existed get it registered once.
+{
+  const env = mkEnv({ [`shop:${SHOP}`]: { access_token: "t", refresh_token: "r", token_expires_at: Date.now() + 3600e3 } });
+  stubFetch();
+  await get(env, "/api/session", { Authorization: `Bearer ${idToken()}` });
+  assert.equal(calls.filter((c) => c.url.includes("/webhooks.json")).length, 2);
+  assert.equal(JSON.parse(env._m.get(`shop:${SHOP}`)).webhooks_v2, true);
+  assert.equal(JSON.parse(env._m.get(`shop:${SHOP}`)).access_token, "t", "existing token kept");
+  calls.length = 0;
+  await get(env, "/api/session", { Authorization: `Bearer ${idToken()}` });
+  assert.equal(calls.length, 0, "second load does not register again");
+  ok("older installs are backfilled with the uninstall webhook exactly once");
+}
+// 13. A revoked token (401 from the Admin API) is dropped so the next load re-exchanges.
+{
+  const env = mkEnv(installed({ rs_key_mode: "keyless" })); 
+  stubWith((url) => {
+    if (url.includes("execute-api")) return new Response(JSON.stringify({ ok: true, data: { level: "high", score: 90, signals: [] } }));
+    if (url.includes("/admin/api/")) return new Response("revoked", { status: 401 });
+    return null;
+  });
+  const raw = JSON.stringify({ id: 5, name: "#1005", email: "a@b.example" });
+  const r = await post(env, "/webhooks/orders-create", raw, { "X-Shopify-Hmac-Sha256": sign(raw), "X-Shopify-Shop-Domain": SHOP });
+  assert.equal(r.status, 200);
+  const rec = JSON.parse(env._m.get(`shop:${SHOP}`));
+  assert.ok(!rec.access_token && !rec.refresh_token, "dead token removed");
+  assert.equal(rec.webhooks_v2, true, "other fields kept");
+  assert.equal(JSON.parse(env._m.get(`screenings:${SHOP}`)).length, 1, "screening still recorded");
+  ok("a 401 from the Admin API drops the stored token and still records the screening");
 }
 console.log(`\n${n} passed`);

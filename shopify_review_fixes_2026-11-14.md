@@ -39,6 +39,11 @@ The App URL screenshot you sent settles one thing: the app's App URL is `https:/
 
 It also showed something more useful. Your `git checkout main` printed `M shopify/worker.js` and `M shopify/wrangler.toml`: you have **uncommitted local edits to the Shopify Worker on your Mac**. That is the likeliest home of the "Plan status unknown" code, and it needs saving before anything else.
 
+## Update 2026-11-15
+
+* **Fixed in code:** a merchant on the Free plan has no active subscription in Shopify's billing, and the dashboard said "No active plan yet". It now says "Current plan: Free". Tests: 18 pass.
+* **Your step A result has not reached GitHub.** The recovery branch still ends at the first, bad commit, so I cannot see your patch. Rerun step A (it is safe to repeat) and paste what it prints.
+
 ## Steps for you, in order
 
 **A. ANDREW RUNS THIS** (save your uncommitted Shopify edits as a patch file on the recovery branch, and remove the error file). It stages only the two files it names.
@@ -60,16 +65,7 @@ STOP IF: `wc -l` prints `0`: your local `worker.js` matches `main`, so the "Plan
 
 **B. ANDREW CLICKS THIS, only if A printed 0 or you want proof of what is deployed** (Cloudflare dashboard, My Profile, API Tokens, Create Token, Create Custom Token): permission **Account, Workers Scripts, Read**, account `Relayshieldadmin@gmail.com's Account`. Use that token when `tools/recover_live_worker.sh` asks. The earlier token returned 403, so it lacked that permission.
 
-**C. ANDREW CLICKS THIS** (the plan setup; Managed Pricing is now called **Shopify App Pricing**, which is probably why you could not find it). It is set in the **Partner Dashboard**, not the Dev Dashboard. From Shopify's documentation (read as search summaries, because shopify.dev is blocked from my container, so the labels may differ slightly on your screen):
-
-1. `partners.shopify.com`, **App distribution**, **All apps**, click RelayShield Order Screening.
-2. Click **Distribution**. Beside **Shopify App Store listing**, click **Manage listing**.
-3. Under **Published languages**, edit your language, then open **Pricing content**, then the **Pricing** page.
-4. Add one public plan: billing period every 30 days, price **$29.00**, a display name, and a feature list. A plan only shows to merchants if it has a description in that language.
-5. Do not add a Free plan. If one is already there, delete it. The reviewer mentioned a Free plan, so a leftover one is a likely source.
-6. If the app is still on the older Billing API pricing, there may be a **Settings** option to choose Shopify App Pricing and confirm the switch; an app with no paying merchants can switch. Plans that are not compatible may have to be removed first.
-
-If this path does not match your screen, send a screenshot of the **Manage listing** page and I will read the labels off it. Do not guess at buttons on a live listing.
+**C. DONE, nothing to do.** Pricing stays as you found it: a Free plan and a Paid plan at $29/month, "approval to charge outside the Shopify Billing API" unchecked. Earlier versions of this file told you to delete the Free plan; that was my wrong guess and is withdrawn. The Free plan allows 100 free checks, counted **per shop for its lifetime** ("try before you buy", your decision, 2026-11-15), not per month. The limit is not built yet and is deliberately not part of this resubmission.
 
 **D. ANDREW CLICKS THIS** (the app handle): open RelayShield Order Screening from the `relayshield-test` Shopify Admin and read the browser address bar. The part after `/apps/` is the app handle. Tell me what it is. If it is not `relayshield-order-screening`, the plan link needs it (Worker variable `SHOPIFY_APP_HANDLE`).
 

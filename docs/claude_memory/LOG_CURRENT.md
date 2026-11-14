@@ -500,3 +500,20 @@ REL question numbers are VERIFIED against `wafr_answers_reliability_2026-10-11.m
 * **I handed Andrew a block that depended on an unmerged PR and he ran it before merging.** I did say to merge first, but the block itself did not stop him. A block that needs a merge must fail loudly on its own: when the next block depends on a PR, say "STOP: run this only after the PR shows Merged" as its first line, and include `git --no-pager log --oneline -1 -- <file>` so the missing file is self-explaining.
 * botocore Stubber rejected my own made-up test data (a 3-character UUID) and a wrong call order; both were test mistakes that the real model caught, which is what it is for. The tool's broad `except Exception` on reads turns a stub mismatch into "blocked", so a Stubber test that fails with "responses remaining" usually means the call order differs from what the tool does (it plans every queue first, then creates).
 * Only a CI event whose `head_sha` equals the PR head means the latest commit is green: an event for an older commit arrived while the newer run was still in progress, and checking the check runs directly caught it.
+
+## WHERE 2026-11-14 (SHOPIFY REVIEW FIXES) LEFT THINGS. BUILT AND PUSHED, NOT MERGED, NOT DEPLOYED.
+
+**Shopify returned "RelayShield Order Screening" with four Action-needed items; branch `claude/admiring-cerf-f26xi5` fixes them in `shopify/worker.js`.** Deliverable for Andrew: `shopify_review_fixes_2026-11-14.md` (what changed, six ordered steps).
+
+* **Only item 1's reviewer text was visible** ("embedded dashboard loaded, but the app provides no merchant-usable buttons, links, or inputs"). Items 2 to 4 are titles only: allow pricing plan changes; implement App Pricing or Billing API correctly; synchronize data accurately. Their fixes are inferred, and item 4 especially is UNCONFIRMED. First thing next session: ask for the reviewer's words on 2 to 4.
+* **Billing decision, Andrew's, 2026-11-14: Managed Pricing** (plan defined in the Partner Dashboard, Shopify hosts the plan page, the app never creates a charge). The Worker only reads `currentAppInstallation.activeSubscriptions` and links to `admin.shopify.com/store/<store>/charges/<handle>/pricing_plans`. That URL shape and the query are UNVERIFIED against a live shop. The app handle defaults to `relayshield-order-screening` and is overridable by the `SHOPIFY_APP_HANDLE` Worker variable; it is a guess until Andrew reads it from the dashboard. No billing gate was added (a reviewer's unpaid test store would be unscreened); add one after approval, behind a flag that ships off.
+* **Sync fixes:** `app/uninstalled` webhook and `deleteShopData` (token, screenings, settings) shared with `shop/redact`; a 401 from the Admin API drops the stored token; shops without `webhooks_v2` get the new webhook registered once. Before this, an uninstall then reinstall kept a dead token and old history.
+* **UI:** plan panel, settings form (`tag_medium`, `add_note`, saved by `POST /api/settings` with a session token), verdict filter, Refresh, order links, Support and Privacy links.
+* **Checked:** 13 node tests (was 5), six planted bugs (one survived the first run and the test was added), the page's JS run in headless Chromium. Not checked: the look inside Shopify Admin (Polaris CSS blocked here), and anything against a real shop.
+* **Lesson:** the planted-bug pass found a validation branch no test reached; a green first run of new tests proves nothing until a bug has been planted.
+* **Not changed:** the 2026-10-17 "do not deploy during review" rule no longer applies, since the app is back in "Action needed" and not in review.
+
+### TODO, in order
+1. Andrew runs the steps in the deliverable (merge, Managed Pricing plan, app handle, deploy, dev-store check, reply to reviewer).
+2. Get the reviewer's text for items 2 to 4 and compare.
+3. After approval: decide the billing gate. Prove the tag and note write with an exchanged token (still open from 2026-10-17).

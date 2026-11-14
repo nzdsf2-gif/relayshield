@@ -3317,3 +3317,8 @@ the copy a prospective buyer reads before installing anything, and it needs no r
 **This is the DRIFT RULE pointed at a store listing.** The repo copy and the published copy are two
 things that must agree with nothing checking that they do, and only one of them is what a buyer
 sees. `test_csm_simswap_claims.py` pins the repo half and cannot see the portal.
+
+
+## SHOP-PRIV-1: Privacy policy must mention the kept free-check counter (added 2026-11-15, open)
+
+The Shopify app keeps one number per shop after uninstall: the count of screenings used on the Free plan (100 per shop for its lifetime), filed under a one-way hash of the store address, so reinstalling does not reset the allowance. Add a sentence to section 6 of `cloudflare_worker_privacy.js` ("Shopify App (RelayShield Order Screening)") saying what is kept, that it holds no order, customer or email data, and what deletes it. It is a separate Worker with its own deploy. Do it before Shopify approval; the listing links this policy. Status: not started.

@@ -19,7 +19,7 @@ export default {
 <body>
   <a href="https://relayshield.net" class="back">← RelayShield</a>
   <h1>Privacy Policy</h1>
-  <p class="meta">Last updated: October 2026</p>
+  <p class="meta">Last updated: November 2026</p>
 
   <p>RelayShield ("we", "us", or "our") operates relayshield.net, the RelayShield API, the CryptoShield mobile application, our Discord and Telegram bots, the RelayShield Order Screening Shopify app, the RelayShield MCP proxy, and the RelayShield agent verifiers (TAP, PAP and x401). RelayShield is based in Massachusetts, United States. This policy explains how we collect, use, and protect your information.</p>
 
@@ -69,10 +69,11 @@ export default {
   <h2>6. Shopify App (RelayShield Order Screening)</h2>
   <p>Our Shopify app screens new orders against our threat-intelligence corpus to help merchants spot potentially fraudulent buyers.</p>
   <p><strong>What the app receives.</strong> When an order is created in your store, Shopify sends the app the order data via webhook, including the buyer's email address and the store domain.</p>
-  <p><strong>What we do with it.</strong> The buyer's email is sent to RelayShield's API for scoring. The score and its reasons are written back to your store as an order tag (relayshield-high-risk or relayshield-review) and a timeline note. The app never blocks, cancels, or refunds orders, and it never calls an order safe.</p>
+  <p><strong>What we do with it.</strong> The buyer's email is sent to RelayShield's API for scoring. The score and its reasons are written back to your store as an order tag (relayshield-high-risk or relayshield-review) and a line in the order note, added after any note you already wrote and never replacing it. The app never blocks, cancels, or refunds orders, and it never calls an order safe.</p>
   <p><strong>What we store.</strong> Buyer emails are SHA-256 hashed before storage; raw email addresses are never persisted. Screening records (order reference, score, level, timestamp) are kept to power the in-app dashboard history.</p>
+  <p><strong>The free-check counter we keep after uninstall.</strong> The Free plan includes 100 screenings per store for the life of the store. To stop an uninstall and reinstall from resetting that allowance, we keep one number per store after the app is removed: how many screenings the store has used. It is filed under a one-way hash of the store address, not under the store name. It holds no order, buyer, or email data. It is kept while the app is offered and deleted on request, using the address in section 15.</p>
   <p><strong>What we do not do.</strong> We do not use order or buyer data for any purpose other than scoring your orders. We do not sell it or share it with third parties for marketing.</p>
-  <p><strong>Your rights.</strong> Shopify's mandatory GDPR webhooks are supported: a customers/redact or shop/redact request deletes the stored records for that customer or shop. You may also contact us at any time at the address in section 15.</p>
+  <p><strong>Your rights.</strong> Shopify's mandatory GDPR webhooks are supported: a customers/redact or shop/redact request deletes the stored records for that customer or shop, except the free-check counter described above. You may also contact us at any time at the address in section 15.</p>
 
   <h2>7. Data Retention</h2>
   <p>API logs are retained for 90 days and then automatically deleted. The identifiers you submit for screening, such as an email address or phone number, are not written to those logs in a readable form: they are replaced with a one-way hash before anything is recorded. Account data is retained until you request deletion. An enrolled mobile number and its carrier history are retained only while the number stays enrolled, and are deleted when you remove it. Wallet addresses stored on-device are under your control and can be deleted at any time from the app.</p>

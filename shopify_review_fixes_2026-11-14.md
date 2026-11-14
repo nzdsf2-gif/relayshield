@@ -1,67 +1,70 @@
-# RelayShield Order Screening: Shopify review fixes (2026-11-14)
+# RelayShield Order Screening: Shopify review fixes (2026-11-14, updated after the reviewer's full text)
 
-Branch: `claude/admiring-cerf-f26xi5`. Not merged, not deployed. Nothing below is live until you do the steps at the end.
+Branch: `claude/admiring-cerf-f26xi5` on `nzdsf2-gif/relayshield`. Not merged, not deployed. The file you are reading was sent to you by me in the Claude app and is also committed on that branch. It has not been sent to Shopify; Shopify only gets what you paste into the "Proof of resolution" boxes.
 
-## What Shopify flagged, and what changed
+## STOP: do not deploy yet. The live Worker is not the code in the repo.
 
-The screenshot showed the reviewer's wording for item 1 only. For items 2 to 4 I had the titles and not the reviewer's text (it is not in the repo or the mailbox I can read), so those three were built from what Shopify's requirement titles ask for. Paste the reviewer's text for 2 to 4 and I will check each fix against it.
+The reviewer quoted two screens: **"Plan status unknown"** and **"Refresh this page to check your plan"**. Neither string exists anywhere in this repo, on any branch, in any commit. So what Shopify tested is not what I read. Most likely the live Worker was changed and deployed from your Mac without being committed (the DRIFT RULE in CLAUDE.md, a fourth time). `wrangler deploy` of my branch would then erase that code with no error. Recover the live copy first (steps 1 and 2) so I can merge the two instead of overwriting one.
 
-| # | Item | Status | What I did |
+## The four items, with the reviewer's words
+
+| # | Item | What the reviewer saw | What changed |
 |---|---|---|---|
-| 1 | UI merchants can interact with | Built, tested in a real browser | The reviewer saw a dashboard with "no merchant-usable buttons, links, or inputs". It now has: a plan panel with a **View or change plan** button, a **Screening settings** form (two checkboxes and **Save settings**), a verdict **filter**, a **Refresh** button, order numbers that open the order in Shopify Admin, and Support and Privacy links. These render signed in or out. |
-| 2 | Allow pricing plan changes | Code done, needs your Partner Dashboard step | The **View or change plan** button goes to Shopify's hosted plan page, where the merchant upgrades, downgrades or cancels without contacting us. That page exists only once Managed Pricing is switched on (step 3 below). |
-| 3 | Implement App Pricing / Billing API correctly | Code done, needs your Partner Dashboard step | You chose Managed Pricing. The app creates no charges itself (a test fails if it ever calls `appSubscriptionCreate`). It reads the shop's active subscription and shows it, or shows "unavailable" if Shopify cannot be reached, never a guess. |
-| 4 | Synchronize data accurately | Built from the title, UNCONFIRMED against the reviewer's text | Four real gaps closed: (a) `app/uninstalled` webhook now deletes the token, screening history and settings, so a reinstall starts clean (before, the dead token and old history survived a reinstall); (b) a 401 from the Admin API now drops the stored token so the next load re-exchanges a fresh one; (c) `shop/redact` now deletes settings too, through the same helper; (d) shops installed before today get the uninstall webhook registered once, on their next load. |
+| 1 | 2.1.3 UI merchants can interact with | Dashboard loaded, "no merchant-usable buttons, links, or inputs" | Plan button, settings form (two checkboxes and Save), verdict filter, **Sync orders**, Refresh, order links to Shopify Admin, Support and Privacy links. Run in a real browser. |
+| 2 | 1.2.3 Allow pricing plan changes | No control to move between Free and Paid; stayed on "Plan status unknown" after reload | **View or change plan** opens Shopify's hosted plan page (Managed Pricing), so upgrade, downgrade and the charge history page are Shopify's. The button shows whatever the plan status is. If the status cannot be read, the page now says so and still shows the button, with no "refresh and wait" dead end. |
+| 3 | 1.2.2 Implement App Pricing correctly | After reinstall, no plan-selection or resubscription control; "Plan status unknown" | Same Managed Pricing design, so accept, decline and re-approval on reinstall are Shopify's screens. The app creates no charge itself (a test fails if it tries). |
+| 4 | 2.1.4 Synchronize data accurately | Six orders in Shopify; after reinstall the dashboard showed zero and "No orders screened yet" | **My first pass missed this.** The Worker only screened orders created after install, and my uninstall cleanup made a reinstall start empty. Now the first signed-in load reads the shop's recent orders (last 60 days Shopify returns, newest 50) and screens them in batches of 8, once each, with the same tags a new order gets. There is a **Sync orders** button too. Uninstall still wipes everything, and the sync refills it on reinstall. |
 
-## What I did not do, on purpose
+Other sync fixes from the first pass still stand: the `app/uninstalled` webhook wipes token, history and settings; a 401 from Shopify's Admin API drops the dead token; older installs get the webhook registered once.
 
-* **No billing gate.** Screening still runs for a shop with no paid plan. Gating it now risks the reviewer's test store being screened for nothing and flagged again. Recommendation: add the gate after approval, behind a Worker flag that ships off.
-* **The app handle is a guess.** The plan link uses `relayshield-order-screening`. If your app's handle in the Partner Dashboard differs, set the Worker variable `SHOPIFY_APP_HANDLE` (step 4).
-* The plan-page URL shape and the `currentAppInstallation.activeSubscriptions` query follow Shopify's documented Managed Pricing, but shopify.dev is blocked from here, so **both are UNVERIFIED against a live shop.** The dev store test in step 5 is what proves them.
+## Things I cannot verify from here, and a suspicion
+
+* **UNVERIFIED: the Shopify calls.** The plan-status query (`currentAppInstallation.activeSubscriptions`), the plan-page URL shape, and the orders query (`orders(...) { legacyResourceId name email }`) follow Shopify's docs, but shopify.dev is blocked from this container. The dev-store check in step 5 is what proves them.
+* **UNVERIFIED: buyer emails on a reviewer's store.** Reading an order's `email` needs Shopify's protected customer data access. If it is not granted, the orders read is refused: the page then says it could not read the orders, and nothing breaks. If step 5 shows that message, the fix is in the Partner Dashboard (protected customer data access), not in code.
+* **Suspicion, not checked:** the Worker writes the "timeline note" through `POST /orders/<id>/events.json`. I believe Shopify's REST Events resource is read-only, so that note may never have been written (tags are written first, so tags are unaffected). Nothing in the repo proves a note was ever written (the 2026-10-17 record says the tag and note write was never proven). It is not part of these four items and I did not change it. My recommendation: check an order in `relayshield-test` for the note after step 5, and tell me what you see.
+* **App handle is a guess.** The plan link uses `relayshield-order-screening`. If your app's handle differs, set the Worker variable `SHOPIFY_APP_HANDLE`.
+* **No billing gate.** Screening still runs with no paid plan, so the reviewer's test store is not left empty. I would add a gate after approval, behind a flag that ships off. That is your call because it decides who gets the product free.
 
 ## How it was checked
 
-* `node shopify/test_worker_session.mjs`: 13 checks pass (was 5). `python3 test_shopify_worker.py` passes.
-* Six bugs were planted one at a time (medium-risk gate, settings deletion, stale-token drop, settings validation, webhook backfill, order link target). The first run caught five and missed one (settings validation never tested a bad `add_note`). I added the case and it is caught now.
-* The dashboard's own JavaScript was run in headless Chromium: the filter hides rows, Save posts `{"tag_medium":false,"add_note":true}`, no page errors. Polaris CSS could not load from this container, so the look in Shopify Admin is unchecked.
+* `node shopify/test_worker_session.mjs`: 18 checks pass (5 before today). `python3 test_shopify_worker.py` passes.
+* Planted bugs: 14 across the two passes. Three survived their first run (a validation branch, the sync's token exchange, and the buyer email reaching the screening call). A test was added for each and all 14 are caught now.
+* The dashboard's JavaScript was run in headless Chromium: filter, Save, and a signed-in first load that syncs in two rounds and reloads to show all six orders. The look inside Shopify Admin is unchecked (Polaris CSS is blocked here).
 
 ## Steps for you, in order
 
-**1. ANDREW RUNS THIS** (merge and test)
+**1. ANDREW RUNS THIS** (read-only: download the live Worker and look for the reviewer's strings). It will ask for a Cloudflare API token (hidden input). The token needs "Workers Scripts: Read".
+
+```zsh
+cd ~/dev/relayshield
+sh tools/recover_live_worker.sh relayshield-order-screening shopify/worker.js
+grep -c "Plan status unknown" "${TMPDIR:-/tmp}/live-worker-relayshield-order-screening.js"
+grep -c "check your plan" "${TMPDIR:-/tmp}/live-worker-relayshield-order-screening.js"
+```
+
+EXPECT: the script reports it downloaded the Worker, then the two `grep -c` lines each print a number. Tell me both numbers and anything the script printed under "THEY DIFFER".
+STOP IF: the script prints a 404 or "no deployed script by that name": the Worker has another name; open Cloudflare, Workers & Pages, and tell me the names you see. A grep number of `0` for both means the reviewer tested something else, and I need to know which URL the app uses (step 3).
+UNVERIFIED: this block has not run in your state.
+
+**2. ANDREW RUNS THIS** (after step 1: put the live copy on a branch so I can read it). It stages only the one file.
 
 ```zsh
 cd ~/dev/relayshield
 git checkout main
-git --no-pager fetch origin claude/admiring-cerf-f26xi5
-git stash push --include-untracked -m "pre-merge untracked"
-git -c pull.rebase=false merge --no-edit FETCH_HEAD
-node shopify/test_worker_session.mjs
+git checkout -b recover/shopify-live-2026-11-14
+cp "${TMPDIR:-/tmp}/live-worker-relayshield-order-screening.js" shopify/live_worker_2026-11-14.js
+git add shopify/live_worker_2026-11-14.js
+git commit -m "Recover the live relayshield-order-screening Worker, 2026-11-14"
+git push -u origin recover/shopify-live-2026-11-14
 ```
 
-EXPECT: the last line is `13 passed`.
-STOP IF: "Automatic merge failed" naming only `docs/claude_memory/LOG_CURRENT.md`: run `python3 tools/resolve_md_conflict.py docs/claude_memory/LOG_CURRENT.md --write`, then `git add docs/claude_memory/LOG_CURRENT.md` and `git commit --no-edit`. A conflict in any `.js` or `.py` file means another session edited the same code; stop and tell me which file.
+EXPECT: the push prints `recover/shopify-live-2026-11-14 -> recover/shopify-live-2026-11-14`.
+STOP IF: `cp` says no such file: step 1 did not finish. Do not continue to the deploy.
 
-**2. ANDREW CLICKS THIS** (Partner Dashboard, `partners.shopify.com`): open RelayShield Order Screening and find the pricing settings for the listing. Turn on **Managed pricing** and create one recurring plan at **$29 / 30 days** (add a free trial if you want one). I cannot see that screen and have given menu paths from memory wrongly before, so if it is not where you expect, send me a screenshot before changing anything. Switching to Managed Pricing is the step that makes the plan page, and so items 2 and 3, real.
+**3. ANDREW CLICKS THIS** (Dev Dashboard, `dev.shopify.com/dashboard`, the RelayShield Order Screening app, its configuration/versions page): read the **App URL** and tell me what it says. It should be the `relayshield-order-screening` Worker's address. If it points anywhere else, that is where the reviewer's strings came from. I cannot see this screen, so send a screenshot if the labels differ.
 
-**3. ANDREW CLICKS THIS**: find the app's **handle** (the URL slug in the app's settings, shown in the Dev Dashboard under the app's Settings). If it is not `relayshield-order-screening`, tell me, or set it yourself in Cloudflare, Workers, `relayshield-order-screening`, Settings, Variables: `SHOPIFY_APP_HANDLE` = the handle.
+**4. ANDREW CLICKS THIS** (Partner Dashboard, `partners.shopify.com`, the listing's pricing settings): confirm **Managed pricing** is on and that the plans listed are exactly what you intend. You told me the price is a flat $29 per month; the reviewer's text mentions a "Free" plan too, so check whether a Free plan is still defined. If it is not what you want, change it there. Send me a screenshot of the plans if unsure.
 
-**4. ANDREW RUNS THIS** (deploy). The KV id goes into the local copy of `wrangler.toml` only and is reverted afterwards. `--keep-vars` stops the deploy wiping dashboard variables such as `SHOPIFY_APP_HANDLE`.
+**5. After I have merged the live copy with my branch, I will give you the deploy block.** It is a separate step on purpose: a deploy over unrecovered code is the one move here that cannot be undone from git. Then you check `relayshield-test` in the Shopify Admin: the plan panel, **View or change plan** opens Shopify's plan page, the settings box stays unticked after Save and Refresh, and an uninstall then reinstall shows the existing orders instead of "No orders screened yet".
 
-```zsh
-cd ~/dev/relayshield/shopify
-npx wrangler login
-sed -i '' 's/PASTE_KV_NAMESPACE_ID_HERE/d95c371db8754acd9e8e791e0a558915/' wrangler.toml
-npx wrangler deploy --keep-vars
-git checkout -- wrangler.toml
-cd ..
-git --no-pager status --short shopify
-```
-
-EXPECT: wrangler prints `Deployed relayshield-order-screening` and a version id; the last command prints nothing.
-STOP IF: the last command lists `shopify/wrangler.toml`: the placeholder was not restored, run `git checkout -- shopify/wrangler.toml` from `~/dev/relayshield`. UNVERIFIED: this block has not run in your state; the KV id is the one recorded on 2026-10-17.
-
-**5. ANDREW CLICKS THIS** (prove it on a dev store): open the app in `relayshield-test` Admin. You should see the plan panel, the settings form, the filter and the Refresh button. Click **View or change plan** and confirm it opens Shopify's plan page (a 404 there means step 2 is not done or the handle in step 3 is wrong). Untick **Tag medium-risk orders**, press **Save settings**, press **Refresh**, and confirm the box is still unticked.
-
-**6. ANDREW CLICKS THIS** (reply to the reviewer): for each item in the Partner dashboard, choose **Show resolved state** and paste a URL. The field wants a link, not a file, so upload a screenshot or short screen recording from step 5 somewhere with a shareable link and use that. One recording can serve all four. Then resubmit.
-
-Open question for you: what does the reviewer's text say for items 2, 3 and 4? That decides whether the guesses above are enough.
+**6. ANDREW CLICKS THIS** (reply to the reviewer, after step 5): for each item choose **Show resolved state** and paste a URL. The field wants a link, not a file, so upload a short screen recording or screenshots from step 5 somewhere with a shareable link; one recording of the reinstall path can serve all four. Then resubmit.

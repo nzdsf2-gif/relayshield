@@ -1,0 +1,307 @@
+diff --git a/shopify/worker.js b/shopify/worker.js
+index 9f34dcd6..3fa72971 100644
+--- a/shopify/worker.js
++++ b/shopify/worker.js
+@@ -189,21 +189,22 @@ export async function screenOrder(signals, shopKeyInfo) {
+ export function verdictActions(level) {
+   if (level === "high") return { tags: ["relayshield-high-risk"], note: true };
+   if (level === "medium") return { tags: ["relayshield-review"], note: true };
+-  return { tags: [], note: false };
+-}
+-
+-export function buildTimelineNote(orderName, level, score, reasons) {
+-  const lines = [
+-    `RelayShield screened order ${orderName}.`,
+-    `Composite risk score: ${score}/100 (${level}).`,
+-  ];
+-  const shown = (reasons || []).filter(Boolean).slice(0, 5);
+-  if (shown.length) lines.push(`Signals: ${shown.join("; ")}.`);
+-  lines.push(
+-    "A clean result means no known red flags were found, not proof of safety. " +
+-    "Nothing was changed on this order automatically; review before fulfilling if anything looks off."
+-  );
+-  return lines.join(" ");
++  return { tags: [], note: true };  // unknown/low: no risk tag, but still write the note with the score
++}
++
++/* The order note is the only merchant-visible field an app can write that
++ * Shopify turns into a timeline entry. The REST Event resource is GET-only:
++ * there is no POST /orders/{id}/events.json endpoint, and timeline
++ * comments are read-only for apps in both REST and GraphQL (Shopify has
++ * confirmed this repeatedly, most recently Nov 2025; requested since 2019).
++ * So the screening line goes into the order note, appended to any merchant
++ * note already there, never overwriting it. */
++export function buildOrderNoteLine(orderName, level, score, reasons) {
++  const shown = (reasons || []).filter(Boolean).slice(0, 3);
++  let line = `RelayShield screened order ${orderName}: composite risk ${score}/100 (${level}).`;
++  if (shown.length) line += ` Signals: ${shown.join("; ")}.`;
++  line += " This is a risk signal, not proof of safety; review before fulfilling. Nothing was changed automatically.";
++  return line;
+ }
+ 
+ /* ------------------------------------------------------------------ */
+@@ -234,22 +235,28 @@ export async function applyVerdictToOrder(shop, token, order, level, score, reas
+   const actions = verdictActions(level);
+   if (!actions.tags.length && !actions.note) return { skipped: true };
+   const results = {};
++  // One GET gives us both the current tags and the current merchant note.
++  const current = await adminApi(shop, token, `/orders/${order.id}.json`);
++  const orderBody = { id: order.id };
+   if (actions.tags.length) {
+-    const current = await adminApi(shop, token, `/orders/${order.id}.json`);
+     const existing = String(current.order.tags || "")
+       .split(",").map((t) => t.trim()).filter(Boolean);
+     const merged = [...new Set([...existing, ...actions.tags])];
+-    await adminApi(shop, token, `/orders/${order.id}.json`, "PUT", {
+-      order: { id: order.id, tags: merged.join(", ") },
+-    });
++    orderBody.tags = merged.join(", ");
+     results.tags = merged;
+   }
+   if (actions.note) {
+-    await adminApi(shop, token, `/orders/${order.id}/events.json`, "POST", {
+-      event: { message: buildTimelineNote(order.name, level, score, reasons) },
+-    });
++    // Append the RelayShield line to the merchant note (never overwrite it).
++    // Updating the note creates a real timeline entry; POST /events.json
++    // does not exist as a write endpoint.
++    const noteLine = buildOrderNoteLine(order.name, level, score, reasons);
++    const existingNote = String(current.order.note || "");
++    orderBody.note = existingNote.includes(noteLine)
++      ? existingNote
++      : existingNote ? `${existingNote}\n${noteLine}` : noteLine;
+     results.note = true;
+   }
++  await adminApi(shop, token, `/orders/${order.id}.json`, "PUT", { order: orderBody });
+   return results;
+ }
+ 
+@@ -486,6 +493,18 @@ async function handleOrdersCreate(request, env) {
+     return json({ ok: true, deduped: true });
+   }
+ 
++  // Billing gate, added 2026-11-03: BEFORE screening, not after.
++  // Free 100 per month, paid $29 2000 per month, no overage.
++  let gateToken = rec.access_token;
++  try { gateToken = await getFreshAccessToken(env, shop); } catch (e) {
++    console.log(`billing token refresh failed order=${order.id}: ${e.message}`);
++  }
++  const gate = await checkScreeningAllowed(env, shop, gateToken);
++  if (!gate.allowed) {
++    return json({ ok: true, screened: false, overLimit: true, plan: gate.plan });
++  }
++  await incrementMonthlyCount(env, shop);
++
+   const signals = extractOrderSignals(order, shop);
+   let verdict;
+   try {
+@@ -590,7 +609,7 @@ function esc(s) {
+     .replace(/"/g, "&quot;");
+ }
+ 
+-export function renderDashboard(shop, screenings, apiKey, host) {
++export function renderDashboard(shop, screenings, apiKey, host, plan) {
+   const counts = { high: 0, medium: 0, unknown: 0 };
+   for (const s of screenings) if (counts[s.level] !== undefined) counts[s.level]++;
+   const rows = screenings.map((s) => `
+@@ -676,6 +695,7 @@ export function renderDashboard(shop, screenings, apiKey, host) {
+ <div class="wrap">
+   <h1>RelayShield Order Screening</h1>
+   <p>Screening orders for <strong>${esc(shop)}</strong> against the RelayShield threat-intelligence corpus.</p>
++    ${plan ? `<div class="card"><div class="n">${plan.used} / ${plan.limit}</div><div>Screenings this month, plan ${esc(plan.plan)}</div>${plan.overLimit ? `<p class="note">Over your monthly limit. Upgrade in Shopify: in Shopify admin, Apps, RelayShield Order Screening, select the Paid plan. No external checkout.</p>` : `<p class="note">Upgrade in Shopify: in Shopify admin, Apps, RelayShield Order Screening, select the Paid plan.</p>`}</div>` : `<div class="card"><div class="n">Plan status unknown</div><div>Refresh this page to check your plan.</div></div>`}
+   <div class="cards">
+     <div class="card"><div class="n">${counts.high}</div><div>High risk (tagged relayshield-high-risk)</div></div>
+     <div class="card"><div class="n">${counts.medium}</div><div>Needs review (tagged relayshield-review)</div></div>
+@@ -705,7 +725,18 @@ async function handleDashboard(request, env) {
+   if (shop) await ensureInstalled(env, shop, bearer, url.origin);
+   const screenings = shop ? ((await kvGet(env, screeningsKey(shop))) || []) : [];
+   const host = url.searchParams.get("host") || "";
+-  return new Response(renderDashboard(shop || "", screenings, env.SHOPIFY_API_KEY, host), {
++    let dashboardPlan = null;
++  if (shop) {
++    try {
++      const dashboardToken = await getFreshAccessToken(env, shop);
++      const dashboardActive = await getActiveSubscription(shop, dashboardToken);
++      const dashboardUsed = await getMonthlyCount(env, shop);
++      dashboardPlan = getShopPlan(dashboardActive, dashboardUsed);
++    } catch (e) {
++      console.log("dashboard billing check failed: " + e.message);
++    }
++  }
++  return new Response(renderDashboard(shop || "", screenings, env.SHOPIFY_API_KEY, host, dashboardPlan), {
+     headers: {
+       "Content-Type": "text/html; charset=utf-8",
+       "Content-Security-Policy": "frame-ancestors https://*.myshopify.com https://admin.shopify.com;",
+@@ -717,6 +748,139 @@ async function handleDashboard(request, env) {
+ /* router                                                              */
+ /* ------------------------------------------------------------------ */
+ 
++
++/* --- RelayShield Shopify App Pricing billing, added 2026-11-03 --- */
++/* App Pricing enabled: Shopify hosts plan selection, this code only */
++/* reads the active subscription and gates screening limits by it. */
++/* No appSubscriptionCreate, no Stripe, no external checkout. */
++const BILLING_API_VERSION = "2026-07";
++const FREE_SCREENING_LIMIT = 100;
++const PAID_SCREENING_LIMIT = 2000;
++const PAID_PRICE_USD = 29;
++const PAID_PLAN_NAME = "Paid";
++function billingMonthKey(d) {
++  const dt = d || new Date();
++  return dt.getUTCFullYear() + "-" + String(dt.getUTCMonth() + 1).padStart(2, "0");
++}
++function billingCountKey(shop, month) { return "screenings-count:" + shop + ":" + month; }
++async function getMonthlyCount(env, shop) {
++  try {
++    const raw = await env.RS_KV.get(billingCountKey(shop, billingMonthKey()));
++    const n = raw ? JSON.parse(raw).count : 0;
++    return typeof n === "number" ? n : 0;
++  } catch { return 0; }
++}
++async function incrementMonthlyCount(env, shop) {
++  const month = billingMonthKey();
++  const key = billingCountKey(shop, month);
++  try {
++    const raw = await env.RS_KV.get(key);
++    const cur = raw ? JSON.parse(raw).count : 0;
++    const next = (typeof cur === "number" ? cur : 0) + 1;
++    await env.RS_KV.put(key, JSON.stringify({ month, count: next }));
++    return next;
++  } catch { return 0; }
++}
++async function billingGraphql(shop, token, query) {
++  const resp = await fetch("https://" + shop + "/admin/api/" + BILLING_API_VERSION + "/graphql.json", {
++    method: "POST",
++    headers: { "X-Shopify-Access-Token": token, "Content-Type": "application/json" },
++    body: JSON.stringify({ query }),
++  });
++  const data = await resp.json().catch(() => ({}));
++  if (!resp.ok || (data.errors && data.errors.length)) {
++    throw new Error("Shopify GraphQL billing check failed: " + resp.status);
++  }
++  return data.data;
++}
++async function getActiveSubscription(shop, token) {
++  const data = await billingGraphql(shop, token, `query {
++    currentAppInstallation {
++      activeSubscriptions {
++        id name status
++        lineItems { plan { pricingDetails {
++          ... on AppRecurringPricing { price { amount currencyCode } interval }
++        } } }
++      }
++    }
++  }`);
++  const subs = (data && data.currentAppInstallation && data.currentAppInstallation.activeSubscriptions) || [];
++  for (const sub of subs) {
++    if (sub.status !== "ACTIVE") continue;
++    if (sub.name === PAID_PLAN_NAME) {
++      const firstItem = (sub.lineItems || [])[0];
++      const price = firstItem && firstItem.plan && firstItem.plan.pricingDetails && firstItem.plan.pricingDetails.price;
++      return { isPaid: true, name: sub.name, amount: price ? Number(price.amount) : 0, status: sub.status, subscriptionId: sub.id };
++    }
++  }
++  return { isPaid: false, name: "Free", amount: 0, status: "FREE", subscriptionId: null };
++}
++function getShopPlan(active, monthlyCount) {
++  const limit = active.isPaid ? PAID_SCREENING_LIMIT : FREE_SCREENING_LIMIT;
++  return {
++    plan: active.isPaid ? PAID_PLAN_NAME : "Free",
++    isPaid: active.isPaid,
++    limit,
++    used: monthlyCount,
++    remaining: Math.max(0, limit - monthlyCount),
++    overLimit: monthlyCount >= limit,
++    subscriptionId: active.subscriptionId,
++  };
++}
++/* Gate helper: call this at the top of handleOrdersCreate, after token */
++/* refresh, before screening. If allowed is false, return early with no */
++/* tag and no note, and let the dashboard show the over-limit message. */
++/* On a billing API error, this fails open to free limits, never paid, */
++/* so a billing outage never grants paid screening by mistake. */
++async function checkScreeningAllowed(env, shop, token) {
++  let active;
++  try { active = await getActiveSubscription(shop, token); }
++  catch (e) { console.log("billing check failed, using free limits: " + e.message); active = { isPaid: false, name: "Free", amount: 0, status: "FREE", subscriptionId: null }; }
++  const used = await getMonthlyCount(env, shop);
++  const plan = getShopPlan(active, used);
++  return { allowed: !plan.overLimit, plan };
++}
++async function handleBillingStatus(request, env) {
++  const url = new URL(request.url);
++  const auth = request.headers.get("Authorization") || "";
++  const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : url.searchParams.get("id_token") || "";
++  const shop = await verifySessionToken(env, bearer);
++  if (!shop) return new Response("Unauthorized", { status: 401 });
++  try {
++    const token = await getFreshAccessToken(env, shop);
++    const active = await getActiveSubscription(shop, token);
++    const used = await getMonthlyCount(env, shop);
++    const plan = getShopPlan(active, used);
++    return new Response(JSON.stringify(plan), { headers: { "Content-Type": "application/json" } });
++  } catch (e) {
++    return new Response(JSON.stringify({ plan: "Free", isPaid: false, limit: FREE_SCREENING_LIMIT, used: await getMonthlyCount(env, shop), remaining: null, overLimit: false, billingUnknown: true }), { headers: { "Content-Type": "application/json" } });
++  }
++}
++async function handleAppSubscriptionsUpdate(request, env) {
++  const raw = await request.text();
++  const hmac = request.headers.get("X-Shopify-Hmac-Sha256") || "";
++  if (!(await verifyShopifyHmac(env.SHOPIFY_API_SECRET, raw, hmac))) {
++    return new Response("Unauthorized", { status: 401 });
++  }
++  let payload = {};
++  try { payload = JSON.parse(raw); } catch { payload = {}; }
++  const shop = (payload && (payload.shop_domain || payload.shop)) || "";
++  const status = payload && payload.app_subscription ? payload.app_subscription.status : "";
++  if (shop && (status === "CANCELLED" || status === "EXPIRED" || status === "FROZEN")) {
++    try {
++      const rec = (await kvGet(env, shopKey(shop))) || {};
++      rec.plan = "Free";
++      rec.subscriptionId = null;
++      await kvPut(env, shopKey(shop), rec);
++    } catch {}
++  }
++  return new Response("ok");
++}
++function renderPlanCard(plan) {
++  return '<div class="card"><div class="n">' + plan.used + ' / ' + plan.limit + '</div><div>Screenings this month, plan ' + plan.plan + '</div><p class="note">Upgrade in Shopify: in Shopify admin, Apps, RelayShield Order Screening, select the Paid plan. No external checkout.</p></div>';
++}
++/* --- end billing, added 2026-11-03 --- */
++
+ export default {
+   async fetch(request, env) {
+     const url = new URL(request.url);
+@@ -768,6 +932,12 @@ export default {
+         return new Response(JSON.stringify({ ok: true, shop, installed: inst.installed }), {
+           headers: { "Content-Type": "application/json" },
+         });
++      }
++            if (url.pathname === "/billing/status" && request.method === "GET") {
++        return handleBillingStatus(request, env);
++      }
++      if (url.pathname === "/webhooks/app-subscriptions-update" && request.method === "POST") {
++        return handleAppSubscriptionsUpdate(request, env);
+       }
+       if (url.pathname === "/healthz") return new Response("ok");
+       return new Response("Not found", { status: 404 });
+diff --git a/shopify/wrangler.toml b/shopify/wrangler.toml
+index 76d617c1..dfa3e429 100644
+--- a/shopify/wrangler.toml
++++ b/shopify/wrangler.toml
+@@ -8,13 +8,13 @@ compatibility_date = "2026-01-01"
+ # then paste the id below.
+ [[kv_namespaces]]
+ binding = "RS_KV"
+-id = "PASTE_KV_NAMESPACE_ID_HERE"
++id = "d95c371db8754acd9e8e791e0a558915"
+ 
+ [vars]
+ # APP_URL is the worker's public URL, used as the OAuth redirect origin
+ # and the webhook address base. Set after first deploy:
+ #   wrangler deploy, then set APP_URL to the workers.dev URL (or custom domain).
+-APP_URL = "https://relayshield-shopify-app.YOUR_SUBDOMAIN.workers.dev"
++APP_URL = "https://relayshield-order-screening.relayshieldadmin.workers.dev"
+ 
+ # Secrets (never commit values). Set with:
+ #   wrangler secret put SHOPIFY_API_KEY

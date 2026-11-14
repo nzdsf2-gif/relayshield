@@ -123,9 +123,11 @@ function stubWith(handler) {
 // 6. Settings change what gets written to an order.
 {
   assert.deepEqual(worker.verdictActions("high", { tag_medium: false, add_note: false }), { tags: ["relayshield-high-risk"], note: false });
-  assert.deepEqual(worker.verdictActions("medium", { tag_medium: false, add_note: true }), { tags: [], note: false });
+  assert.deepEqual(worker.verdictActions("medium", { tag_medium: false, add_note: true }), { tags: [], note: true });
+  assert.deepEqual(worker.verdictActions("medium", { tag_medium: false, add_note: false }), { tags: [], note: false });
   assert.deepEqual(worker.verdictActions("medium"), { tags: ["relayshield-review"], note: true });
-  assert.deepEqual(worker.verdictActions("unknown", {}), { tags: [], note: false });
+  assert.deepEqual(worker.verdictActions("unknown", {}), { tags: [], note: true }, "clean orders get the score line, no tag");
+  assert.deepEqual(worker.verdictActions("unknown", { add_note: false }), { tags: [], note: false });
   assert.deepEqual(worker.normalizeSettings({ tag_medium: "no", add_note: 0 }), { tag_medium: true, add_note: true });
   ok("settings gate tags and notes, high risk is always tagged, junk values fall back to defaults");
 }
@@ -167,12 +169,14 @@ function stubWith(handler) {
 {
   const gql = (payload, status = 200) => (url) => url.endsWith("/graphql.json") ? new Response(JSON.stringify(payload), { status }) : null;
   const page = async (handler) => { const env = mkEnv(installed()); stubWith(handler); return (await get(env, `/?id_token=${idToken()}&shop=${SHOP}`)).text(); };
-  let html = await page(gql({ data: { currentAppInstallation: { activeSubscriptions: [{ name: "Standard", status: "ACTIVE", test: false }] } } }));
-  assert.match(html, /Current plan: <strong>Standard<\/strong>/);
+  let html = await page(gql({ data: { currentAppInstallation: { activeSubscriptions: [{ name: "Paid", status: "ACTIVE", test: false }] } } }));
+  assert.match(html, /Current plan: <strong>Paid<\/strong>\. 0 of 2000 screenings used this month/);
   assert.match(html, /charges\/relayshield-order-screening\/pricing_plans/);
   assert.doesNotMatch(html, /test charge/);
   html = await page(gql({ data: { currentAppInstallation: { activeSubscriptions: [] } } }));
-  assert.match(html, /Current plan: <strong>Free<\/strong>/);
+  assert.match(html, /Current plan: <strong>Free<\/strong>\. 0 of 100 free checks used/);
+  html = await page(gql({ data: { currentAppInstallation: { activeSubscriptions: [{ name: "Something else", status: "ACTIVE" }] } } }));
+  assert.match(html, /Current plan: <strong>Free<\/strong>/, "only the plan named Paid unlocks paid limits");
   html = await page(gql({ errors: [{ message: "boom" }] }));
   assert.match(html, /could not confirm your plan/);
   html = await page(gql({}, 500));
@@ -340,5 +344,128 @@ function stubWith(handler) {
   assert.equal(j.ok, true); assert.equal(j.synced, 1);
   assert.equal(JSON.parse(env._m.get(`shop:${SHOP}`)).access_token, "shpat_new");
   ok("sync exchanges a token first when the shop has none");
+}
+
+/* ---- billing gate, merged from the live Worker's uncommitted edits ---- */
+const SHOP_HASH = await worker.sha256Hex(SHOP.toLowerCase());
+const monthKey = () => { const d = new Date(); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`; };
+const seedLifetime = (n) => ({ [`screenings-total:${SHOP_HASH}`]: { count: n } });
+const seedMonth = (n) => ({ [`screenings-count:${SHOP}:${monthKey()}`]: { month: monthKey(), count: n } });
+function billingStub({ paid = false, billingDown = false, level = "unknown", nodes = [] } = {}) {
+  stubWith((url, init) => {
+    const body = String(init.body || "");
+    if (url.endsWith("/graphql.json") && body.includes("orders(")) return new Response(JSON.stringify({ data: { orders: { nodes } } }));
+    if (url.endsWith("/graphql.json")) return billingDown ? new Response("{}", { status: 500 })
+      : new Response(JSON.stringify({ data: { currentAppInstallation: { activeSubscriptions: paid ? [{ id: "gid://s/1", name: "Paid", status: "ACTIVE", test: false }] : [] } } }));
+    if (url.includes("execute-api")) return new Response(JSON.stringify({ ok: true, data: { level, score: 12, signals: [] } }));
+    if (url.includes("/admin/api/") && (init.method || "GET") === "GET") return new Response(JSON.stringify({ order: { tags: "", note: "" } }));
+    return null;
+  });
+}
+const orderHook = (env, id) => { const raw = JSON.stringify({ id, name: `#${id}`, email: `b${id}@example.com` });
+  return post(env, "/webhooks/orders-create", raw, { "X-Shopify-Hmac-Sha256": sign(raw), "X-Shopify-Shop-Domain": SHOP }); };
+const screenedCalls = () => calls.filter((c) => c.url.includes("execute-api")).length;
+
+// 19. Free plan: 100 screenings for the shop's LIFETIME, then nothing is screened, tagged or recorded.
+{
+  const env = mkEnv({ ...installed(), ...seedLifetime(99) }); billingStub();
+  let j = await (await orderHook(env, 1)).json();
+  assert.equal(j.screened, true);
+  assert.equal(JSON.parse(env._m.get(`screenings-total:${SHOP_HASH}`)).count, 100);
+  j = await (await orderHook(env, 2)).json();
+  assert.deepEqual([j.screened, j.overLimit, j.plan], [false, true, "Free"]);
+  assert.equal(screenedCalls(), 1, "the 101st order is never sent for screening");
+  assert.ok(!JSON.parse(env._m.get(`screenings:${SHOP}`)).some((x) => x.order_id === 2), "and is not recorded");
+  assert.ok(!calls.some((c) => c.url.includes("/orders/2.json")), "and is not tagged or noted");
+  ok("free plan: the 100th order is screened, the 101st is not screened, noted or recorded");
+}
+// 20. The lifetime counter survives uninstall and reinstall, so reinstalling does not buy a fresh 100.
+{
+  const env = mkEnv({ ...installed(), ...seedLifetime(100), ...seedMonth(100) }); billingStub();
+  const raw = "{}";
+  await post(env, "/webhooks/app-uninstalled", raw, { "X-Shopify-Hmac-Sha256": sign(raw), "X-Shopify-Shop-Domain": SHOP });
+  assert.ok(!env._m.has(`shop:${SHOP}`));
+  assert.equal(JSON.parse(env._m.get(`screenings-total:${SHOP_HASH}`)).count, 100, "lifetime counter kept");
+  const u = await worker.getUsage(env, SHOP);
+  assert.deepEqual(u, { month: 100, lifetime: 100 });
+  assert.ok(![...env._m.keys()].some((k) => k.includes(SHOP) && k.startsWith("screenings-total")), "the counter key does not contain the raw shop domain");
+  ok("uninstall wipes the shop but keeps the lifetime counter, keyed by a hash of the domain");
+}
+// 21. Paid plan: 2000 per calendar month, independent of lifetime use.
+{
+  const env = mkEnv({ ...installed(), ...seedLifetime(5000), ...seedMonth(1999) }); billingStub({ paid: true });
+  assert.equal((await (await orderHook(env, 11)).json()).screened, true, "lifetime use above 100 does not block a paid shop");
+  const j = await (await orderHook(env, 12)).json();
+  assert.deepEqual([j.screened, j.overLimit, j.plan], [false, true, "Paid"]);
+  ok("paid plan: allowance is 2000 a month and lifetime use is ignored");
+}
+// 22. A billing outage fails open to FREE limits, never to paid.
+{
+  const used = mkEnv({ ...installed(), ...seedLifetime(100) }); billingStub({ billingDown: true, paid: true });
+  assert.equal((await (await orderHook(used, 21)).json()).overLimit, true, "outage plus used-up free allowance: blocked");
+  const fresh = mkEnv({ ...installed(), ...seedLifetime(5) }); billingStub({ billingDown: true });
+  assert.equal((await (await orderHook(fresh, 22)).json()).screened, true, "outage with allowance left: still screened");
+  ok("a billing outage uses free limits, so it can neither block a new shop nor grant paid screening");
+}
+// 23. Sync respects the allowance and says so.
+{
+  const nodes = Array.from({ length: 10 }, (_, i) => ({ legacyResourceId: String(500 + i), name: `#${5000 + i}`, email: `s${i}@example.com` }));
+  const env = mkEnv({ ...installed(), ...seedLifetime(95) }); billingStub({ nodes });
+  const H = { Authorization: `Bearer ${idToken()}` };
+  let j = await (await post(env, "/api/sync", "", H)).json();
+  assert.deepEqual([j.synced, j.overLimit], [5, true]);
+  assert.equal(screenedCalls(), 5);
+  assert.equal(JSON.parse(env._m.get(`screenings-total:${SHOP_HASH}`)).count, 100);
+  assert.ok(!JSON.parse(env._m.get(`shop:${SHOP}`)).orders_synced_at, "not marked synced while orders were held back");
+  j = await (await post(env, "/api/sync", "", H)).json();
+  assert.deepEqual([j.synced, j.overLimit], [0, true]);
+  assert.equal(screenedCalls(), 5, "nothing more is screened");
+  ok("sync stops at the plan limit, counts what it screened, and reports the limit");
+}
+// 24. The dashboard states usage and the limit plainly.
+{
+  const env = mkEnv({ ...installed(), ...seedLifetime(100) }); billingStub();
+  let html = await (await get(env, `/?id_token=${idToken()}&shop=${SHOP}`)).text();
+  assert.match(html, /100 of 100 free checks used/);
+  assert.match(html, /used all your free checks/);
+  const paid = mkEnv({ ...installed(), ...seedMonth(7) }); billingStub({ paid: true });
+  html = await (await get(paid, `/?id_token=${idToken()}&shop=${SHOP}`)).text();
+  assert.match(html, /7 of 2000 screenings used this month/);
+  assert.doesNotMatch(html, /Plan status unknown|Refresh this page to check your plan/);
+  ok("dashboard shows free checks used and the limit, or the paid monthly use, and never the old unknown-plan text");
+}
+// 25. One PUT writes tag and order note; a merchant's own note is kept; a repeat adds nothing.
+{
+  const env = mkEnv(installed()); let current = { tags: "vip", note: "Gift wrap please" };
+  stubWith((url, init) => {
+    if (url.endsWith("/graphql.json")) return new Response(JSON.stringify({ data: { currentAppInstallation: { activeSubscriptions: [] } } }));
+    if (url.includes("execute-api")) return new Response(JSON.stringify({ ok: true, data: { level: "high", score: 90, signals: [{ reasons: ["Known bad domain"] }] } }));
+    if (url.includes("/orders/61.json") && (init.method || "GET") === "GET") return new Response(JSON.stringify({ order: current }));
+    return null;
+  });
+  await orderHook(env, 61);
+  const puts = calls.filter((c) => c.url.includes("/orders/61.json") && c.init.method === "PUT");
+  assert.equal(puts.length, 1, "tags and note go in one write");
+  const body = JSON.parse(puts[0].init.body).order;
+  assert.equal(body.tags, "vip, relayshield-high-risk");
+  assert.ok(body.note.startsWith("Gift wrap please\n") && body.note.includes("RelayShield screened order #61") && body.note.includes("Known bad domain"));
+  assert.ok(!calls.some((c) => c.url.includes("/events.json")), "no call to the events endpoint");
+  current = { tags: "vip", note: body.note };
+  const again = await worker.applyVerdictToOrder(SHOP, "t", { id: 61, name: "#61" }, "high", 90, ["Known bad domain"], {});
+  assert.ok(again.note);
+  const last = JSON.parse(calls.filter((c) => c.init.method === "PUT").pop().init.body).order;
+  assert.equal(last.note, body.note, "the same line is not appended twice");
+  ok("tag and order note are written in one PUT, a merchant note is kept, and nothing is appended twice");
+}
+// 26. app_subscriptions/update: HMAC checked, shop taken from the header.
+{
+  const env = mkEnv(installed({ plan: "Paid" }));
+  const raw = JSON.stringify({ app_subscription: { status: "CANCELLED" } });
+  assert.equal((await post(env, "/webhooks/app-subscriptions-update", raw, { "X-Shopify-Hmac-Sha256": "bad", "X-Shopify-Shop-Domain": SHOP })).status, 401);
+  assert.equal(JSON.parse(env._m.get(`shop:${SHOP}`)).plan, "Paid", "forged request changes nothing");
+  assert.equal((await post(env, "/webhooks/app-subscriptions-update", raw, { "X-Shopify-Hmac-Sha256": sign(raw), "X-Shopify-Shop-Domain": SHOP })).status, 200);
+  assert.equal(JSON.parse(env._m.get(`shop:${SHOP}`)).plan, "Free");
+  assert.equal(JSON.parse(env._m.get(`shop:${SHOP}`)).access_token, "t", "token kept");
+  ok("a cancelled subscription is recorded from the shop header, and a forged request is refused");
 }
 console.log(`\n${n} passed`);

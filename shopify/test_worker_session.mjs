@@ -172,7 +172,7 @@ function stubWith(handler) {
   assert.match(html, /charges\/relayshield-order-screening\/pricing_plans/);
   assert.doesNotMatch(html, /test charge/);
   html = await page(gql({ data: { currentAppInstallation: { activeSubscriptions: [] } } }));
-  assert.match(html, /No active plan yet/);
+  assert.match(html, /Current plan: <strong>Free<\/strong>/);
   html = await page(gql({ errors: [{ message: "boom" }] }));
   assert.match(html, /could not confirm your plan/);
   html = await page(gql({}, 500));

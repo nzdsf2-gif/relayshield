@@ -799,7 +799,7 @@ export function renderDashboard(shop, screenings, apiKey, host, extras = {}) {
   const planText = !shop ? "Sign in through Shopify Admin to see your plan."
     : plan === null ? "We could not confirm your plan just now. Use the button below to choose or review it."
     : plan.active ? `Current plan: <strong>${esc(plan.name)}</strong>${plan.test ? " (test charge)" : ""}`
-    : "No active plan yet.";
+    : "Current plan: <strong>Free</strong>";
   const orderCell = (s) => storeHandle && s.order_id
     ? `<a href="https://admin.shopify.com/store/${esc(storeHandle)}/orders/${esc(s.order_id)}" target="_top">${esc(s.order_name)}</a>`
     : esc(s.order_name);

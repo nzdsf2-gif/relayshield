@@ -14441,7 +14441,7 @@ PAYG_TAGS: dict[str, list[str]] = {
     # rejected their settlements with HTTP 400 (paymentPayload schema).
     # wallet-risk settles with the same envelope because it has tags.
     "/v1/payg/counterparty-screen": ["defi", "wallet-screening", "crypto-security"],
-    "/v1/payg/pin-check":           ["defi", "payment-security", "crypto-security"],
+    "/v1/payg/pin-check":           ["defi", "wallet-screening", "crypto-security"],
 }
 
 

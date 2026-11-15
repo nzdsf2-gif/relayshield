@@ -14384,13 +14384,10 @@ PAYG_DESCRIPTIONS: dict[str, str] = {
         "aggregate risk score with corpus citations. Call for campaign-level takedown intel."
     ),
     "/v1/payg/pin-check": (
-        "Compare a payment to a stored seller pin before your agent pays it: pass the "
-        "seller, the payTo address, network, asset, and amount, and get PIN_OK when every "
-        "field matches the pin, PIN_MISMATCH when any field drifted, or NO_PIN when no pin "
-        "is set for that seller. A mismatch is HIGH / do_not_pay by default, or MEDIUM / "
-        "review when the tenant pin mode is step_up. Pins are created with POST "
-        "/v1/payg/pin. Advisory only - it never moves funds and never overrides the "
-        "human approval step in Coinbase Wallet."
+        "Compare a payment to a stored seller pin before your agent pays it. Returns PIN_OK "
+        "when every field matches, PIN_MISMATCH when any field drifted, or NO_PIN when no pin "
+        "is set. A mismatch is HIGH / do_not_pay by default. Pins are created with POST "
+        "/v1/payg/pin. Advisory only, it never moves funds."
     ),
     "/v1/payg/counterparty-screen": (
         "Screen a payment counterparty address before your agent pays it: the RelayShield "

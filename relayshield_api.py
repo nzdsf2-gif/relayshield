@@ -14436,6 +14436,12 @@ PAYG_TAGS: dict[str, list[str]] = {
     "/v1/payg/scamkit-match":       ["phishing-kit", "smishing", "threat-intelligence"],
     "/v1/payg/campaign-scan":       ["campaign-analysis", "threat-intelligence", "takedown-intel"],
     "/v1/passport/issue":           ["agent-identity", "identity-verification", "reputation"],
+    # Added 2026-11-14 — counterparty-screen and pin-check shipped without
+    # tags, so their 402 resources carried no tags and CDP's x402 verify
+    # rejected their settlements with HTTP 400 (paymentPayload schema).
+    # wallet-risk settles with the same envelope because it has tags.
+    "/v1/payg/counterparty-screen": ["defi", "wallet-screening", "crypto-security"],
+    "/v1/payg/pin-check":           ["defi", "payment-security", "crypto-security"],
 }
 
 

@@ -227,6 +227,44 @@ _EMAIL_RE = re.compile(
 # bulk data leak rather than ordinary contact info.
 _BULK_EMAIL_THRESHOLD = 5
 
+# Redaction patterns for the redact-and-continue feature (v1).
+# Phone: NANP / E.164. Requires 10 digits in phone-like grouping
+# with separators or parentheses, so bare digit runs and dates do
+# not match.
+_PHONE_RE = re.compile(
+    r"(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}\b"
+)
+# Crypto wallets. Ethereum is unambiguous (0x + 40 hex). Solana is
+# base58, 32-44 chars, and must contain at least one digit so
+# ordinary words do not match.
+_WALLET_ETH_RE = re.compile(r"\b0x[a-fA-F0-9]{40}\b")
+_WALLET_SOL_RE = re.compile(
+    r"\b(?=[1-9A-HJ-NP-Za-km-z]{32,44}\b)(?=.*\d)"
+    r"[1-9A-HJ-NP-Za-km-z]{32,44}\b"
+)
+# API key prefixes: OpenAI/Stripe sk-, AWS AKIA, GitHub ghp_,
+# Slack xox*.
+_API_KEY_RE = re.compile(
+    r"\b(?:sk-[A-Za-z0-9]{20,}|AKIA[A-Z0-9]{16}|"
+    r"ghp_[A-Za-z0-9]{36}|xox[baprs]-[A-Za-z0-9-]{10,})\b"
+)
+
+# Redaction tokens. Only these tokens (never raw PII values) appear
+# in redacted payloads, audit rows, or logs.
+REDACT_EMAIL = "[REDACTED_EMAIL]"
+REDACT_PHONE = "[REDACTED_PHONE]"
+REDACT_SSN = "[REDACTED_SSN]"
+REDACT_CARD = "[REDACTED_CARD]"
+REDACT_SECRET = "[REDACTED_SECRET]"
+REDACT_WALLET = "[REDACTED_WALLET]"
+REDACT_IP = "[REDACTED_IP]"
+
+# PII types redacted when redaction is enabled. "ip" is redacted
+# only for IPs the TI corpus flags (see redact_text).
+_REDACTION_TYPES = frozenset(
+    {"email", "phone", "ssn", "card", "secret", "wallet", "ip"}
+)
+
 
 def extract_indicators(obj, _depth=0, _seen=None) -> dict:
     """Recursively extract URLs, domains, and IPs from tool arguments.
@@ -415,7 +453,9 @@ class Screener:
                  block_levels: set = None, kit_lookup_enabled: bool = False,
                  pii_screening_enabled: bool = True,
                  oauth_screening_enabled: bool = True,
-                 ssrf_screening_enabled: bool = True):
+                 ssrf_screening_enabled: bool = True,
+                 redaction_enabled: bool = False,
+                 redaction_types: set = None):
         self.api_base = api_base.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
@@ -436,6 +476,16 @@ class Screener:
         # screening. Disable only in trusted environments where tools
         # legitimately fetch intranet URLs.
         self.ssrf_screening_enabled = ssrf_screening_enabled
+        # When True, PII in tool call arguments and tool results is
+        # replaced with redaction tokens and the call continues
+        # (redact-and-continue, v1, redact-only, no block mode).
+        # Default off (opt-in per tenant). When off, the redaction
+        # pass is skipped entirely, so there is no performance cost.
+        self.redaction_enabled = redaction_enabled
+        # Subset of _REDACTION_TYPES to redact. None means all seven.
+        self.redaction_types = (
+            set(redaction_types) if redaction_types is not None
+            else set(_REDACTION_TYPES))
 
     def screen_indicators(self, indicators: dict,
                           ssrf_check: bool = True,
@@ -509,6 +559,7 @@ class Screener:
         # Check each URL via composite-check (keyless). Take the worst.
         worst = {"level": "unknown", "score": 0, "reasons": [],
                  "matched_indicators": []}
+        flagged_urls = []
         checked = 0
         errors = 0
         for url in urls[:10]:  # cap per-call fan-out
@@ -519,6 +570,8 @@ class Screener:
                 errors += 1
                 log.warning("screening failed for %s: %s", url, exc)
                 continue
+            if result["level"] in self.block_levels:
+                flagged_urls.append(url)
             if _level_rank(result["level"]) > _level_rank(worst["level"]):
                 worst = result
 
@@ -542,6 +595,7 @@ class Screener:
 
         verdict = "block" if worst["level"] in self.block_levels else "allow"
         worst["verdict"] = verdict
+        worst["flagged_urls"] = flagged_urls
         worst["poison_category"] = (
             POISON_MALICIOUS_URL if verdict == "block" else POISON_CLEAN
         )
@@ -625,8 +679,27 @@ class Screener:
             "confidence": data.get("confidence", 0),
         }
 
-    def screen_tool_call(self, tool_name: str, arguments: dict, api_key: str = None) -> dict:
-        """Full screening for a tools/call invocation."""
+    def screen_tool_call(self, tool_name: str, arguments: dict) -> dict:
+        """Full screening for a tools/call invocation.
+
+        When redaction is enabled, PII in the arguments is replaced
+        with tokens before screening, and the verdict carries the
+        redacted arguments ("redacted_arguments") plus per-type
+        counts ("redactions") so the caller forwards the redacted
+        version. When redaction is off, arguments pass through
+        unchanged.
+        """
+        # Redact-and-continue: redact the six non-IP types first
+        # (IPs need the TI result, handled after screening below).
+        # The threat screen then never sees raw PII for those types.
+        redacted_arguments = arguments
+        redactions = {}
+        if getattr(self, "redaction_enabled", False):
+            _no_ip = set(getattr(self, "redaction_types",
+                                 _REDACTION_TYPES)) - {"ip"}
+            redacted_arguments, redactions = redact_payload(
+                arguments, flagged_ips=None, types=_no_ip)
+            arguments = redacted_arguments
         # Path traversal: check raw arguments before indicator extraction.
         if getattr(self, 'path_traversal_enabled', True):
             ws_root = getattr(self, 'workspace_root', '/workspace')
@@ -654,8 +727,39 @@ class Screener:
             if oauth_verdict is not None:
                 oauth_verdict["tool_name"] = tool_name
                 return oauth_verdict
-        verdict = self.screen_indicators(indicators, api_key=api_key)
+        verdict = self.screen_indicators(indicators)
         verdict["tool_name"] = tool_name
+        if getattr(self, "redaction_enabled", False):
+            # IP redaction, second pass: only IPs the TI corpus
+            # flagged. A flagged URL whose host is an IP literal
+            # marks that IP as corpus-flagged.
+            flagged_ips = set()
+            for url in verdict.get("flagged_urls", []):
+                host = _url_host(url)
+                if host and _IPV4_RE.fullmatch(host):
+                    flagged_ips.add(host)
+            if flagged_ips and "ip" in getattr(
+                    self, "redaction_types", _REDACTION_TYPES):
+                redacted_arguments, ip_counts = redact_payload(
+                    redacted_arguments, flagged_ips=flagged_ips,
+                    types={"ip"})
+                for k, v in ip_counts.items():
+                    redactions[k] = redactions.get(k, 0) + v
+                # The verdict itself carries the flagged URL in
+                # "screened", "matched_indicators", "flagged_urls"
+                # (and possibly in "reasons"); redact the flagged IP
+                # there too so no raw PII leaks into the audit trail.
+                # These replacements are hygiene only and are not
+                # counted in "redactions", which counts the forwarded
+                # payload.
+                for key in ("screened", "matched_indicators",
+                            "flagged_urls", "reasons"):
+                    if key in verdict:
+                        verdict[key], _ = redact_payload(
+                            verdict[key], flagged_ips=flagged_ips,
+                            types={"ip"})
+            verdict["redacted_arguments"] = redacted_arguments
+            verdict["redactions"] = redactions
         return verdict
 
     def _screen_oauth_arguments(self, indicators: dict):
@@ -725,6 +829,18 @@ class Screener:
         holds for OAuth credential material: only pattern types are
         ever reported.
         """
+        # Redact-and-continue: redact the six non-IP types first
+        # (IPs need the TI result, handled after URL screening
+        # below). The threat screen then never sees raw PII for
+        # those types.
+        redacted_result = result_obj
+        redactions = {}
+        if getattr(self, "redaction_enabled", False):
+            _no_ip = set(getattr(self, "redaction_types",
+                                 _REDACTION_TYPES)) - {"ip"}
+            redacted_result, redactions = redact_payload(
+                result_obj, flagged_ips=None, types=_no_ip)
+            result_obj = redacted_result
         texts = _extract_result_text(result_obj)
         reasons = []
         details = {"text_chunks": len(texts)}
@@ -766,6 +882,7 @@ class Screener:
         details["urls_found"] = len(urls)
         worst = None
         worst_url = None
+        flagged_result_urls = []
         for url in urls[:10]:
             try:
                 check = self._check_url(url, api_key=api_key)
@@ -773,6 +890,8 @@ class Screener:
                 log.warning("result URL screening failed for %s: %s",
                             url, exc)
                 continue
+            if check["level"] in self.block_levels:
+                flagged_result_urls.append(url)
             if _level_rank(check["level"]) > _level_rank(
                     worst["level"] if worst else "unknown"):
                 worst = check
@@ -943,6 +1062,33 @@ class Screener:
                     "kit_family": ke.get("family", ""),
                     "confidence": ke.get("confidence", 0),
                 })
+        if getattr(self, "redaction_enabled", False):
+            # IP redaction, second pass: only IPs the TI corpus
+            # flagged (hosts of flagged URLs).
+            flagged_ips = set()
+            for url in flagged_result_urls:
+                host = _url_host(url)
+                if host and _IPV4_RE.fullmatch(host):
+                    flagged_ips.add(host)
+            if flagged_ips and "ip" in getattr(
+                    self, "redaction_types", _REDACTION_TYPES):
+                redacted_result, ip_counts = redact_payload(
+                    redacted_result, flagged_ips=flagged_ips,
+                    types={"ip"})
+                for k, v in ip_counts.items():
+                    redactions[k] = redactions.get(k, 0) + v
+                # The verdict carries the flagged URL in
+                # matched_indicators (worst_url fallback) and possibly
+                # in details["url_reasons"]; redact the flagged IP
+                # there too so no raw PII leaks into the audit trail.
+                # Hygiene only; not counted in "redactions".
+                matched_indicators, _ = redact_payload(
+                    matched_indicators, flagged_ips=flagged_ips,
+                    types={"ip"})
+                if "url_reasons" in details:
+                    details["url_reasons"], _ = redact_payload(
+                        details["url_reasons"], flagged_ips=flagged_ips,
+                        types={"ip"})
         scored = _confidence_for_result(categories, details)
         return {
             "verdict": "flagged" if reasons else "clean",
@@ -950,10 +1096,11 @@ class Screener:
             "reasons": reasons,
             "details": details,
             "kit_ids": kit_ids,
-            "matched_indicators": matched_indicators,
             "pii_leak": bool(pii_found),
             "confidence": scored["confidence"],
             "cause_codes": scored["cause_codes"],
+            "redacted_result": redacted_result,
+            "redactions": redactions,
         }
 
 
@@ -1027,6 +1174,119 @@ def _find_credentials(texts: list) -> dict:
         counts["pkce_verifier"] += len(_PKCE_VERIFIER_RE.findall(text))
         counts["client_secret"] += len(_CLIENT_SECRET_RE.findall(text))
     return counts
+
+
+def redact_text(text: str, flagged_ips=None, types=None) -> tuple:
+    """Redact PII in one string.
+
+    Returns (redacted_text, counts) where counts maps the PII type
+    name to the number of replacements. flagged_ips is the set of
+    corpus-flagged IP strings to redact; other IPs are left alone.
+    types is the set of PII types to redact; None means all seven.
+    Raw PII values are never returned or logged. The card regex can
+    consume a trailing separator, so a trailing space or dash is
+    preserved on the token.
+    """
+    if types is None:
+        types = _REDACTION_TYPES
+    counts = {}
+    out = text
+
+    if "email" in types:
+        out, n = _EMAIL_RE.subn(REDACT_EMAIL, out)
+        if n:
+            counts["email"] = counts.get("email", 0) + n
+    if "phone" in types:
+        out, n = _PHONE_RE.subn(REDACT_PHONE, out)
+        if n:
+            counts["phone"] = counts.get("phone", 0) + n
+    if "ssn" in types:
+        def _ssn_repl(m):
+            if _looks_like_ssn(m.group(0)):
+                return REDACT_SSN
+            return m.group(0)
+        out = _SSN_RE.sub(_ssn_repl, out)
+        n_real = sum(
+            1 for m in _SSN_RE.finditer(text)
+            if _looks_like_ssn(m.group(0)))
+        if n_real:
+            counts["ssn"] = counts.get("ssn", 0) + n_real
+    if "card" in types:
+        def _card_repl(m):
+            digits = re.sub(r"[ \-]", "", m.group(0))
+            if (13 <= len(digits) <= 19 and len(set(digits)) > 1
+                    and _luhn_ok(digits)):
+                tail = m.group(0)[-1] if m.group(0)[-1] in " -" else ""
+                return REDACT_CARD + tail
+            return m.group(0)
+        out = _CARD_SEQ_RE.sub(_card_repl, out)
+        n_real = 0
+        for m in _CARD_SEQ_RE.finditer(text):
+            digits = re.sub(r"[ \-]", "", m.group(0))
+            if (13 <= len(digits) <= 19 and len(set(digits)) > 1
+                    and _luhn_ok(digits)):
+                n_real += 1
+        if n_real:
+            counts["card"] = counts.get("card", 0) + n_real
+    if "secret" in types:
+        out, n = _JWT_RE.subn(REDACT_SECRET, out)
+        if n:
+            counts["secret"] = counts.get("secret", 0) + n
+        out, n = _API_KEY_RE.subn(REDACT_SECRET, out)
+        if n:
+            counts["secret"] = counts.get("secret", 0) + n
+        # Private-key blocks.
+        for pattern in _SECRET_PATTERNS:
+            if pattern in out:
+                out = out.replace(pattern, REDACT_SECRET)
+                counts["secret"] = counts.get("secret", 0) + 1
+    if "wallet" in types:
+        out, n = _WALLET_ETH_RE.subn(REDACT_WALLET, out)
+        if n:
+            counts["wallet"] = counts.get("wallet", 0) + n
+        out, n = _WALLET_SOL_RE.subn(REDACT_WALLET, out)
+        if n:
+            counts["wallet"] = counts.get("wallet", 0) + n
+    if "ip" in types and flagged_ips:
+        # Only redact IPs the TI corpus flagged.
+        def _ip_repl(m):
+            if m.group(0) in flagged_ips:
+                return REDACT_IP
+            return m.group(0)
+        out = _IPV4_RE.sub(_ip_repl, out)
+        n_real = sum(
+            1 for m in _IPV4_RE.finditer(text)
+            if m.group(0) in flagged_ips)
+        if n_real:
+            counts["ip"] = counts.get("ip", 0) + n_real
+    return out, counts
+
+
+def redact_payload(obj, flagged_ips=None, types=None) -> tuple:
+    """Redact PII in a JSON-serialisable payload.
+
+    Deep-copies the payload, redacts every string value, and returns
+    (redacted_obj, counts). Non-string values pass through unchanged.
+    Cycle-safe to depth 10, matching extract_indicators.
+    """
+    counts = {}
+
+    def _walk(node, depth):
+        if depth > 10:
+            return node
+        if isinstance(node, str):
+            redacted, c = redact_text(node, flagged_ips, types)
+            for k, v in c.items():
+                counts[k] = counts.get(k, 0) + v
+            return redacted
+        if isinstance(node, dict):
+            return {k: _walk(v, depth + 1) for k, v in node.items()}
+        if isinstance(node, (list, tuple)):
+            walked = [_walk(v, depth + 1) for v in node]
+            return walked if isinstance(node, list) else tuple(walked)
+        return node
+
+    return _walk(obj, 0), counts
 
 
 def _extract_result_text(result_obj) -> list:

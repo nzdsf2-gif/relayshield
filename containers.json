@@ -1,0 +1,10 @@
+[
+  {
+    "Description": "RelayShield MCP Proxy Firewall (Ubuntu 24.04, licensed 2026-11-11)",
+    "Format": "vmdk",
+    "UserBucket": {
+      "S3Bucket": "relayshield-vm-import-239677749008",
+      "S3Key": "images/relayshield-mcp-proxy-fw-ubuntu-24.04-amd64-license-fix.vmdk"
+    }
+  }
+]

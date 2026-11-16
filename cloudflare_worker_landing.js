@@ -14,7 +14,7 @@ const HTML = `<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RelayShield: Identity Security, Threat Monitoring and Intelligence for the Agentic AI Era</title>
-<meta name="description" content="Identity security, threat monitoring and intelligence for the agentic AI era. TAP verifier for agentic commerce, MCP Proxy Firewall for AI agents, and threat intelligence APIs backed by 725K indicators across 129 monitored marketplaces.">
+<meta name="description" content="Identity security, threat monitoring and intelligence for the agentic AI era. TAP verifier for agentic commerce, MCP Proxy Firewall for AI agents, and threat intelligence APIs backed by 800K+ indicators across 139 monitored Telegram marketplaces.">
 <meta property="og:title" content="RelayShield: Identity Security, Threat Monitoring and Intelligence for the Agentic AI Era">
 <meta property="og:description" content="TAP verifier, MCP Proxy Firewall, and threat intelligence APIs for the agentic AI era.">
 <meta property="og:type" content="website">
@@ -166,6 +166,8 @@ const HTML = `<!DOCTYPE html>
   .modal .m-sub { color: var(--purple); font-weight: 700; margin-bottom: 14px; }
   .modal p.body { color: var(--muted); margin-bottom: 18px; }
   .modal ul { list-style: none; margin-bottom: 22px; }
+  .modal ol { list-style: decimal; padding-left: 24px; margin-bottom: 18px; }
+  .modal ol li::before { content: none; }
   .modal li { padding: 7px 0; color: var(--text); font-size: .97rem; border-bottom: 1px solid #2c2c2c; }
   .modal li::before { content: "\\25B8  "; color: var(--green); }
   .modal .m-links { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
@@ -204,7 +206,7 @@ const HTML = `<!DOCTYPE html>
   <div class="wrap">
     <span class="kicker">Identity Security for the Agentic AI Era</span>
     <h1>Identity Security, Threat Monitoring and <span class="accent">Intelligence</span> for the Agentic AI Era</h1>
-    <p class="sub">AI agents transact, browse, and call tools on your behalf. RelayShield verifies who is acting, screens what they touch, and watches the threat landscape behind them. Built on a live corpus of 725K threat indicators across 129 monitored marketplaces.</p>
+    <p class="sub">AI agents transact, browse, and call tools on your behalf. RelayShield verifies who is acting, screens what they touch, and watches the threat landscape behind them. Built on a live corpus of 800K+ threat indicators across 139 monitored Telegram marketplaces.</p>
     <div class="hero-ctas">
       <a class="btn btn-primary" href="https://api.relayshield.net/developers">Get API access</a>
       <a class="btn btn-ghost" href="#products" data-goto-tab="products">Explore products</a>
@@ -214,9 +216,9 @@ const HTML = `<!DOCTYPE html>
 
 <div class="metrics">
   <div class="wrap metrics-inner">
-    <div class="metric"><div class="num">129</div><div class="lbl">Monitored marketplaces</div></div>
-    <div class="metric"><div class="num">725K</div><div class="lbl">Threat indicators</div></div>
-    <div class="metric"><div class="num">9M+</div><div class="lbl">Corpus citations</div></div>
+    <div class="metric"><div class="num">139</div><div class="lbl">Monitored Telegram marketplaces</div></div>
+    <div class="metric"><div class="num">800K+</div><div class="lbl">Threat indicators</div></div>
+    <div class="metric"><div class="num">10.9M</div><div class="lbl">Corpus citations</div></div>
   </div>
 </div>
 
@@ -245,10 +247,11 @@ const HTML = `<!DOCTYPE html>
       <div class="card" data-drill="tap">
         <span class="tag">Live</span>
         <div class="icon">&#x1F4E6;</div>
-        <h3>TAP Verifier</h3>
-        <p>Visa Trusted Agent Protocol verification for agentic commerce. One API call checks the agent signature, validates the signing key, and screens agent identity against the threat corpus.</p>
+        <h3>Agent Verifiers</h3>
+        <p class="tagline">RelayShield Passport, intent binding, and TAP and PAP verification, checked together.</p>
+        <p>Verify the agent, bind its intent, then check the action before settlement. The RelayShield Passport gives an agent a signed identity that can be checked and revoked. Intent binding records a signed binding for payer, counterparty, amount, currency, and artifact set, and a settle check allows or blocks that exact payment, once only. TAP verification covers card network transactions, and PAP verification covers merchant checkout. All checks screen against the RelayShield threat intelligence corpus.</p>
         <div class="links">
-          <a class="btn btn-primary btn-sm" href="https://buy.stripe.com/bJe28semO0mxf9adoj0Ny0l">$49/mo flat</a>
+          <a class="btn btn-primary btn-sm" href="https://api.relayshield.net/developers">$79/mo flat</a>
         </div>
         <div class="drill-hint">Click for details &#x25B8;</div>
       </div>
@@ -264,6 +267,8 @@ const HTML = `<!DOCTYPE html>
         <div class="drill-hint">Click for details &#x25B8;</div>
       </div>
     </div>
+
+    <p style="color: var(--muted); max-width: 680px; margin: 12px auto 0; font-size: 0.95rem;">RelayShield covers the four tiers of the <a href="https://api.relayshield.net/developers#agent-identity-tad">Trusted Agent Delegation framework</a> with primitives that are live today: proxy screening with no identity required, intent binding tied to a session, Passport identity across sessions, and step-up human approval for high-risk actions. <a href="https://api.relayshield.net/developers#agent-identity-tad">Read the full mapping</a>.</p>
 
     <div class="subsec">
       <h3><span class="accent">Threat Intelligence APIs</span></h3>
@@ -383,18 +388,48 @@ const HTML = `<!DOCTYPE html>
         <a class="btn btn-primary" href="https://buy.stripe.com/bJe28semO0mxf9adoj0Ny0l">Subscribe</a>
       </div>
       <div class="price-card">
-        <h3>MCP Proxy Firewall Cloud</h3>
+        <h3>Agent Verifiers Bundle</h3>
+        <div class="for">Merchants and businesses accepting agent payments</div>
+        <div class="amount">$79</div>
+        <div class="per">flat monthly pricing</div>
+        <ul>
+          <li>Everything in TAP Verifier</li>
+          <li>Everything in PAP Verifier</li>
+          <li>RelayShield Passport identity verification</li>
+          <li>Intent binding and settle check</li>
+          <li>100 free verifications per month</li>
+          <li>Threat corpus screening</li>
+        </ul>
+        <a class="btn btn-ghost" href="https://api.relayshield.net/developers">API docs</a>
+      </div>
+      <div class="price-card">
+        <h3>Hosted MCP Proxy Firewall</h3>
         <div class="for">Teams running agents on MCP</div>
         <div class="amount">$49</div>
         <div class="per">flat monthly pricing</div>
         <ul>
-          <li>Runtime tool-call screening</li>
-          <li>Confidence scores with cause codes</li>
-          <li>Policy engine and audit trail</li>
-          <li>Free pre-deployment scanner</li>
+          <li>Dedicated hosted proxy instance, single tenant by construction</li>
+          <li>Your own URL and per-tenant token</li>
+          <li>20,000 screened calls included, $0.002 per call above that</li>
+          <li>Works with Coinbase Wallet MCP and MetaMask</li>
+          <li>PII redaction built in: sensitive values are redacted from tool calls and tool results in both directions, opt-in per tenant</li>
         </ul>
         <p class="tos">By subscribing you agree to our <a href="https://docs.google.com/document/d/e/2PACX-1vTuxkRdCZNeRghwIqhY8XH9-OzYCMNokKiqmQwQODuHGFYfc3htt_-2_se5YkWtEXLwwLclxCq_8KWz/pub">Terms of Service</a> and <a href="https://docs.google.com/document/d/e/2PACX-1vTu1KknanQip9yqLMXBzEPTU1uggFn2FVNFIcQzTT3D49rJMi0SzsKbFIlvVYfpJBbNOsxr7MIGx3m5/pub">Privacy Policy</a>.</p>
-        <a class="btn btn-primary" href="https://api.relayshield.net/developers">Get started</a>
+        <a class="btn btn-primary" href="https://mcpfw.relayshield.net">Subscribe via the console</a>
+      </div>
+      <div class="price-card">
+        <h3>Firewall + Verifiers Bundle</h3>
+        <div class="for">A single developer or small team, one price</div>
+        <div class="amount">$109</div>
+        <div class="per">flat monthly pricing</div>
+        <ul>
+          <li>Everything in Hosted MCP Proxy Firewall</li>
+          <li>Everything in Agent Verifiers Bundle</li>
+          <li>20,000 screened calls included, $0.002 per call above that</li>
+          <li>100 free verifications per month</li>
+        </ul>
+        <p class="tos">By subscribing you agree to our <a href="https://docs.google.com/document/d/e/2PACX-1vTuxkRdCZNeRghwIqhY8XH9-OzYCMNokKiqmQwQODuHGFYfc3htt_-2_se5YkWtEXLwwLclxCq_8KWz/pub">Terms of Service</a> and <a href="https://docs.google.com/document/d/e/2PACX-1vTu1KknanQip9yqLMXBzEPTU1uggFn2FVNFIcQzTT3D49rJMi0SzsKbFIlvVYfpJBbNOsxr7MIGx3m5/pub">Privacy Policy</a>.</p>
+        <a class="btn btn-primary" href="https://mcpfw.relayshield.net">Subscribe via the console</a>
       </div>
       <div class="price-card">
         <h3>MCP Proxy Firewall On-Premise</h3>
@@ -402,7 +437,7 @@ const HTML = `<!DOCTYPE html>
         <div class="amount">Custom</div>
         <div class="per">from $3,000/mo, onsite available</div>
         <ul>
-          <li>Everything in Cloud</li>
+          <li>Everything in Hosted</li>
           <li>White glove customization including dedicated support and policy configuration</li>
           <li>Dedicated support</li>
           <li>Custom policy configuration</li>
@@ -648,12 +683,13 @@ const HTML = `<!DOCTYPE html>
 /* Product drill-down modal */
 var PRODUCT_DETAILS = {
   tap: {
-    tag: 'Live', title: 'TAP Verifier',
-    sub: 'Cryptographic proof for agentic payments',
-    body: 'RelayShield verifies Visa Trusted Agent Protocol messages so merchants know the agent at checkout is who it claims to be. Built for the x402 agent-to-agent economy and listed on Coinbase Bazaar. Each verification checks the RFC 9421 message signature, validates the signing key against the Visa JWKS, and screens the agent identity against the RelayShield threat corpus.',
-    list: ['RFC 9421 message signature verification', 'Signing key validation against Visa JWKS', 'Intent mismatch detection on payment details', 'Agent identity screening against the 725K indicator corpus', 'Signed verification receipts'],
+    tag: 'Live', title: 'Agent Verifiers',
+    sub: 'RelayShield Passport, intent binding, and TAP and PAP verification, checked together',
+    body: 'Three checks, in order, at the point where the action happens. 1. RelayShield Passport as identity: an agent presents a signed passport that can be issued, checked, and revoked. A revoked passport is blocked at the per-call check. 2. Intent Binding: before settlement, a signed binding records payer, counterparty, amount, currency, and artifact set, and a settle check allows only a match, once only. A repeat settle is blocked because the binding is consumed exactly once. Amount drift, recipient drift, scope expansion, a missing binding, and a revoked passport are blocked in Enforce and recorded for audit. 3. TAP and PAP transaction verifiers: TAP covers Visa Trusted Agent Protocol transactions, with RFC 9421 message signature verification, signing key validation against the Visa JWKS, intent mismatch detection, and threat corpus screening. PAP covers merchant checkout, with session token, DPoP proof, identity validation, and the same corpus screening.',
+    body_html: 'Three ordered checks at the point where the action happens.<ol><li>RelayShield Passport as identity: an agent presents a signed passport that can be issued, checked, and revoked. A revoked passport is blocked at the per-call check.</li><li>Intent Binding: before settlement, a signed binding records payer, counterparty, amount, currency, and artifact set, and a settle check allows only a match, once only. A repeat settle is blocked because the binding is consumed exactly once. Amount drift, recipient drift, scope expansion, a missing binding, and a revoked passport are blocked in Enforce and recorded for audit.</li><li>TAP and PAP transaction verifiers: TAP covers Visa Trusted Agent Protocol transactions, with RFC 9421 message signature verification, signing key validation against the Visa JWKS, intent mismatch detection, and threat corpus screening. PAP covers merchant checkout, with session token, DPoP proof, identity validation, and the same corpus screening.</li></ol>',
+    list: ['RFC 9421 message signature verification', 'Signing key validation against Visa JWKS', 'Intent mismatch detection on payment details', 'Agent identity screening against the 800K+ indicator corpus', 'RelayShield Passport identity, issued, checked, and revoked', 'Intent binding and settle check, exactly once', 'Signed verification receipts'],
     links: [
-      { text: '$49/mo flat', href: 'https://buy.stripe.com/bJe28semO0mxf9adoj0Ny0l', cls: 'btn btn-primary btn-sm' },
+      { text: '$79/mo flat', href: 'https://api.relayshield.net/developers', cls: 'btn btn-primary btn-sm' },
       { text: 'API docs', href: 'https://api.relayshield.net/developers', cls: 'btn btn-ghost btn-sm' }
     ]
   },
@@ -670,7 +706,7 @@ var PRODUCT_DETAILS = {
   ti: {
     tag: 'Live', title: 'Threat Intelligence APIs',
     sub: 'The corpus behind everything we build',
-    body: 'REST, MCP, and x402 pay-per-call access to the RelayShield corpus: 725K indicators and 9M+ citations across 129 monitored Telegram marketplaces and 20 authoritative feeds. Breach exposure, infostealer logs, SIM swap signals, wallet and domain reputation, and MCP registry risk. Now with live licenses on AWS Marketplace.',
+    body: 'REST, MCP, and x402 pay-per-call access to the RelayShield corpus: 800K+ indicators and 10.9M citations across 139 monitored Telegram marketplaces and 20 authoritative feeds. Breach exposure, infostealer logs, SIM swap signals, wallet and domain reputation, and MCP registry risk. Now with live licenses on AWS Marketplace.',
     list: ['Live licenses on AWS Marketplace', 'REST, MCP, STIX/TAXII, and x402 rails', 'Breach, infostealer, SIM swap, wallet, domain, and MCP registry coverage', 'Free checks with no signup', 'Pay per call when you scale'],
     links: [
       { text: 'Browse the API', href: 'https://api.relayshield.net/developers', cls: 'btn btn-primary btn-sm' },
@@ -694,8 +730,8 @@ var PRODUCT_DETAILS = {
   solana: {
     tag: 'Live', title: 'Solana Crypto Shield Mobile',
     sub: 'Wallet screening in your pocket',
-    body: 'Crypto Shield Mobile brings RelayShield scam checks to your phone, with Solana wallet screening built in. Check wallet addresses, links, and tokens before you sign a transaction. The same 725K indicator corpus, in your pocket.',
-    list: ['Solana wallet address screening', 'Link and token checks before you sign', 'Phishing and drainer detection', 'Same 725K indicator corpus as the API', 'Phone friendly: works where mobile browsers do not support extensions'],
+    body: 'Crypto Shield Mobile brings RelayShield scam checks to your phone, with Solana wallet screening built in. Check wallet addresses, links, and tokens before you sign a transaction. The same 800K+ indicator corpus, in your pocket.',
+    list: ['Solana wallet address screening', 'Link and token checks before you sign', 'Phishing and drainer detection', 'Same 800K+ indicator corpus as the API', 'Phone friendly: works where mobile browsers do not support extensions'],
     links: [
       { text: 'Crypto Shield mobile', href: 'https://cryptoshieldmobile.relayshield.net', cls: 'btn btn-primary btn-sm' }
     ]
@@ -731,7 +767,7 @@ var PRODUCT_DETAILS = {
     tag: 'Live', title: 'Chrome Extension',
     sub: 'Scam checks in your browser',
     body: 'The RelayShield Chrome extension screens links and pages as you browse, with tri-state verdicts: BLOCKED, FLAGGED, ALLOWED. An ALLOWED verdict means no flags were found, with caveats shown.',
-    list: ['Tri-state verdicts: BLOCKED, FLAGGED, ALLOWED', 'Screenshot to verdict', 'Same 725K indicator corpus', 'Privacy respecting: checks run against the API, browsing stays local'],
+    list: ['Tri-state verdicts: BLOCKED, FLAGGED, ALLOWED', 'Screenshot to verdict', 'Same 800K+ indicator corpus', 'Privacy respecting: checks run against the API, browsing stays local'],
     links: [
       { text: 'Get the extension', href: 'https://api.relayshield.net/developers', cls: 'btn btn-primary btn-sm' }
     ]
@@ -753,7 +789,7 @@ var PRODUCT_DETAILS = {
     mTag.textContent = d.tag;
     mTitle.textContent = d.title;
     mSub.textContent = d.sub;
-    mBody.textContent = d.body;
+    if (d.body_html) { mBody.innerHTML = d.body_html; } else { mBody.textContent = d.body; }
     mList.innerHTML = '';
     for (var i = 0; i < d.list.length; i++) {
       var li = document.createElement('li');

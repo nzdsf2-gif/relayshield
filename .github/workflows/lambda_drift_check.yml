@@ -94,6 +94,8 @@ jobs:
             # resolves it against AWS is
             #   sh tools/handler_drift.sh relayshield_bundle_fulfillment.py
             ["relayshield_bundle_fulfillment.py"]="relayshield-bundle-fulfillment"
+            ["relayshield_license_service.py"]="relayshield-license-service"
+            ["relayshield_stripe_license.py"]="relayshield-stripe-license"
             ["relayshield_api.py"]="relayshield-api"
             ["relayshield_breach_monitor.py"]="relayshield-breach-monitor"
             # Added 2026-08-30. Source in the repo since 2026-07-07, live and

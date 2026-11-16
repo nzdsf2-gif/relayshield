@@ -8,13 +8,13 @@ compatibility_date = "2026-01-01"
 # then paste the id below.
 [[kv_namespaces]]
 binding = "RS_KV"
-id = "PASTE_KV_NAMESPACE_ID_HERE"
+id = "d95c371db8754acd9e8e791e0a558915"
 
 [vars]
 # APP_URL is the worker's public URL, used as the OAuth redirect origin
 # and the webhook address base. Set after first deploy:
 #   wrangler deploy, then set APP_URL to the workers.dev URL (or custom domain).
-APP_URL = "https://relayshield-shopify-app.YOUR_SUBDOMAIN.workers.dev"
+APP_URL = "https://relayshield-order-screening.relayshieldadmin.workers.dev"
 
 # Secrets (never commit values). Set with:
 #   wrangler secret put SHOPIFY_API_KEY

@@ -1,0 +1,71 @@
+# Context-engine Step 7: daily risk profile job (GitHub Actions).
+#
+# Runs the daily per-tenant risk profile job once a day and writes
+# the profiles to the console CONFIG_KV, where the Step 6 Worker
+# patch reads them for the resolved-policy response.
+#
+# Schedule: 05:00 UTC daily ("0 5 * * *"), matching the reference
+# cron in the daily job file. The job is Python; it runs here, not
+# in the Worker (the Worker is JavaScript). The Worker only reads
+# the profiles from KV.
+#
+# Setup (one time, in the relayshield repo on GitHub):
+# 1. Copy this file to .github/workflows/context-engine-daily-profiles.yml
+# 2. Copy these files into the repo (same directory as the workflow
+#    expects, e.g. tools/context-engine/):
+#      - context-engine-daily-profile-job-2026-11-08.py
+#      - context-engine-risk-profile-module-2026-11-08.py
+#      - context-engine-step7-runner-2026-11-08.py --corpus-file tools/context-engine/context-engine-step7-corpus-default-2026-11-08.json
+#    The runner loads the daily job module by path from its own
+#    directory, and the daily job loads the risk profile module
+#    the same way, so keep the three files together.
+# 3. Add GitHub secrets (repo Settings > Secrets and variables):
+#      - CLOUDFLARE_API_TOKEN: an API token with KV write on the
+#        account (Storage: KV Edit). Do not commit the token.
+#      - CLOUDFLARE_ACCOUNT_ID: the Cloudflare account id.
+#    CE_CONFIG_KV_ID defaults to the console CONFIG_KV
+#    (d73105bd6b1449caa8a31abcaaaa209b); override it as a secret
+#    only if the namespace changes.
+# 4. Add the tenants/corpus/history inputs as files in the repo
+#    (tools/context-engine/inputs/) or extend the runner to fetch
+#    them. The workflow below runs with no input files, which
+#    treats every tenant as new (sector baseline + sector kit
+#    families from an empty corpus). To use real history and
+#    corpus, add the files and pass --history-file and
+#    --corpus-file.
+#
+# Manual run: Actions tab > "Context-engine daily profiles" >
+# Run workflow. The first run writes one profile per tenant with
+# version 1 and a computed timestamp. Confirm in the console that
+# the tenant detail view shows the profile, and that the
+# resolved-policy response carries risk_profile.
+#
+# No live profile is served until the Step 6 Worker patch is
+# deployed. Deploy the Worker first, then enable this workflow.
+
+name: Context-engine daily profiles
+
+on:
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+
+jobs:
+  daily-profiles:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run daily profile job (dry run first, then write)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CE_CONFIG_KV_ID: ${{ secrets.CE_CONFIG_KV_ID }}
+        run: |
+          cd tools/context-engine
+          python3 context-engine-step7-runner-2026-11-08.py --corpus-file tools/context-engine/context-engine-step7-corpus-default-2026-11-08.json --dry-run
+          python3 context-engine-step7-runner-2026-11-08.py --corpus-file tools/context-engine/context-engine-step7-corpus-default-2026-11-08.json

@@ -2596,6 +2596,8 @@ curl -X POST https://api.relayshield.net/v1/webhook/configure \
       <a href="https://mcpfw.relayshield.net" style="display:block;margin-top:1rem;background:var(--accent);border:1px solid var(--accent);color:#fff;text-align:center;padding:.5rem;border-radius:6px;font-size:.85rem;font-weight:600;text-decoration:none">Subscribe via the console</a>
     </div>
   </div>
+  <h3 id="pii-redaction" style="margin-top:1.5rem;font-size:1.05rem">PII redaction, built in</h3>
+  <p style="color:var(--muted);font-size:.95rem;margin:.5rem 0 1.25rem">The Hosted MCP Proxy Firewall now redacts PII and secrets from AI agent traffic in both directions: every tool call going out and every tool result coming back is screened, and sensitive values are replaced with redaction tokens before the agent sees them. Email addresses, phone numbers, Social Security numbers, credit card numbers, API keys and secrets, and crypto wallet addresses are redacted, and the raw values never reach the audit log. IP addresses are redacted only when the threat-intelligence corpus flags them. Redaction is opt-in per tenant, off by default, and included in your existing license at no extra charge. Enable it per PII type in the console Policies tab.</p>
   <p style="margin-top:1rem;font-size:.88rem;color:var(--muted)">Read the launch post on <a href="https://blog.relayshield.net/2026-11-13-hosted-mcp-proxy-firewall" style="color:var(--accent)">blog.relayshield.net</a>. Questions: <a href="mailto:support@relayshield.net" style="color:var(--accent)">support@relayshield.net</a>.</p>
 </div>
 

@@ -195,6 +195,7 @@ ${body}
      for breaches, infostealer logs and SIM-swap attempts, and alert you in
      that chat.</p>` : ``}
 </div></footer>
+<!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "bf072d561666486ca722049ff21a3c4d"}'></script><!-- End Cloudflare Web Analytics -->
 </body></html>`;
 }
 

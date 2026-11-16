@@ -68,9 +68,13 @@ What it does, in order:
         deleted automatically on a health-poll timeout; it is left
         running for diagnosis. No welcome email is sent on failure.
 
-Actions "terminate" and "sweep" are NOT implemented here; they belong
-to Step 5 (cancellation flow / daily sweeper). Invoking this Lambda
-with another action raises NotImplementedError.
+Actions "terminate" and "sweep" (Step 5): "terminate" tears down one
+tenant immediately (EC2 instance, Elastic IP, DNS record, secret, CONFIG_KV
+status, registry marked "terminated"); "sweep" scans the registry for
+records with status "terminating" whose terminate_after deadline has
+passed and terminates each one. A daily EventBridge rule invokes the
+sweep. Invoking this Lambda with any other action raises
+NotImplementedError.
 
 Secrets: this module never logs a secret value (proxy token, license
 key, Cloudflare token, signing key). Logs carry only ids, statuses,
@@ -84,7 +88,10 @@ import hashlib
 import json
 import os
 import secrets
+import socket
+import ssl
 import time
+import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -118,6 +125,10 @@ CLOUDFLARE_API_BASE = "https://api.cloudflare.com/client/v4"
 CONFIG_KV_NAMESPACE_ID = "d73105bd6b1449caa8a31abcaaaa209b"
 
 SES_SENDER = "relayshieldadmin@gmail.com"
+# Console URL for tenant login and the one-time setup link.
+CONSOLE_URL = "https://mcpfw.relayshield.net"
+# One-time console setup token lifetime (72 hours, single-use).
+SETUP_TOKEN_TTL_SECONDS = 72 * 3600
 # Customer-facing support address. The From stays the verified SES
 # identity above (relayshield.net is not a verified SES sender, so
 # sending From support@ would fail delivery). Replies go to support@
@@ -138,6 +149,15 @@ DEFAULT_UPSTREAM_URL = "https://relayshieldadmin-relayshield-free-mcp.hf.space/m
 HEALTH_TIMEOUT_SECONDS = 600
 HEALTH_INTERVAL_SECONDS = 15
 HEALTH_PATH = "/_rs/health"
+
+# Step 6: provision retry. Up to 3 attempts per invocation; a failed
+# attempt cleans up its own instance/EIP/DNS before the next try.
+# On final failure the Lambda sends an admin alert and attempts a
+# first-month refund (best-effort) so the customer is not charged for
+# a proxy that was never delivered.
+PROVISION_MAX_ATTEMPTS = 3
+ADMIN_ALERT_EMAIL = "relayshieldadmin@gmail.com"
+STRIPE_SECRET_KEY_NAME = "relayshield/stripe_secret_key"
 
 # A "provisioning" record older than this is stale (a crashed or timed
 # out attempt) and no longer blocks a retry.
@@ -160,6 +180,7 @@ _TABLE = _DYNAMODB.Table(REGISTRY_TABLE)
 _SECRETS = boto3.client("secretsmanager", region_name=REGION)
 _EC2 = boto3.client("ec2", region_name=REGION)
 _SES = boto3.client("ses", region_name=REGION)
+_SSM = boto3.client("ssm", region_name=REGION)
 
 
 def _log(message):
@@ -839,6 +860,21 @@ def _upsert_dns_record(token, name, content):
     return record_id
 
 
+def _delete_dns_record(token, name):
+    """Delete the A record for the name, if it exists. Returns True
+    when a record was deleted, False when there was none. Never raises
+    for a missing record; other Cloudflare errors propagate."""
+    existing_id = _find_dns_record_id(token, name)
+    if not existing_id:
+        _log("no DNS record for %s to delete" % name)
+        return False
+    _cloudflare_request(
+        token, "DELETE",
+        "/zones/%s/dns_records/%s" % (CLOUDFLARE_ZONE_ID, existing_id))
+    _log("deleted DNS record %s for %s" % (existing_id, name))
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Cloudflare KV (CONFIG_KV display cache for the console, Step 7)
 # ---------------------------------------------------------------------------
@@ -897,19 +933,194 @@ def _write_config_kv(token, tenant_id, proxy_url, status):
     return True
 
 
+
+def _config_kv_put(token, key, value_dict):
+    """PUT an arbitrary key into CONFIG_KV. Used for the one-time
+    console setup token ("setup-token:<token>") and the minimal
+    tenant record ("tenant:<tenant-id>"). Returns True on success.
+    Raises on failure; callers decide whether it is fatal."""
+    path = ("/accounts/%s/storage/kv/namespaces/%s/values/%s"
+            % (CLOUDFLARE_ACCOUNT_ID, CONFIG_KV_NAMESPACE_ID,
+               urllib.parse.quote(key, safe="")))
+    url = CLOUDFLARE_API_BASE + path
+    data = json.dumps(value_dict, sort_keys=True).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method="PUT")
+    req.add_header("Authorization", "Bearer " + token)
+    req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")
+        raise RuntimeError(
+            "CONFIG_KV put for %s failed: HTTP %s: %s"
+            % (key, exc.code, detail)) from exc
+    if not payload.get("success", False):
+        raise RuntimeError(
+            "CONFIG_KV put for %s failed: %s"
+            % (key, payload.get("errors")))
+    return True
+
+
+def _create_console_setup(cf_token, tenant_id, email, stripe_customer_id,
+                          plan):
+    """Create a one-time console setup token in CONFIG_KV and return
+    the setup URL, or None on failure (never raises: a setup failure
+    must not fail the provision; the founder can re-issue it with
+    the resend_setup action). The token is URL-safe so it can go in
+    a link. The console redeems it once to create the client_admin
+    user and mint a session. 72-hour expiry, single-use."""
+    token = secrets.token_urlsafe(32)
+    now = datetime.datetime.now(datetime.timezone.utc)
+    expires = now + datetime.timedelta(seconds=SETUP_TOKEN_TTL_SECONDS)
+    record = {
+        "username": email.lower().strip(),
+        "tenant_id": tenant_id,
+        "stripe_customer_id": stripe_customer_id or "",
+        "plan": plan,
+        "created_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "expires_at": expires.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "used": False,
+    }
+    try:
+        _config_kv_put(cf_token, "setup-token:" + token, record)
+    except Exception as exc:
+        _log("console setup token creation failed for tenant %s: %s"
+             % (tenant_id, exc))
+        return None
+    _log("created console setup token for tenant %s (expires %s)"
+         % (tenant_id, record["expires_at"]))
+    return CONSOLE_URL + "/?setup=" + token
+
+
+def _write_tenant_record(cf_token, tenant_id, email, stripe_customer_id,
+                         subscription_id, plan, proxy_url):
+    """Create the minimal "tenant:" record in CONFIG_KV so the tenant
+    appears in the console tenant list and the usage/policy endpoints
+    work. A provisioned direct dev tenant otherwise has no "tenant:"
+    record (only the bare-key hosted proxy fields), so the console
+    router returns 404 for it. Best-effort: returns True on success,
+    False on failure, never raises."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    record = {
+        "type": "tenant",
+        "name": email,
+        "parent_customer_id": "",
+        "status": "active",
+        "created_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "screening": {"ssrf": True, "path_traversal": True,
+                      "threat_intel": True, "command_injection": True},
+        "policies": {"quarantine_violation_threshold": 5,
+                     "confidence_block_below": 0.60,
+                     "confidence_flag_below": 0.85},
+        "stripe_customer_id": stripe_customer_id or "",
+        "subscription_id": subscription_id or "",
+        "plan": plan,
+        "hosted_proxy_url": proxy_url,
+        "hosted_proxy_status": "active",
+        "default_location_id": "",
+        "usage_threshold_calls": 20000,
+        "usage_overage_rate_per_call": 0.002,
+    }
+    try:
+        _config_kv_put(cf_token, "tenant:" + tenant_id, record)
+    except Exception as exc:
+        _log("tenant record write failed for tenant %s: %s"
+             % (tenant_id, exc))
+        return False
+    _log("wrote tenant record for %s" % tenant_id)
+    return True
+
 # ---------------------------------------------------------------------------
 # Health poll
 # ---------------------------------------------------------------------------
 
-def _wait_for_health(subdomain):
+def _health_error_stage(exc):
+    """Classify a health-poll failure from its traceback frames.
+    Returns one of "dns", "connect", "tls", "http", "other".
+    urllib collapses everything into str(exc), which is why the Nov 13
+    logs only show "[Errno 16] Device or resource busy" with no clue
+    which syscall raised it."""
+    # Reason chain first: urllib wraps the real OSError in
+    # exc.reason, and the traceback of a wrapped error does not
+    # always name the syscall (a URLError raised by a stub, or by
+    # urlopen itself, has no "connect" frame).
+    reason = getattr(exc, "reason", None)
+    if isinstance(reason, socket.gaierror):
+        return "dns"
+    if isinstance(reason, ConnectionRefusedError):
+        return "connect"
+    if isinstance(reason, ssl.SSLError):
+        return "tls"
+    tb = traceback.format_exc()
+    if "getaddrinfo" in tb or "gaierror" in tb:
+        return "dns"
+    if "do_handshake" in tb or "SSLError" in tb or "ssl" in type(exc).__module__:
+        return "tls"
+    if "connect" in tb:
+        return "connect"
+    if isinstance(exc, urllib.error.HTTPError):
+        return "http"
+    return "other"
+
+
+def _exc_errno(exc):
+    """The errno of a health-poll failure. urllib wraps the real
+    OSError in exc.reason, so exc.errno alone is None for URLError
+    (that is why the first test of this patch logged errno=None)."""
+    return (getattr(exc, "errno", None)
+            or getattr(getattr(exc, "reason", None), "errno", None))
+
+
+def _millis_remaining(context):
+    """Lambda milliseconds left in this invocation, or None when the
+    context does not expose it (local tests). Never raises."""
+    try:
+        if context is not None and hasattr(context, "get_remaining_time_in_millis"):
+            return context.get_remaining_time_in_millis()
+    except Exception:
+        pass
+    return None
+
+
+def _health_deadline(context):
+    """Monotonic deadline for the health poll: Lambda time remaining
+    minus 90s safety for cleanup / mark-failed / admin alert /
+    refund. Returns None when the context does not expose remaining
+    time (local tests), in which case the full 600s poll applies."""
+    remaining = _millis_remaining(context)
+    if remaining is None:
+        return None
+    return time.monotonic() + max(0, remaining / 1000.0 - 90.0)
+
+
+def _wait_for_health(subdomain, deadline_monotonic=None):
     """Poll the health endpoint (no auth) until HTTP 200, up to 10
     minutes. DNS NXDOMAIN, connection refused, TLS errors, and
     non-200 responses in the first minutes are "not ready yet", not
     failure (Caddy is still obtaining its certificate and DNS is
     still propagating). Returns True on HTTP 200, False on timeout."""
     url = "https://" + subdomain + HEALTH_PATH
-    attempts = HEALTH_TIMEOUT_SECONDS // HEALTH_INTERVAL_SECONDS
+    try:
+        infos = socket.getaddrinfo(subdomain, 443, proto=socket.IPPROTO_TCP)
+        _log("health check for %s resolves to %s"
+             % (subdomain, sorted({i[4][0] for i in infos})))
+    except Exception as exc:
+        _log("health check for %s DNS resolution failed: %s "
+             "(stage=dns) %s" % (subdomain, exc, traceback.format_exc()))
+    budget = HEALTH_TIMEOUT_SECONDS
+    if deadline_monotonic is not None:
+        budget = max(0, min(budget,
+                            int(deadline_monotonic - time.monotonic())))
+        _log("health check for %s poll budget capped to %d seconds "
+             "by Lambda deadline" % (subdomain, budget))
+    attempts = budget // HEALTH_INTERVAL_SECONDS
     for attempt in range(1, attempts + 1):
+        if (deadline_monotonic is not None
+                and time.monotonic() >= deadline_monotonic):
+            _log("health check for %s stopping: Lambda deadline "
+                 "reached" % subdomain)
+            return False
         try:
             req = urllib.request.Request(url, method="GET")
             with urllib.request.urlopen(req, timeout=10) as resp:
@@ -922,12 +1133,15 @@ def _wait_for_health(subdomain):
                 _log("health check for %s returned HTTP %s on attempt %d"
                      % (subdomain, status, attempt))
         except Exception as exc:
-            _log("health check for %s not ready on attempt %d: %s"
-                 % (subdomain, attempt, exc))
+            _log("health check for %s not ready on attempt %d: %s "
+                 "(stage=%s, type=%s, errno=%s) traceback: %s"
+                 % (subdomain, attempt, exc, _health_error_stage(exc),
+                    type(exc).__name__, _exc_errno(exc),
+                    traceback.format_exc()))
         if attempt < attempts:
             time.sleep(HEALTH_INTERVAL_SECONDS)
     _log("health check for %s did not return 200 within %d seconds"
-         % (subdomain, HEALTH_TIMEOUT_SECONDS))
+         % (subdomain, budget))
     return False
 
 
@@ -935,10 +1149,12 @@ def _wait_for_health(subdomain):
 # SES welcome email
 # ---------------------------------------------------------------------------
 
-def _send_welcome_email(email, proxy_url, proxy_token):
+def _send_welcome_email(email, proxy_url, proxy_token, setup_url=None):
     """Send the provisioning email. The proxy token is included here
     exactly once so the tenant can configure it; it is never logged
-    and never returned by this Lambda."""
+    and never returned by this Lambda. When setup_url is given, the
+    email also carries the console login (one-time setup link, 72
+    hours, single-use)."""
     body = (
         "Your RelayShield hosted MCP Proxy Firewall is ready.\n"
         "\n"
@@ -951,8 +1167,26 @@ def _send_welcome_email(email, proxy_url, proxy_token):
         "\n"
         "Keep the token secret. Anyone with it can use your proxy.\n"
         "\n"
-        "Support: " + SUPPORT_EMAIL + "\n"
+        "Manage your proxy in the RelayShield console:\n"
+        "Console: " + CONSOLE_URL + "\n"
+        "Username: " + email + "\n"
     )
+    if setup_url:
+        body += (
+            "Set up your console password (one-time link, expires in "
+            "72 hours):\n"
+            "  " + setup_url + "\n"
+            "\n"
+            "Click the link above, then set your password in the "
+            "\"Set Up Your Console Access\" form at the top of the "
+            "page. Do not use the Sign In form until your password "
+            "is set.\n"
+            "\n"
+            "After setup, sign in at the console to see your usage, "
+            "billing, policy, event logs, and hosted proxy status.\n"
+            "\n"
+        )
+    body += "Support: " + SUPPORT_EMAIL + "\n"
     _SES.send_email(
         Source=SES_SENDER,
         Destination={"ToAddresses": [email]},
@@ -995,6 +1229,455 @@ def _resolve_plan(event):
         "event must carry a valid plan (sme or msp) or a known price_id")
 
 
+def _release_eip_by_ip(public_ip):
+    """Release the Elastic IP with this public IP, if it exists.
+    Looks up the AllocationId via describe-addresses. Returns True
+    when released, False when there was no such EIP. Never raises for
+    a missing EIP."""
+    if not public_ip:
+        return False
+    try:
+        resp = _EC2.describe_addresses(PublicIps=[public_ip])
+    except Exception as exc:
+        _log("describe-addresses failed for %s: %s" % (public_ip, exc))
+        return False
+    addresses = resp.get("Addresses") or []
+    if not addresses:
+        _log("no Elastic IP found for %s" % public_ip)
+        return False
+    allocation_id = addresses[0].get("AllocationId")
+    if not allocation_id:
+        return False
+    try:
+        _EC2.release_address(AllocationId=allocation_id)
+    except Exception as exc:
+        _log("release-address failed for %s (%s): %s"
+             % (public_ip, allocation_id, exc))
+        return False
+    _log("released Elastic IP %s (%s)" % (public_ip, allocation_id))
+    return True
+
+
+def _delete_tenant_secret(secret_name):
+    """Delete the per-tenant secret. Returns True when deleted, False
+    when there was none. Never raises for a missing secret."""
+    if not secret_name:
+        return False
+    try:
+        _SECRETS.delete_secret(
+            SecretId=secret_name, ForceDeleteWithoutRecovery=True)
+    except _SECRETS.exceptions.ResourceNotFoundException:
+        _log("no secret %s to delete" % secret_name)
+        return False
+    except Exception as exc:
+        _log("delete-secret failed for %s: %s" % (secret_name, exc))
+        return False
+    _log("deleted secret %s" % secret_name)
+    return True
+
+
+def _terminate_tenant(tenant_id):
+    """Tear down one tenant immediately: EC2 instance, Elastic IP, DNS
+    record, secret, CONFIG_KV status, registry marked "terminated".
+    Each step is best-effort (a failure is logged, not fatal) except
+    the final registry mark. Returns the public result dict. A missing
+    record returns status "not_found"; an already-terminated record
+    returns its existing result."""
+    record = _get_record(tenant_id)
+    if not record:
+        _log("terminate: no record for tenant %s" % tenant_id)
+        return {"tenant_id": tenant_id, "instance_id": None,
+                "subdomain": None, "proxy_url": None, "status": "not_found"}
+    if record.get("status") == "terminated":
+        _log("tenant %s already terminated" % tenant_id)
+        return _public_result(record)
+
+    instance_id = record.get("instance_id")
+    public_ip = record.get("eip") or record.get("public_ip") or record.get("elastic_ip")
+    subdomain = record.get("subdomain") or ""
+    secret_name = record.get("hosted_secret") or ("relayshield/hosted/" + tenant_id)
+
+    _log("terminating tenant %s (instance %s)" % (tenant_id, instance_id))
+    if instance_id:
+        try:
+            _EC2.terminate_instances(InstanceIds=[instance_id])
+            _log("terminate-instances issued for %s" % instance_id)
+        except Exception as exc:
+            _log("terminate-instances failed for %s: %s" % (instance_id, exc))
+    if public_ip:
+        _release_eip_by_ip(public_ip)
+    if subdomain:
+        try:
+            cf_token = _load_cloudflare_token()
+            _delete_dns_record(cf_token, subdomain)
+        except Exception as exc:
+            _log("DNS delete failed for %s: %s" % (subdomain, exc))
+    _delete_tenant_secret(secret_name)
+    try:
+        cf_token = _load_cloudflare_token()
+        _write_config_kv(cf_token, tenant_id,
+                         record.get("url") or ("https://" + subdomain if subdomain else ""),
+                         "terminated")
+    except Exception as exc:
+        _log("CONFIG_KV terminated write failed for %s: %s" % (tenant_id, exc))
+
+    _update_record(tenant_id, status="terminated", terminated_at=_now_ts())
+    record = _get_record(tenant_id)
+    _log("terminate complete for tenant %s" % tenant_id)
+    return _public_result(record)
+
+
+def _sweep_terminating():
+    """Terminate every registry record with status "terminating" whose
+    terminate_after deadline has passed. Returns a summary dict
+    {terminated: [tenant_ids], skipped: [tenant_ids], errors: {tid: reason}}.
+    Records not yet past their deadline are skipped, not terminated."""
+    now_ts = _now_ts()
+    terminated = []
+    skipped = []
+    errors = {}
+    try:
+        resp = _TABLE.scan(
+            FilterExpression="#s = :s",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={":s": "terminating"},
+        )
+    except Exception as exc:
+        _log("sweep scan failed: %s" % exc)
+        return {"terminated": terminated, "skipped": skipped,
+                "errors": {"scan": str(exc)}}
+    items = resp.get("Items") or []
+    # Paginate the scan (the table is small, but be correct).
+    while "LastEvaluatedKey" in resp:
+        resp = _TABLE.scan(
+            FilterExpression="#s = :s",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={":s": "terminating"},
+            ExclusiveStartKey=resp["LastEvaluatedKey"],
+        )
+        items.extend(resp.get("Items") or [])
+    for item in items:
+        tenant_id = item.get("tenant_id")
+        terminate_after = item.get("terminate_after")
+        if terminate_after is None:
+            skipped.append(tenant_id)
+            continue
+        try:
+            deadline = int(terminate_after)
+        except Exception:
+            skipped.append(tenant_id)
+            continue
+        if deadline > now_ts:
+            skipped.append(tenant_id)
+            continue
+        try:
+            _terminate_tenant(tenant_id)
+            terminated.append(tenant_id)
+        except Exception as exc:
+            errors[tenant_id] = str(exc)
+            _log("sweep terminate failed for %s: %s" % (tenant_id, exc))
+    _log("sweep complete: terminated %d, skipped %d, errors %d"
+         % (len(terminated), len(skipped), len(errors)))
+    return {"terminated": terminated, "skipped": skipped, "errors": errors}
+
+
+def _send_admin_alert(tenant_id, subscription_id, reason):
+    """Email the admin that a provision failed after all retries.
+    Best-effort; a failure here does not mask the original error."""
+    subject = "Hosted proxy provision FAILED for %s" % tenant_id
+    body = ("RelayShield hosted proxy provisioning failed after %d attempts.\n\n"
+            "Tenant: %s\nSubscription: %s\nReason: %s\n\n"
+            "The customer has not been provisioned. Check CloudWatch "
+            "/aws/lambda/relayshield-hosted-provision for detail."
+            % (PROVISION_MAX_ATTEMPTS, tenant_id, subscription_id, reason))
+    try:
+        _SES.send_email(
+            Source="RelayShield <relayshieldadmin@gmail.com>",
+            Destination={"ToAddresses": [ADMIN_ALERT_EMAIL]},
+            Message={
+                "Subject": {"Data": subject, "Charset": "UTF-8"},
+                "Body": {"Text": {"Data": body, "Charset": "UTF-8"}},
+            },
+        )
+        _log("admin alert sent for failed provision of %s" % tenant_id)
+        return True
+    except Exception as exc:
+        _log("admin alert failed for %s: %s" % (tenant_id, exc))
+        return False
+
+
+def _stripe_api_get(path, stripe_secret_key):
+    """GET a Stripe API path. Returns the parsed JSON dict."""
+    credentials = base64.b64encode(f"{stripe_secret_key}:".encode()).decode()
+    req = urllib.request.Request(
+        "https://api.stripe.com" + path,
+        headers={"Authorization": f"Basic {credentials}"},
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return json.loads(resp.read())
+
+
+def _stripe_api_post(path, stripe_secret_key, data):
+    """POST form-encoded data to a Stripe API path. Returns parsed JSON."""
+    credentials = base64.b64encode(f"{stripe_secret_key}:".encode()).decode()
+    body = urllib.parse.urlencode(data).encode()
+    req = urllib.request.Request(
+        "https://api.stripe.com" + path,
+        data=body,
+        headers={"Authorization": f"Basic {credentials}",
+                 "Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return json.loads(resp.read())
+
+
+def _refund_first_invoice(subscription_id):
+    """Refund the first-month payment for a subscription whose provision
+    failed after all retries. Finds the subscription's latest invoice,
+    takes its charge, and refunds it. Best-effort: returns the refund
+    id on success, None when there is nothing to refund or the refund
+    fails. Never raises."""
+    try:
+        stripe_secret_key = _load_secret(STRIPE_SECRET_KEY_NAME)
+    except Exception as exc:
+        _log("refund: could not load Stripe secret key: %s" % exc)
+        return None
+    try:
+        sub = _stripe_api_get("/v1/subscriptions/%s" % subscription_id,
+                              stripe_secret_key)
+        invoice_id = sub.get("latest_invoice")
+        if not invoice_id:
+            _log("refund: no latest invoice for %s" % subscription_id)
+            return None
+        invoice = _stripe_api_get("/v1/invoices/%s" % invoice_id,
+                                  stripe_secret_key)
+        charge_id = invoice.get("charge")
+        if not charge_id:
+            _log("refund: invoice %s has no charge" % invoice_id)
+            return None
+        if invoice.get("amount_paid", 0) <= 0:
+            _log("refund: invoice %s amount_paid is 0, nothing to refund"
+                 % invoice_id)
+            return None
+        refund = _stripe_api_post(
+            "/v1/refunds", stripe_secret_key,
+            {"charge": charge_id, "reason": "requested_by_customer"})
+        refund_id = refund.get("id")
+        _log("refund: refunded charge %s for subscription %s (refund %s)"
+             % (charge_id, subscription_id, refund_id))
+        return refund_id
+    except Exception as exc:
+        _log("refund failed for subscription %s: %s" % (subscription_id, exc))
+        return None
+
+
+def _load_secret(secret_name):
+    """Fetch a Secrets Manager secret string value."""
+    resp = _SECRETS.get_secret_value(SecretId=secret_name)
+    return resp.get("SecretString") or ""
+
+
+def _diagnose_tenant(tenant_id):
+    """Read-only diagnosis of a (possibly failed) tenant. Returns the
+    registry record, EC2 instance state + status checks, the EC2
+    console output tail, and, when SSM is available, Caddy status
+    plus a local health curl on the instance. Never launches,
+    terminates, or modifies anything. SSM failure is reported, not
+    raised."""
+    record = _get_record(tenant_id) or {}
+    result = {"tenant_id": tenant_id, "registry": record,
+              "instance": {}, "console_output_tail": "",
+              "ssm": {"available": False, "output": ""}}
+    instance_id = record.get("instance_id")
+    if not instance_id:
+        result["error"] = "no instance_id in registry record"
+        return result
+    try:
+        resp = _EC2.describe_instances(InstanceIds=[instance_id])
+        inst = resp["Reservations"][0]["Instances"][0]
+        result["instance"] = {
+            "state": inst["State"]["Name"],
+            "public_ip": inst.get("PublicIpAddress"),
+            "private_ip": inst.get("PrivateIpAddress"),
+            "launch_time": str(inst.get("LaunchTime")),
+        }
+        try:
+            checks = _EC2.describe_instance_status(
+                InstanceIds=[instance_id])
+            st = checks.get("InstanceStatuses", [{}])[0]
+            result["instance"]["system_status"] = st.get("SystemStatus", {}).get("Status")
+            result["instance"]["instance_status"] = st.get("InstanceStatus", {}).get("Status")
+        except Exception as exc:
+            result["instance"]["status_error"] = str(exc)
+    except Exception as exc:
+        result["instance_error"] = str(exc)
+        return result
+    try:
+        out = _EC2.get_console_output(InstanceId=instance_id, Latest=True)
+        result["console_output_tail"] = (out.get("Output") or "")[-4000:]
+    except Exception as exc:
+        result["console_output_error"] = str(exc)
+    try:
+        cmd = ("systemctl is-active caddy; "
+               "curl -s -m 5 http://127.0.0.1:8090/_rs/health || echo CURL_FAILED; "
+               "journalctl -u caddy -n 30 --no-pager || true")
+        resp = _SSM.send_command(
+            InstanceIds=[instance_id],
+            DocumentName="AWS-RunShellScript",
+            Parameters={"commands": [cmd]},
+            TimeoutSeconds=60)
+        command_id = resp["Command"]["CommandId"]
+        for _ in range(12):
+            time.sleep(5)
+            inv = _SSM.get_command_invocation(
+                CommandId=command_id, InstanceId=instance_id)
+            if inv.get("Status") in ("Success", "Failed", "TimedOut", "Cancelled"):
+                result["ssm"] = {"available": True,
+                                 "status": inv.get("Status"),
+                                 "output": (inv.get("StandardOutputContent") or "")[-4000:],
+                                 "error": (inv.get("StandardErrorContent") or "")[-2000:]}
+                break
+        else:
+            result["ssm"] = {"available": True, "status": "poll-timeout",
+                             "output": ""}
+    except Exception as exc:
+        result["ssm"] = {"available": False, "output": str(exc)}
+    return result
+
+
+def _cleanup_attempt_resources(instance_id, allocation_id, eip, subdomain):
+    """Tear down the resources of a single failed provision attempt so
+    the next retry starts clean. Best-effort; every step is logged
+    and never raises."""
+    if instance_id:
+        try:
+            _EC2.terminate_instances(InstanceIds=[instance_id])
+            _log("retry cleanup: terminated instance %s" % instance_id)
+        except Exception as exc:
+            _log("retry cleanup: terminate failed for %s: %s" % (instance_id, exc))
+    if allocation_id:
+        try:
+            _EC2.release_address(AllocationId=allocation_id)
+            _log("retry cleanup: released EIP %s" % allocation_id)
+        except Exception as exc:
+            _log("retry cleanup: release failed for %s: %s" % (allocation_id, exc))
+    elif eip:
+        _release_eip_by_ip(eip)
+    if subdomain:
+        try:
+            cf_token = _load_cloudflare_token()
+            _delete_dns_record(cf_token, subdomain)
+        except Exception as exc:
+            _log("retry cleanup: DNS delete failed for %s: %s" % (subdomain, exc))
+
+
+
+def _rotate_proxy_token(tenant_id):
+    """Rotate the tenant's proxy token. Order matters, and the secret
+    is the source of truth:
+      1. Read the current secret (for rollback) and the registry
+         record (for the instance id).
+      2. Generate the new token and update the secret.
+      3. SSM Run Command on the instance: rewrite /etc/caddy/caddy.env
+         with the new token and reload Caddy (systemd reads the
+         updated env file for the reload, so the new token takes
+         effect). Poll for completion.
+      4. On SSM failure, roll the secret back to the old token and
+         raise, so the old token keeps working (safe failure).
+    Returns {tenant_id, instance_id, proxy_token}. The new token is
+    returned once so the console can show it to the tenant; it is
+    never logged. Requires the SSM IAM prerequisites (see the module
+    docstring in the patch script)."""
+    record = _get_record(tenant_id)
+    if not record or record.get("status") != "active":
+        raise ValueError("tenant %s is not active" % tenant_id)
+    instance_id = record.get("instance_id")
+    if not instance_id:
+        raise ValueError("tenant %s has no instance" % tenant_id)
+    secret_name = "relayshield/hosted/" + tenant_id
+    current = json.loads(_get_secret_string(secret_name))
+    old_token = current.get("proxy_token")
+    if not old_token:
+        raise ValueError("tenant %s secret has no proxy_token" % tenant_id)
+    new_token = secrets.token_hex(16)
+    updated = dict(current)
+    updated["proxy_token"] = new_token
+    _create_or_update_tenant_secret(secret_name, updated)
+    _log("rotated secret for tenant %s; reloading Caddy on %s"
+         % (tenant_id, instance_id))
+    script = (
+        "set -e\n"
+        "printf 'PROXY_TOKEN=%s\n' '" + new_token + "' > /etc/caddy/caddy.env\n"
+        "chown root:caddy /etc/caddy/caddy.env\n"
+        "chmod 0600 /etc/caddy/caddy.env\n"
+        "systemctl reload caddy.service\n"
+        "systemctl is-active caddy.service\n"
+    )
+    try:
+        cmd = _SSM.send_command(
+            InstanceIds=[instance_id],
+            DocumentName="AWS-RunShellScript",
+            Parameters={"commands": [script]},
+            TimeoutSeconds=120,
+        )
+        command_id = cmd["Command"]["CommandId"]
+    except Exception as exc:
+        _log("SSM send_command failed for tenant %s: %s"
+             % (tenant_id, exc))
+        _create_or_update_tenant_secret(secret_name, current)
+        raise RuntimeError("SSM send_command failed: %s" % exc) from exc
+    for _ in range(12):
+        time.sleep(10)
+        try:
+            inv = _SSM.get_command_invocation(
+                CommandId=command_id, InstanceId=instance_id)
+        except Exception as exc:
+            _log("SSM get_command_invocation failed for tenant %s: %s"
+                 % (tenant_id, exc))
+            continue
+        status = inv.get("Status")
+        if status == "Success":
+            _log("rotated proxy token for tenant %s (instance %s)"
+                 % (tenant_id, instance_id))
+            return {"tenant_id": tenant_id, "instance_id": instance_id,
+                    "proxy_token": new_token}
+        if status in ("Failed", "Cancelled", "TimedOut"):
+            detail = (inv.get("StandardErrorContent") or "")[:500]
+            _log("SSM reload failed for tenant %s: %s %s"
+                 % (tenant_id, status, detail))
+            _create_or_update_tenant_secret(secret_name, current)
+            raise RuntimeError(
+                "Caddy reload failed on the instance (%s): %s"
+                % (status, detail))
+    _create_or_update_tenant_secret(secret_name, current)
+    raise RuntimeError("Caddy reload timed out on the instance")
+
+
+def _resend_setup(tenant_id, email):
+    """Regenerate a console setup token and re-send the welcome email.
+    For when a setup link expired (72h) or was never used. Requires
+    the tenant to be active. Returns {tenant_id, setup_url}."""
+    record = _get_record(tenant_id)
+    if not record or record.get("status") != "active":
+        raise ValueError("tenant %s is not active" % tenant_id)
+    cf_token = _load_cloudflare_token()
+    proxy_url = record.get("url") or ("https://" + (record.get("subdomain") or ""))
+    proxy_token = ""
+    try:
+        secret = json.loads(_get_secret_string(
+            "relayshield/hosted/" + tenant_id))
+        proxy_token = secret.get("proxy_token") or ""
+    except Exception as exc:
+        _log("could not read tenant secret for resend_setup %s: %s"
+             % (tenant_id, exc))
+    setup_url = _create_console_setup(
+        cf_token, tenant_id, email,
+        record.get("stripe_customer_id") or "", record.get("plan") or "sme")
+    _send_welcome_email(email, proxy_url, proxy_token,
+                        setup_url=setup_url)
+    return {"tenant_id": tenant_id, "setup_url": setup_url}
+
 def lambda_handler(event, context):
     """Provision a hosted MCP Proxy Firewall instance for one tenant.
 
@@ -1004,10 +1687,32 @@ def lambda_handler(event, context):
     failure after marking the registry record "failed".
     """
     action = event.get("action", "provision")
+    if action == "terminate":
+        tenant_id = event.get("tenant_id")
+        if not tenant_id:
+            raise ValueError("terminate requires tenant_id")
+        return _terminate_tenant(tenant_id)
+    if action == "sweep":
+        return _sweep_terminating()
+    if action == "rotate_token":
+        tenant_id = event.get("tenant_id")
+        if not tenant_id:
+            raise ValueError("rotate_token requires tenant_id")
+        return _rotate_proxy_token(tenant_id)
+    if action == "resend_setup":
+        tenant_id = event.get("tenant_id")
+        email = event.get("email") or event.get("customer_email")
+        if not tenant_id or not email:
+            raise ValueError("resend_setup requires tenant_id and email")
+        return _resend_setup(tenant_id, email)
+    if action == "diagnose":
+        tenant_id = event.get("tenant_id")
+        if not tenant_id:
+            raise ValueError("diagnose requires tenant_id")
+        return _diagnose_tenant(tenant_id)
     if action != "provision":
         raise NotImplementedError(
-            "action %r is not implemented in this Lambda; terminate "
-            "and sweep belong to Step 5" % action)
+            "action %r is not implemented in this Lambda" % action)
 
     tenant_id = event.get("tenant_id")
     subscription_id = event.get("subscription_id")
@@ -1044,79 +1749,149 @@ def lambda_handler(event, context):
         raise RuntimeError(
             "could not claim provisioning for tenant %s" % tenant_id)
 
-    # This invocation owns the provision. Any failure from here is
-    # recorded as "failed" and re-raised.
-    try:
-        # Proxy token (32 hex chars).
-        proxy_token = secrets.token_hex(16)
+    # This invocation owns the provision. Up to PROVISION_MAX_ATTEMPTS
+    # attempts; a failed attempt cleans up its own instance/EIP/DNS
+    # before the next try. On final failure the record is marked
+    # "failed", an admin alert is sent, and a first-month refund is
+    # attempted (best-effort). Then the error is re-raised.
+    last_exc = None
+    for attempt in range(1, PROVISION_MAX_ATTEMPTS + 1):
+        # Attempt 1 always runs: a fresh invocation has 900s and one
+        # attempt costs at most 300s (instance wait) + 600s (poll),
+        # which just fits, and the poll itself is now deadline-capped
+        # (P3 above) so it stops 90s before the timeout. A retry
+        # attempt can only start if at least 180s remain; otherwise
+        # fail fast through the normal final-failure path (mark
+        # failed, admin alert, refund) instead of being killed
+        # silently mid-poll, which is what stranded
+        # tnt_test_tenant_login_002 on 2026-11-13 (invocation
+        # 21:04:48 UTC, attempt 2 launched 21:14:59, then nothing:
+        # no attempt 3, no alert, registry stuck provisioning).
+        if attempt > 1:
+            remaining = _millis_remaining(context)
+            if remaining is not None and remaining < 180000:
+                _log("provision for tenant %s: only %d ms remain, "
+                     "not starting retry attempt %d; failing fast so "
+                     "the admin alert fires"
+                     % (tenant_id, remaining, attempt))
+                last_exc = RuntimeError(
+                    "insufficient Lambda time remaining (%d ms) for "
+                    "provision attempt %d" % (remaining, attempt))
+                break
+        attempt_instance_id = None
+        attempt_allocation_id = None
+        attempt_eip = None
+        try:
+            _log("provision attempt %d/%d for tenant %s"
+                 % (attempt, PROVISION_MAX_ATTEMPTS, tenant_id))
+            # Proxy token (32 hex chars).
+            proxy_token = secrets.token_hex(16)
 
         # License, generated here (no license Lambda to invoke).
-        kid, signing_key = _load_signing_key()
-        license_exp = int(time.time()) + LICENSE_VALID_DAYS * 86400
-        license_key = _issue_license_key(
-            signing_key, kid, tenant_id, plan, license_exp, calls=None)
-        _log("issued license for tenant %s (plan %s, kid %s)"
-             % (tenant_id, plan, kid))
+            kid, signing_key = _load_signing_key()
+            license_exp = int(time.time()) + LICENSE_VALID_DAYS * 86400
+            license_key = _issue_license_key(
+                signing_key, kid, tenant_id, plan, license_exp, calls=None)
+            _log("issued license for tenant %s (plan %s, kid %s)"
+                 % (tenant_id, plan, kid))
 
-        # Per-tenant secret (created, or overwritten on a retry).
-        _create_or_update_tenant_secret(secret_name, {
-            "proxy_token": proxy_token,
-            "license_key": license_key,
-            "api_key": "",
-        })
+            # Per-tenant secret (created, or overwritten on a retry).
+            _create_or_update_tenant_secret(secret_name, {
+                "proxy_token": proxy_token,
+                "license_key": license_key,
+                "api_key": "",
+            })
 
-        # Elastic IP, then launch. The EIP is associated only after
-        # the instance is running.
-        allocation_id, eip = _allocate_eip()
-        user_data = _build_user_data(
-            tenant_id, subdomain, secret_name, upstream_url)
-        instance_id = _launch_instance(
-            tenant_id, subscription_id, user_data)
-        _wait_instance_running(instance_id)
-        _associate_eip(instance_id, allocation_id)
+            # Elastic IP, then launch. The EIP is associated only after
+            # the instance is running.
+            allocation_id, eip = _allocate_eip()
+            attempt_allocation_id = allocation_id
+            attempt_eip = eip
+            user_data = _build_user_data(
+                tenant_id, subdomain, secret_name, upstream_url)
+            instance_id = _launch_instance(
+                tenant_id, subscription_id, user_data)
+            attempt_instance_id = instance_id
+            _wait_instance_running(instance_id)
+            _associate_eip(instance_id, allocation_id)
 
-        # Record the instance while it is still provisioning.
-        _update_record(
-            tenant_id,
-            instance_id=instance_id,
-            public_ip=eip,
-            elastic_ip=eip,
-            eip=eip,
-            subdomain=subdomain,
-            url=proxy_url + "/",
-            ami_id=AMI_ID,
-            license_key_id=kid + ":" + tenant_id,
-            hosted_secret=secret_name,
-            status="provisioning")
+            # Record the instance while it is still provisioning.
+            _update_record(
+                tenant_id,
+                instance_id=instance_id,
+                public_ip=eip,
+                elastic_ip=eip,
+                eip=eip,
+                subdomain=subdomain,
+                url=proxy_url + "/",
+                ami_id=AMI_ID,
+                license_key_id=kid + ":" + tenant_id,
+                hosted_secret=secret_name,
+                status="provisioning")
 
-        # DNS A record (created, or updated on a retry).
-        cf_token = _load_cloudflare_token()
-        dns_record_id = _upsert_dns_record(cf_token, subdomain, eip)
-        _update_record(tenant_id, dns_record_id=dns_record_id)
+            # DNS A record (created, or updated on a retry).
+            cf_token = _load_cloudflare_token()
+            dns_record_id = _upsert_dns_record(cf_token, subdomain, eip)
+            _update_record(tenant_id, dns_record_id=dns_record_id)
 
-        # Health poll. DNS NXDOMAIN / TLS errors in the first minutes
-        # are "not ready yet". On timeout the instance is left running
-        # for diagnosis (it is NOT deleted here).
-        if not _wait_for_health(subdomain):
-            raise RuntimeError(
-                "health check for %s did not return 200 within %d "
-                "seconds" % (subdomain, HEALTH_TIMEOUT_SECONDS))
+            # Health poll. DNS NXDOMAIN / TLS errors in the first minutes
+            # are "not ready yet". On timeout the instance is left running
+            # for diagnosis (it is NOT deleted here).
+            if not _wait_for_health(subdomain, _health_deadline(context)):
+                raise RuntimeError(
+                    "health check for %s did not return 200 within %d "
+                    "seconds" % (subdomain, HEALTH_TIMEOUT_SECONDS))
 
-        # Active, then CONFIG_KV display cache, then welcome email.
-        # A CONFIG_KV failure does not fail the provision; the
-        # registry (DynamoDB) is the source of truth.
-        _update_record(tenant_id, status="active")
-        try:
-            _write_config_kv(cf_token, tenant_id, proxy_url, "active")
+            # Active, then CONFIG_KV display cache, then console
+            # access (setup token + tenant record), then welcome email.
+            # A CONFIG_KV failure does not fail the provision; the
+            # registry (DynamoDB) is the source of truth.
+            _update_record(tenant_id, status="active")
+            try:
+                _write_config_kv(cf_token, tenant_id, proxy_url, "active")
+            except Exception as exc:
+                _log("CONFIG_KV write failed for tenant %s: %s "
+                     "(registry is source of truth)" % (tenant_id, exc))
+            setup_url = _create_console_setup(
+                cf_token, tenant_id, email,
+                event.get("stripe_customer_id") or "", plan)
+            _write_tenant_record(
+                cf_token, tenant_id, email,
+                event.get("stripe_customer_id") or "", subscription_id,
+                plan, proxy_url)
+            _send_welcome_email(email, proxy_url, proxy_token,
+                                setup_url=setup_url)
+
+            record = _get_record(tenant_id)
+            _log("provision complete for tenant %s (instance %s, %s)"
+                 % (tenant_id, instance_id, proxy_url))
+            return _public_result(record)
         except Exception as exc:
-            _log("CONFIG_KV write failed for tenant %s: %s "
-                 "(registry is source of truth)" % (tenant_id, exc))
-        _send_welcome_email(email, proxy_url, proxy_token)
-
-        record = _get_record(tenant_id)
-        _log("provision complete for tenant %s (instance %s, %s)"
-             % (tenant_id, instance_id, proxy_url))
-        return _public_result(record)
-    except Exception as exc:
-        _mark_failed(tenant_id, exc)
-        raise
+            last_exc = exc
+            _log("provision attempt %d/%d failed for tenant %s: %s"
+                 % (attempt, PROVISION_MAX_ATTEMPTS, tenant_id, exc))
+            if attempt < PROVISION_MAX_ATTEMPTS:
+                _cleanup_attempt_resources(
+                    attempt_instance_id, attempt_allocation_id,
+                    attempt_eip, subdomain)
+                _update_record(tenant_id, status="provisioning")
+                continue
+            # Final attempt: do NOT clean up. Leave the instance, EIP
+            # and DNS record running so the failure can be diagnosed
+            # (SSM / EC2 console output / Caddy journal) instead of
+            # destroying the evidence, as happened to attempt 1 of
+            # tnt_test_tenant_login_002. Terminate cleans it up.
+            _log("final provision attempt failed for tenant %s; "
+                 "leaving instance %s (%s) running for diagnosis"
+                 % (tenant_id, attempt_instance_id, attempt_eip))
+            _mark_failed(tenant_id, exc)
+            _send_admin_alert(tenant_id, subscription_id, exc)
+            _refund_first_invoice(subscription_id)
+            raise
+    if last_exc is not None:
+        _mark_failed(tenant_id, last_exc)
+        _send_admin_alert(tenant_id, subscription_id, last_exc)
+        _refund_first_invoice(subscription_id)
+    raise RuntimeError(
+        "provision failed for tenant %s after %d attempts: %s"
+        % (tenant_id, PROVISION_MAX_ATTEMPTS, last_exc))

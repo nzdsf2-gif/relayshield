@@ -404,6 +404,6 @@ REL question numbers are VERIFIED against `wafr_answers_reliability_2026-10-11.m
 
 **Deliberately NOT ported, each needs its own review:** the RansomLook ingest, `test_intel_category_drift.py`, and the monitor and classifier changes. The branch's `relayshield_intel_monitor.py` is 2,000 lines older than main's; merging the branch would have regressed it. The other 20-odd files on that branch (workflows, API, Discord bot, IAM policies, `intel_manual_collection_guide.md`, NEXT_SESSION notes) are likewise unmerged and untouched.
 
-**Routine prompts rewritten:** each run starts a fresh branch from latest `main`, appends the next sweep to `intel_channel_recommendations.md` (next is 004), and opens a pull request for Andrew to review. Nothing merges without him.
+**Routine prompts rewritten:** each run resets its assigned `claude/...` branch (`claude/confident-knuth` for the sweep, `claude/vibrant-brown` for the monthly check; neither existed on origin on 2026-11-16) to latest `main`, appends the next sweep to `intel_channel_recommendations.md` (next is 004), and opens a pull request for Andrew to review. Nothing merges without him.
 
 **Open:** nobody has measured whether any keyword from sweeps 001 to 003 produced channels; that needs a query on the Mac with `AWS_PROFILE=relayshield`.

@@ -901,6 +901,130 @@ def _cs_mobile_stats() -> dict:
                 "activations_month_by_platform": {}, "trials_started_week_by_platform": {}}
 
 
+# New orders this week, added 2026-11-15 (NEW_ORDERS_WEEK_2026_11_15).
+# Lists subscriptions created in the last 7 days with product, amount,
+# date, customer/tenant, and best-effort channel from existing metadata.
+# Excludes INTERNAL_TEST_EMAILS.
+ORDER_PRICE_PRODUCTS = {
+    "price_1UPNO3L2dcjOeFiYMHoSwomW": "Firewall direct ($49/mo)",
+    "price_1UWRhCL2dcjOeFiYISogjCEq": "Firewall MSP ($69/mo per org)",
+    "price_1Ub2rOL2dcjOeFiY5jiiKIbm": "Firewall + Verifiers bundle ($109/mo)",
+    "price_1ToLjdL2dcjOeFiYVuBGPZgI": "Crypto Shield Mobile ($10.99/mo)",
+    "price_1ToLtuL2dcjOeFiYGivL2rts": "Crypto Shield Mobile ($105.99/yr)",
+}
+
+
+def _order_product(sub: dict) -> str:
+    """Product name for a subscription, from price ID first, then metadata
+    bundle tag, then amount as a fallback."""
+    items = (sub.get("items") or {}).get("data", [])
+    price_id = None
+    amount = None
+    if items:
+        price = (items[0].get("price") or {})
+        price_id = price.get("id")
+        amount = price.get("unit_amount")
+    if price_id and price_id in ORDER_PRICE_PRODUCTS:
+        return ORDER_PRICE_PRODUCTS[price_id]
+    meta = sub.get("metadata") or {}
+    bundle = meta.get("bundle")
+    if bundle == "combined_fw_verifiers":
+        return "Firewall + Verifiers bundle ($109/mo)"
+    if amount is not None:
+        dollars = amount / 100
+        interval = ((items[0].get("price") or {}).get("recurring") or {}).get("interval", "month")
+        return f"${dollars:.2f}/{interval} (price {price_id or 'unknown'})"
+    return "Unknown product"
+
+
+def _order_channel(sub: dict, stripe_key: str) -> str:
+    """Best-effort channel for a subscription, from existing metadata.
+    Prefers the subscription metadata source/channel, then the checkout
+    session client_reference_id, then distributor/msp context."""
+    meta = sub.get("metadata") or {}
+    for key in ("source", "channel"):
+        val = meta.get(key)
+        if val:
+            return val
+    ref = _checkout_platform_tag(sub.get("id", ""), stripe_key)
+    if ref and ref != "unattributed":
+        return ref
+    if meta.get("distributor_id") or meta.get("msp_id"):
+        return "msp"
+    if meta.get("tenant_id"):
+        return "direct"
+    return "unattributed"
+
+
+def _new_orders_week(stripe_key: str) -> dict:
+    """Subscriptions created in the last 7 days, excluding test emails.
+    Returns a dict with a count, a total amount, and a list of order rows
+    (each: product, amount, date, customer, tenant, channel)."""
+    try:
+        week_start = int(datetime.now(timezone.utc).timestamp()) - 7 * 86400
+        orders = []
+        starting_after = None
+        while True:
+            path = (f"/v1/subscriptions?status=all&created[gte]={week_start}"
+                    f"&limit=100&expand[]=data.items")
+            if starting_after:
+                path += f"&starting_after={starting_after}"
+            data = _stripe_get(path, stripe_key)
+            items = data.get("data", [])
+            for sub in items:
+                email = (sub.get("customer_email") or "").lower()
+                if email in INTERNAL_TEST_EMAILS:
+                    continue
+                created = sub.get("created", 0)
+                if created < week_start:
+                    continue
+                meta = sub.get("metadata") or {}
+                price_items = (sub.get("items") or {}).get("data", [])
+                amount = 0.0
+                if price_items:
+                    unit = ((price_items[0].get("price") or {}).get("unit_amount") or 0)
+                    amount = unit / 100
+                orders.append({
+                    "product":  _order_product(sub),
+                    "amount":   amount,
+                    "date":     datetime.fromtimestamp(created, tz=timezone.utc).strftime("%Y-%m-%d"),
+                    "customer": sub.get("customer_email") or sub.get("customer") or "",
+                    "tenant":   meta.get("tenant_id") or "",
+                    "channel":  _order_channel(sub, stripe_key),
+                    "status":   sub.get("status", ""),
+                })
+            if not data.get("has_more") or not items:
+                break
+            starting_after = items[-1]["id"]
+        orders.sort(key=lambda o: o["date"], reverse=True)
+        return {
+            "count":        len(orders),
+            "total_amount": round(sum(o["amount"] for o in orders), 2),
+            "orders":       orders,
+        }
+    except Exception as exc:
+        logger.warning("New orders fetch failed: %s", exc)
+        return {"count": 0, "total_amount": 0.0, "orders": []}
+
+
+def _new_orders_rows(orders: list) -> str:
+    """HTML table rows for the new-orders list. One row per order."""
+    if not orders:
+        return '<tr><td colspan="2" style="color:#888">No new orders this week</td></tr>'
+    rows = []
+    for o in orders:
+        who = o["customer"]
+        if o["tenant"]:
+            who += f" ({o['tenant']})"
+        rows.append(
+            f'<tr><td>{o["date"]} &mdash; {o["product"]}</td>'
+            f'<td><b>${o["amount"]:.2f}</b></td></tr>'
+            f'<tr><td style="color:#888;font-size:12px">&nbsp;&nbsp;{who} &middot; '
+            f'channel: {o["channel"]} &middot; {o["status"]}</td><td></td></tr>'
+        )
+    return "".join(rows)
+
+
 def _stripe_ytd_revenue(stripe_key: str) -> float:
     """Actual cumulative revenue collected this calendar year — distinct from
     MRR, which is a current-rate snapshot, not a running total. Sums paid
@@ -1282,6 +1406,93 @@ def _webcheck_section_html(w: dict) -> str:
     )
 
 
+
+def _cloudflare_stats() -> dict:
+    """Query Cloudflare Web Analytics RUM for the last 7 days, best effort."""
+    import json as _json
+    import os as _os
+    import urllib.request as _urllib
+    from datetime import datetime, timedelta, timezone as _tz
+    account = _os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
+    token = _os.environ.get("CLOUDFLARE_API_TOKEN", "")
+    sites = {
+        "relayshield": _os.environ.get("CLOUDFLARE_RUM_SITE_TAG_RELAYSHIELD", ""),
+        "blog": _os.environ.get("CLOUDFLARE_RUM_SITE_TAG_BLOG", ""),
+    }
+    if not account or not token or not sites["relayshield"]:
+        return {"error": "not configured"}
+    end = datetime.now(_tz.utc).date()
+    start = end - timedelta(days=7)
+    query = """
+    query($acc: String!, $site: String!, $s: Date!, $e: Date!) {
+      viewer {
+        accounts(filter: { accountTag: $acc }) {
+          rumPageloadEventsAdaptiveGroups(
+            filter: { siteTag: $site, date_geq: $s, date_leq: $e, bot: 0 }
+            limit: 10000
+            orderBy: [date_ASC]
+          ) {
+            count
+            sum { visits }
+            avg { sampleInterval }
+            dimensions { date }
+          }
+        }
+      }
+    }
+    """
+    out = {}
+    for label, site_tag in sites.items():
+        if not site_tag:
+            continue
+        try:
+            payload = _json.dumps({
+                "query": query,
+                "variables": {"acc": account, "site": site_tag, "s": start.isoformat(), "e": end.isoformat()},
+            }).encode()
+            req = _urllib.Request(
+                "https://api.cloudflare.com/client/v4/graphql",
+                data=payload,
+                headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
+            )
+            with _urllib.urlopen(req, timeout=30) as resp:
+                data = _json.loads(resp.read().decode())
+            groups = data["data"]["viewer"]["accounts"][0]["rumPageloadEventsAdaptiveGroups"]
+            pageviews = sum(g["count"] for g in groups)
+            visits = sum((g["sum"] or {}).get("visits") or 0 for g in groups)
+            sample = None
+            if groups and groups[0].get("avg"):
+                sample = groups[0]["avg"].get("sampleInterval")
+            out[label] = {"pageviews": pageviews, "visits": visits, "sample_interval": sample, "top_paths": [], "top_referrers": [], "top_countries": []}
+        except Exception as exc:  # best effort, section shows unavailable
+            out[label] = {"error": str(exc)}
+    if not out:
+        return {"error": "no sites"}
+    return out
+
+
+def _cloudflare_section_html(cloudflare: dict) -> str:
+    """Render the Cloudflare section, never raising, following webcheck style."""
+    if not cloudflare or cloudflare.get("error"):
+        return '<h3 style="color: #e94560;">Cloudflare Web Analytics (Last 7 Days)</h3><p style="color:#888">Cloudflare analytics unavailable this week</p>'
+    rows = []
+    for label in ("relayshield", "blog"):
+        site = cloudflare.get(label) or {}
+        if not site or site.get("error"):
+            continue
+        pageviews = site.get("pageviews", 0)
+        visits = site.get("visits", 0)
+        ppv = round(pageviews / visits, 2) if visits else 0
+        rows.append(f"  <tr><td>{label} pageviews</td><td><b>{pageviews}</b></td></tr>")
+        rows.append(f"  <tr><td>{label} visits</td><td><b>{visits}</b></td></tr>")
+        rows.append(f"  <tr><td>{label} pages per visit</td><td><b>{ppv}</b></td></tr>")
+        if site.get("sample_interval") is not None:
+            rows.append(f"  <tr><td>{label} sample interval</td><td><b>{site['sample_interval']}</b></td></tr>")
+    if not rows:
+        return '<h3 style="color: #e94560;">Cloudflare Web Analytics (Last 7 Days)</h3><p style="color:#888">Cloudflare analytics unavailable this week</p>'
+    return '<h3 style="color: #e94560;">Cloudflare Web Analytics (Last 7 Days)</h3><table border="0" cellpadding="4">' + "".join(rows) + '</table><p style="color:#888;font-size:12px">Web Analytics is browser traffic only, hostname by hostname, not summed with Zone edge traffic. Blog data starts only from the blog beacon deploy date.</p>'
+
+
 def _build_email(metrics: dict) -> str:
     week_end = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     s = metrics
@@ -1289,6 +1500,7 @@ def _build_email(metrics: dict) -> str:
     _x402_endpoints = _x402.get("all_endpoints") or _x402.get("top_endpoints", [])
     _x402_recent = _x402.get("recent_settlements", [])
     webcheck_section = _webcheck_section_html(s.get("webcheck") or {})
+    cloudflare_section = _cloudflare_section_html(s.get("cloudflare") or {})
     return f"""
 <html><body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
 <h2 style="color: #1a1a2e;">RelayShield Weekly Metrics — {week_end}</h2>
@@ -1306,6 +1518,7 @@ def _build_email(metrics: dict) -> str:
 </table>
 
 {webcheck_section}
+{cloudflare_section}
 <h3 style="color: #e94560;">Self-Reported Telemetry</h3>
 <table border="0" cellpadding="4">
   <tr><td>Chrome installs (unique)</td><td><b>{s['telemetry']['chrome_installs_unique']}</b></td></tr>
@@ -1364,6 +1577,13 @@ def _build_email(metrics: dict) -> str:
   <tr><td>&nbsp;&nbsp;n8n</td><td><b>${s['stripe']['mrr_by_source']['n8n']}</b></td></tr>
   <tr><td>&nbsp;&nbsp;Tines</td><td><b>${s['stripe']['mrr_by_source']['tines']}</b></td></tr>
   <tr><td>&nbsp;&nbsp;HF (smolagents)</td><td><b>${s['stripe']['mrr_by_source']['hf-smolagents']}</b></td></tr>
+</table>
+
+<h3 style="color: #e94560;">New orders this week</h3>
+<table border="0" cellpadding="4">
+  <tr><td>Orders (last 7 days)</td><td><b>{s['new_orders_week']['count']}</b></td></tr>
+  <tr><td>Total amount (first month)</td><td><b>${s['new_orders_week']['total_amount']}</b></td></tr>
+  {_new_orders_rows(s['new_orders_week']['orders'])}
 </table>
 
 <h3 style="color: #e94560;">API keys by discovery surface</h3>
@@ -1779,6 +1999,7 @@ and includes this same section.</p>
         "stripe":               _stripe_mrr(stripe_key),
         "ytd_revenue":          _stripe_ytd_revenue(stripe_key),
         "cs_mobile_stats":      _cs_mobile_stats(),
+        "new_orders_week":      _new_orders_week(stripe_key),
         "aws_marketplace":      _aws_marketplace_stats(),
         "x402":                 _x402_stats(),
         "hf_mcp":               _hf_mcp_stats(),
@@ -1786,6 +2007,7 @@ and includes this same section.</p>
         # Webcheck fetch is time-bounded (10s) and never raises, so it is
         # safe ahead of the corpus scan; it sits second-to-last on purpose.
         "webcheck":               _webcheck_stats(),
+        "cloudflare": _cloudflare_stats(),
         # LAST on purpose: it spends whatever Lambda time is left, so every
         # other figure must already exist by the time it starts.
         "corpus":               _corpus_distinct(context),

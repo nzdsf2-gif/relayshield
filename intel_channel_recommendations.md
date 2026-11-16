@@ -283,10 +283,10 @@ scheduled sessions do not have.
 
 | Sweep | Date | Keywords | Channels produced | Result |
 |---|---|---|---|---|
-| 001 | 2026-08-21 | 7 (+3 card shop) | not measured | *pending, needs a founder query* |
-| 001b | 2026-08-22 | 4 | not measured | *pending* |
-| 002 | 2026-08-21 | 13 | not measured | *pending* |
-| 003 | 2026-08-30 | 16 | not measured | *pending* |
+| 001 | 2026-08-21 | 7 (+3 card shop) | pending, founder query | *pending, founder query (`tools/intel_keyword_yield.py`, see 2026-11-16 check below)* |
+| 001b | 2026-08-22 | 4 | pending, founder query | *pending, founder query* |
+| 002 | 2026-08-21 | 13 | pending, founder query | *pending, founder query* |
+| 003 | 2026-08-30 | 16 | pending, founder query | *pending, founder query* |
 
 ## Gap found when this file was merged
 
@@ -304,3 +304,71 @@ behaviour and needs its own review: the RansomLook ingest (`ingest_ransomlook_ch
 `relayshield_intel_monitor.py` falls back to the raw category name and a generic severity for any category it has no
 label for (`CATEGORY_LABELS.get(category, category)`), so this is cosmetic there. Not traced: whether the classifier's
 `VALID_CATEGORIES` check changes anything for a channel found by one of these keywords.
+
+---
+
+# Keyword check, 2026-11 (scheduled run, 2026-11-16)
+
+**Question:** did any keyword added by sweeps 001, 001b, 002 and 003 produce a channel? **Answer: not
+established.** This session had no AWS, so `relayshield_intel_channels` was not read. No number in this
+section is a channel count, and the scoreboard above says "pending, founder query" for every sweep.
+
+## What WAS checked, from GitHub alone
+
+**1. The weekly discovery workflow has never shown whether a run finished.** Four runs of
+`intel_channel_discovery.yml` were read (2026-08-31, 10-05, 11-02, 11-09). Every one is green, and every
+one printed the same response:
+
+    {"statusCode": 200, "skipped": "lock_held"}
+
+The Lambda log tail in each shows a SECOND invocation starting 4.5 to 5 minutes after the step began,
+finding the discovery lock held, and exiting in under 100 ms. That second invocation is the response the
+workflow read. So the first invocation's result (newly added, re-verified) has not reached GitHub on any
+of those runs, and the "open an issue if new channels found" step has been skipped every time because it
+reads the second response. The other runs (2026-09-07 to 10-26) were not opened; their durations (4.5 to
+6 minutes) fit the same pattern but that is inference.
+
+*Not established:* whether the first invocation completes. Two explanations fit and the fix differs:
+(a) the runner's idle TCP connection is dropped around 4 to 5 minutes into a long synchronous invoke and
+the AWS CLI retries, or (b) the CLI's 300 s read timeout fires and it retries. In both cases the
+duplicate invocation is the CLI's retry. Separately, 112 keywords at a fixed 3 s pause each is at least
+336 s of sleep before the cross-promotion crawl starts, against a 600 s Lambda timeout, so a run that
+never logs "Discovery complete" is plausible too. The CloudWatch section of the script below settles it.
+
+**2. The discovery Lambda is not deployed from main.** `relayshield-intel-discovery` appears in no
+deploy workflow (only `intel_channel_discovery.yml`, which invokes it). Sweep 003 reached main on
+2026-09-01 (`0e0334b`); sweeps 001, 001b and 002 reached main only on 2026-11-15 via PR #57 (`5d4811d`).
+Unless someone hand-deployed, the running Lambda may not contain some or all of these keywords, in
+which case a zero would say nothing about the keyword. The script checks the deployed package directly.
+
+**3. Attribution is a lower bound.** `keyword_match` is written only when a channel is newly added (or
+re-added after going inactive), and within a run a channel is credited to the first keyword in list
+order that found it. The sweep blocks sit late in `SEARCH_KEYWORDS`. A zero means "added nothing new",
+which is the right test for retirement, not "matches nothing on Telegram".
+
+## The founder query
+
+`tools/intel_keyword_yield.py` (new, read-only, refuses any account but `239677749008`). Per sweep
+keyword it reports: on main, in the DEPLOYED package, how many times CloudWatch shows it searched, and
+which channels carry it as `keyword_match`. Checked here with `botocore.stub.Stubber` against the real
+Lambda, CloudWatch Logs, DynamoDB and STS models, including pagination, a keyword planted missing from
+the deployed package, and the wrong-account guard. Not run against real AWS. `test_intel_keyword_yield.py`
+fails if `SWEEPS` and `SEARCH_KEYWORDS` drift apart.
+
+## RansomLook
+
+`grep -n ingest_ransomlook_channels relayshield_intel_discovery.py` on main returns nothing. Still not
+ported, so the endpoint check was skipped, as instructed.
+
+## Retirement candidates: none named, deliberately
+
+Nothing is retired and no keyword is named as a candidate yet, because the precondition for "produced
+nothing after two months" is not established: findings 1 and 2 mean a keyword may never have been
+deployed or searched. The rule for the next run, printed by the script: **a keyword is a retirement
+candidate only if it is deployed, CloudWatch shows it searched at least twice, and it has zero
+channels.** Sweep 003 (on main since 2026-09-01) is the first that can meet the two-month bar, IF the
+deployed package carries it. Sweeps 001/001b/002 cannot meet it before 2027-01 even if deployed today.
+
+Watch in particular, when the numbers arrive: `cti now`, `log sync`, `data leak monitoring` and
+`mailpass` are the most generic phrases in these sweeps and the likeliest to be credited channels that
+are off-theme rather than none at all; check what they found, not only whether they found something.

@@ -744,6 +744,31 @@ class ProxyHandler(BaseHTTPRequestHandler):
         if not hasattr(self.server, "tenant_policies") or self.server.tenant_policies is None:
             self.server.tenant_policies = {}
         self.server.tenant_policies[cache_key] = policy
+        # PII redaction wiring (2026-11-15): the resolved-policy response
+        # carries a top-level "redaction" field ({enabled, types}) alongside
+        # "policies". _fetch_tenant_policy narrows to just the "policies" dict
+        # above, so extract redaction from the full response here and push it
+        # into the Screener. The Screener is a singleton; redaction is per-tenant,
+        # so we update its attributes on each policy fetch. If the policy has
+        # no redaction field, default to disabled (opt-in, off by default).
+        try:
+            _red = None
+            if isinstance(data, dict):
+                _inner = data.get("data", data)
+                if isinstance(_inner, dict):
+                    _red = _inner.get("redaction")
+            if not isinstance(_red, dict):
+                _red = {}
+            _red_enabled = _red.get("enabled") is True
+            _red_types = _red.get("types") if isinstance(_red.get("types"), dict) else {}
+            _screener = getattr(self.server, "screener", None)
+            if _screener is not None:
+                _screener.redaction_enabled = _red_enabled
+                _screener.redaction_types = _red_types
+        except Exception:
+            # Never fail the policy fetch because redaction wiring failed.
+            # The Screener keeps its previous redaction settings.
+            pass
         _key_errors = getattr(self.server, "tenant_policy_errors", None)
         if _key_errors is not None:
             _key_errors.pop(cache_key, None)

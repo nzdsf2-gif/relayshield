@@ -163,6 +163,81 @@ SEARCH_KEYWORDS = [
     ("phishing como servico", "phaas"),         # PT: phishing as a service
     ("sim swap fraude",     "sim_swap"),        # PT/ES: SIM swap fraud
 
+    # Sweeps 001, 001b and 002 below were recovered from the unmerged branch
+    # claude/daily-todo-summary-7zpsvv on 2026-11-16. They were written on
+    # 2026-08-21/22 and never reached main. Sweep 003 follows them.
+    # --- OSINT sweep 002, 2026-08-21: SOCRadar named channels (founder-supplied) ---
+    # Real channel NAMES from SOCRadar's stealer-log and top-groups tables.
+    # Added as keywords rather than as channel rows because SOCRadar publishes
+    # display names, not @handles, and this document's own rule is never to
+    # invent one. A brand name also survives the renames these operations rely
+    # on, which handles do not.
+    #
+    # Stealer-log distribution and credential aggregation:
+    ("moon cloud",          "infostealer"),   # curates + republishes other channels' logs
+    ("daisy cloud",         "infostealer"),   # "fresh one-hand logs", mostly RedLine
+    ("log sync",            "infostealer"),   # free + premium tiers, community uploads
+    ("observer cloud",      "credential_dump"),  # long-standing combo-list distribution
+    ("alien txtbase",       "credential_dump"),  # the massive infostealer-derived dump
+    ("data leak monitoring","credential_dump"),  # SOCRadar rates activity "very high"
+    ("mailpass",            "credential_dump"),  # EMP/mailpass/sqli chat
+    ("bidencash shop",      "card_shop"),
+    ("cti now",             "general"),          # news tracking, useful as a cross-promo seed
+    #
+    # Hacktivist crews — four of SOCRadar's ten most active groups. New
+    # category; see Sweep 002 in intel_channel_recommendations.md for why these
+    # are MEDIUM rather than HIGH.
+    ("noname057",           "hacktivist"),
+    ("rippersec",           "hacktivist"),
+    ("dark storm team",     "hacktivist"),
+    ("z-pentest",           "hacktivist"),
+    #
+    # NOT added: bare "alien". It is an ordinary English word and would match
+    # hundreds of unrelated channels — the generic-phrase trap this list has
+    # already been burned by once. "alien txtbase" is the operation's actual
+    # name and is specific.
+
+    # --- OSINT sweep 001b, 2026-08-22 ---
+    # The four most active ransomware operations of 2026 per current reporting,
+    # NONE of which were in this list: the existing ransomware keywords are the
+    # 2024-2025 cohort (LockBit, ALPHV, Cl0p, Play), and the leaderboard has
+    # moved. Qilin and DragonForce in particular post-date every keyword here.
+    #
+    # Ransomware is also one of the thinnest categories in the seeded channel
+    # list -- 2 channels against 7 infostealer -- so this is coverage that does
+    # not exist rather than depth on a category that is already strong.
+    ("qilin",               "ransomware"),
+    ("dragonforce",         "ransomware"),
+    ("thegentlemen",        "ransomware"),
+    ("babuk",               "ransomware"),
+
+    # --- OSINT sweep 001, 2026-08-21 (intel_channel_recommendations.md) ---
+    # Platform and operation BRAND names, not generic phrases. Reporting is
+    # explicit that these operations survive takedowns by rotating channel
+    # names and running mirrors, so a hand-curated handle list decays within
+    # weeks. A brand name keeps finding whatever the current channel is called,
+    # which is the whole reason the sweep outputs keywords rather than handles.
+    #
+    # Weighted deliberately toward phaas / sim_swap / card_shop: the seeded
+    # channel list carries ZERO of all three, so these create coverage that does
+    # not exist rather than deepening infostealer, which is already the
+    # strongest category.
+    ("omega cloud",         "infostealer"),
+    # ("moon cloud") is already listed under sweep 002 above.
+    ("bidencash",           "card_shop"),
+    ("darcula",             "phaas"),
+    ("magic cat",           "phaas"),
+    ("otp bot",             "sim_swap"),
+    ("sim swap service",    "sim_swap"),
+
+    # Card-shop keywords added 2026-08-21. The monitor has carried a label and a
+    # severity for "card_shop" since it was written, but no discovery path and
+    # no classifier vocabulary could ever produce one, so the category existed
+    # only as a dead branch in the alert formatter.
+    ("cc shop",             "card_shop"),
+    ("dumps and pins",      "card_shop"),
+    ("fullz",               "card_shop"),
+
     # --- OSINT sweep 003, 2026-08-30 (rebuilt) -------------------------------
     # Reconstructed after the original commit (a08104f) was stranded in a
     # session that could not push. See the push-path rule in CLAUDE.md.

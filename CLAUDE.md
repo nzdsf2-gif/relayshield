@@ -864,6 +864,15 @@ workflow: a workflow that validates workflows fails the same way it is meant to 
 The general form, which is the part worth remembering: **the alarm you must check hardest is the one
 that goes quiet, not the one that goes red.**
 
+## A SCHEDULED TASK WITH NO REPOSITORY CANNOT PUSH, AND A MERGE TO MAIN DOES NOT DEPLOY THE INTEL DISCOVERY LAMBDA
+
+**2026-11-16. Six fortnightly sweep runs (Sep 1 to Nov 15) left nothing, and nobody noticed for 11 weeks, because a run that cannot push still reports "Completed".**
+
+1. **A scheduled task needs a repository attached or every `git push` is refused with a 403.** The signal is `folders_state: NONE` on the task and no `session_request.config.sources`. `update_trigger` and `create_trigger` cannot set it. Only the app can: Scheduled, the task, Edit scheduled task, Advanced settings, General, Repository. After attaching, `get_trigger` / `update_trigger` shows `sources` and an assigned `outcomes` branch. **A routine's first run after any configuration change is checked for a pushed branch and a pull request, not for "Completed".**
+2. **A run's session may push only to its assigned `claude/...` branch.** Routine prompts say "use the branch your session names, reset to latest main". They never say "create a fresh branch" and never reuse an old long-lived one.
+3. **Merging to main deploys `relayshield_intel_monitor.py`, `_feed.py` and `_kev.py` and does NOT deploy `relayshield_intel_discovery.py`**: it is absent from `deploy_lambdas.yml`'s LAMBDA_MAP, and `intel_channel_discovery.yml` only invokes whatever is already deployed. A new keyword is live only after a separate reviewed deploy (recover the live handler first, drift rule). `tools/keyword_yield.py` reports `[live]` or `[NOT DEPLOYED]` per keyword.
+4. **A keyword with zero `keyword_match` rows means "nothing NEW", never "found nothing"**, and for a keyword that is not deployed it means nothing at all. Do not retire a keyword on a zero without both facts. State of this thread: `LOG_CURRENT.md`, "WHERE 2026-11-16 LEFT THINGS".
+
 ## THE DRIFT RULE — the most expensive lesson in this repo
 
 **Anything not in the repo is erased by the next deploy of that component.**

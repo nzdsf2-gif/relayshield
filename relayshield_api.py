@@ -15096,21 +15096,39 @@ def handle_payg_request(path: str, method: str, event: dict) -> dict:
     if method != "POST":
         return _err(f"{path} only accepts POST requests", 405)
 
-    # Require payment proof
-    if not x_payment:
+    # FluxA API-key auth (added 2026-11-15): if a valid RelayShield API key
+    # is present, skip the x402 payment and execute the endpoint. This lets
+    # FluxA AgentMarket forward caller requests with a static API key; the
+    # caller pays FluxA per call and never needs a RelayShield key or an
+    # x402 payment proof. If a key is present but invalid, return 401.
+    # The key is validated via _verify_rs_api_key (DynamoDB lookup, same as
+    # TAXII/MISP and /v1/payg/pin). Use a DEDICATED key for FluxA, not a
+    # master key. API-key auth bypasses the x402 payment; the FluxA key
+    # billing arrangement is a business decision, not a code decision.
+    api_key_record = None
+    _api_key_str = _intel_api_key(headers)
+    if _api_key_str:
+        api_key_record = _verify_rs_api_key(_api_key_str)
+        if api_key_record is None:
+            return _err("Invalid API key", 401)
+
+    # Require payment proof (unless API-key auth succeeded above)
+    if not x_payment and api_key_record is None:
         return _x402_payment_required(path)
 
-    settlement = _verify_and_settle_x402_payment(x_payment, path)
-    if settlement is None:
-        return {
-            "statusCode": 402,
-            "headers": {"Content-Type": "application/json"},
-            "body": json.dumps({
-                "ok":    False,
-                "error": "Invalid or expired payment proof, or settlement failed — pay again and retry.",
-            }),
-        }
-    _log_payg_settlement(path, PAYG_PRICE_UNITS.get(path, 0), settlement)
+    settlement = None
+    if api_key_record is None:
+        settlement = _verify_and_settle_x402_payment(x_payment, path)
+        if settlement is None:
+            return {
+                "statusCode": 402,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({
+                    "ok":    False,
+                    "error": "Invalid or expired payment proof, or settlement failed — pay again and retry.",
+                }),
+            }
+        _log_payg_settlement(path, PAYG_PRICE_UNITS.get(path, 0), settlement)
 
     payg_routes = {
         "/v1/payg/breach":                handle_breach,
@@ -15183,10 +15201,12 @@ def handle_payg_request(path: str, method: str, event: dict) -> dict:
     # Include the settlement receipt per x402 spec (PAYMENT-RESPONSE header,
     # base64-encoded JSON) so compliant client libraries get a verifiable
     # receipt instead of crashing on a missing header.
-    encoded_settlement = base64.b64encode(json.dumps(settlement).encode()).decode()
-    result.setdefault("headers", {})
-    result["headers"]["PAYMENT-RESPONSE"] = encoded_settlement
-    result["headers"]["Access-Control-Expose-Headers"] = "PAYMENT-RESPONSE"
+    # API-key auth has no settlement, so skip the header in that case.
+    if settlement is not None:
+        encoded_settlement = base64.b64encode(json.dumps(settlement).encode()).decode()
+        result.setdefault("headers", {})
+        result["headers"]["PAYMENT-RESPONSE"] = encoded_settlement
+        result["headers"]["Access-Control-Expose-Headers"] = "PAYMENT-RESPONSE"
     return result
 
 

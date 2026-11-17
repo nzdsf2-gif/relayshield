@@ -3238,11 +3238,13 @@ async def _poll_channels(stats: dict, tier: str = "") -> None:
                         ARCHIVE_MIMES = (
                             "application/zip", "application/x-zip-compressed",
                             "application/x-rar-compressed", "application/vnd.rar",
-                            "application/x-7z-compressed", "application/x-tar",
+                            "application/x-rar",
+                            "application/x-7z-compressed", "application/x-7z",
+                            "application/x-tar",
                             "application/gzip", "application/x-gzip",
                             "application/octet-stream",
                         )
-                        by_name = fname.endswith((".zip", ".rar", ".7z", ".tar", ".gz", ".tgz"))
+                        by_name = fname.endswith((".zip", ".rar", ".7z", ".tar", ".gz", ".tgz", ".001", ".002", ".003", ".part1", ".part01")) or ".zip." in fname or ".rar." in fname
                         by_mime = mime in ARCHIVE_MIMES
                         if by_name or by_mime:
                             try:

@@ -22,7 +22,13 @@ The note on each order reads: `RelayShield screened order #N: composite risk S/1
 
 Values for the two fixture rows come from running `fixtureVerdict`, `verdictActions` and `buildOrderNoteLine` from `shopify/worker.js` on these addresses. Values for the PASS row come from the live `composite-check` endpoint. The Shopify side (does the webhook fire, does the tag appear) has NOT been seen by me: that is what the dry run proves.
 
-For the dry run use `jane.smith.dryrun@gmail.com`, `fixture-medium-dryrun@relayshield.net` and `fixture-high-dryrun@relayshield.net` (still valid: the fixture only needs the `fixture-` start, `@relayshield.net` end and the test shop). Dry-run rows stay in the app table afterwards; in the recording use the **Show** filter to isolate the three real ones.
+**Use the same three addresses in the dry run and in the recording** (changed 2026-11-17; the first version of this file said to use `-dryrun` names). The table already held 21 rows before the dry run, so separate names buy nothing, and the rehearsal should be identical to the take. Nothing in the Worker stops the same address being screened twice: each order is screened on its own.
+
+**Create all three orders live, while recording, and rehearse the same way.** Pre-made orders only show the reviewer a finished table. Live creation shows cause and effect: the order is paid, then the verdict appears. While the 15-second wait runs, talk (for example: "RelayShield screens the order as soon as Shopify tells it a new order exists").
+
+**Same customer twice:** from memory, Shopify may refuse **Create a new customer** with an email that already exists. On the second pass (the recording) search the email in **Add customer** and select the existing customer instead. If it errors, send me a screenshot.
+
+Older rows stay in the table. In the recording the newest order is at the top; use the **Show** filter when you want one level only.
 
 ## Before either run
 

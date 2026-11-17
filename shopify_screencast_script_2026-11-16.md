@@ -41,6 +41,20 @@ Admin, **Orders**, **Create order**. Add any product. **Add customer**, **Create
 
 If the order has no email on it, nothing below works: the screening reads the order's email.
 
+## If a result is slow while recording (added 2026-11-17)
+
+Dry run on 2026-11-17: all three rows matched the table (#1022 unknown 15, #1023 medium 55, #1024 high 85). The high order felt slow. The record says otherwise: #1024 shows "Today at 8:39 pm" in Admin and was screened at 01:39:28Z, which is the same minute (assuming Admin is on US Eastern, UTC-5), so at most about 28 seconds. Medium and high run identical code (the fixture returns before any outside call), so nothing in the app makes high slower. The variable is how fast Shopify delivers the new-order notification, which we do not control.
+
+What to do:
+1. **Create the high-risk order first, then medium, then pass, and only then walk through them in the order pass, medium, high.** By the time you reach the high order it has had the longest head start.
+2. **The order page is the early signal.** The tag and note are written to the order before the row is stored in the app, so the tag shows on the order page a moment before the app table updates. The app table does not update itself: click **Refresh**.
+3. **Fallback after about 60 seconds with no tag and no row: click Sync orders, wait, then Refresh.** Sync screens any recent order not yet recorded and writes the same tag and note. Say what you are doing: "This order hasn't shown up yet, so I'll click Sync orders, which screens any order that hasn't been picked up." If a late notification then arrives, the app skips it as a duplicate.
+4. **If Sync does not fix it, stop recording and send me the status line.** Do not cut the middle of the video to hide a wait.
+
+## Check on each order page (the dry run has not confirmed this yet)
+
+Open each of the three orders in Admin: the **Tags** box (right side) should show `relayshield-review` on the medium order and `relayshield-high-risk` on the high order, none on the pass order, and the order note should carry the RelayShield line. In the Orders list the tags only show if you add the **Tags** column (column picker at the right of the search bar; from memory). The red icon beside #1024 in the list: hover it before recording and name what it is, because the reviewer will see it.
+
 ## Talking points
 
 **Opening (10 seconds).** "This is RelayShield Order Screening on a Shopify development store. It screens each new order's customer email and store URL, then shows the result in the app and writes it back to the order. It never cancels, holds or refunds an order. That stays the merchant's decision."

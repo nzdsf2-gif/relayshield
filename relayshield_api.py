@@ -1004,6 +1004,10 @@ KEYLESS_SCAN_ENDPOINTS = frozenset({
     # server-side -- same cost profile as the checks it wraps, so keyless
     # for the same reason; quota counts one unit per supplied input.
     "/v1/composite-check",
+    # Added 2026-11-17. Buyer screening for the Shopify Buyer Fraud app.
+    # Same cost profile as composite-check (DynamoDB corpus reads only,
+    # no paid upstream), so keyless for the same reason; one unit per call.
+    "/v1/buyer-screen",
     # Added 2026-09-30. Corpus sightings + attack-graph pivots are internal
     # (DynamoDB, ~zero marginal cost); the Twilio Lookup is keyed-only and
     # never runs on this path. Same per-IP cap rationale as /v1/link-check.
@@ -5247,6 +5251,324 @@ def handle_composite_check(params: dict) -> dict:
     if provenance:
         response["corpus_provenance"] = provenance
     return _ok(response)
+
+
+# ---------------------------------------------------------------------------
+# Endpoint: POST /v1/buyer-screen   (KEYLESS)
+# ---------------------------------------------------------------------------
+# Buyer screening for the Shopify Buyer Fraud app: one POST taking the buyer
+# signals the Shopify webhooks carry (email, browser IP, shipping and
+# billing addresses, account age/order history, cart value), fanning out to
+# RelayShield's own TI corpus server-side, returning a single risk level +
+# score + per-signal breakdown.
+#
+# Request (from the Worker; see shopify-buyer-fraud-build-2026-11-17.md):
+#   { "email": {"from_address": "buyer@example.com"}, "ip": "203.0.113.7",
+#     "device_fingerprint": null,
+#     "shipping_address": {"address1": ..., "city": ..., "province": ...,
+#                          "zip": ..., "country": ...},
+#     "billing_address": {...same shape, or null...},
+#     "account": {"customer_id": ..., "created_at": ..., "orders_count": ...,
+#                 "verified_email": ...},
+#     "cart": {"total_price": "149.00", "currency": "USD", "line_items": 2},
+#     "source": "shopify-buyer-fraud-app", "shop": "https://store.myshopify.com" }
+# Response: _ok({"level": "high"|"medium"|"unknown", "score": 0-100,
+#                 "signals": [{"type": ..., "level": ..., "reasons": [...]}]})
+#
+# Same combination rule as composite-check: RISKIEST SIGNAL WINS.
+#     worst level   base score
+#     high          90
+#     medium        55
+#     unknown       15
+# plus 5 for each ADDITIONAL signal at medium or high (corroboration across
+# independent checks raises confidence), capped at 100. "unknown" signals
+# never corroborate.
+#
+# Fail-soft, same as composite-check: a sub-check that errors degrades to
+# an "unknown" signal with the failure noted -- one bad check never kills
+# the screening. A verdict NEVER says "safe"; the best case is "unknown"
+# with per-signal reasons explaining what was (and wasn't) found.
+#
+# Cost profile, and why this is keyless: every check here is internal
+# (DynamoDB corpus reads, ~zero marginal cost). There is deliberately NO
+# live HIBP call -- HIBP is a shared rate-limited subscription key, and the
+# breach cache is consulted instead -- and NO VirusTotal call on the IP
+# path. A paid upstream per screening would need a priced route; this one
+# is the free tier the Shopify app screens on in v1. A valid X-RS-API-KEY
+# skips the per-IP quota via the KEYLESS_SCAN_ENDPOINTS dispatcher branch,
+# exactly like composite-check.
+#
+# Privacy: the raw email and IP are never logged (only _redact() digests)
+# and never returned -- the response carries level/score/signals only.
+# The Worker stores only the SHA-256 email hash.
+#
+# Not in v1, documented honestly:
+# - device_fingerprint is accepted but never sent by any Shopify webhook
+#   payload, so no device signal is emitted until a checkout extension or
+#   theme pixel supplies one.
+# - Reshipping-mule / freight-forwarder corpus checks need a data source
+#   that does not exist yet; the address signal covers billing/shipping
+#   mismatch and PO-box shipping today.
+# - Failed-payment-attempt and rapid-account-creation signals are not in
+#   any Shopify webhook payload, so they cannot be assessed here.
+
+_BUYER_SCREEN_BASE_SCORE = {"high": 90, "medium": 55, "unknown": 15}
+_BUYER_SCREEN_LEVEL_RANK = {"unknown": 0, "medium": 1, "high": 2}
+
+# Curated, well-known disposable-mail providers. Heuristic, not a verdict:
+# a disposable domain alone is medium ("flag for review"), never high.
+_BUYER_SCREEN_DISPOSABLE_DOMAINS = frozenset({
+    "mailinator.com", "guerrillamail.com", "temp-mail.org",
+    "10minutemail.com", "yopmail.com", "maildrop.cc", "getnada.com",
+    "tempmail.com", "fakeinbox.com", "trashmail.com", "mailnesia.com",
+    "mintemail.com", "mytemp.email", "tempail.com", "throwawaymail.com",
+})
+
+_BUYER_SCREEN_PO_BOX_RE = re.compile(r"\bP\.?\s*O\.?\s*BOX\b", re.IGNORECASE)
+
+_BUYER_SCREEN_NEW_ACCOUNT_DAYS = 7
+_BUYER_SCREEN_HIGH_VALUE = 100  # nominal USD; cart total at/above this + new account = medium
+
+
+def _buyer_screen_ioc_hits(value, ioc_types):
+    """Query relayshield_intel_iocs for one value. Never raises; [] on error."""
+    if not value:
+        return []
+    try:
+        resp = dynamodb.Table(INTEL_IOCS_TABLE).query(
+            KeyConditionExpression=boto3.dynamodb.conditions.Key("ioc_value").eq(value),
+            FilterExpression=boto3.dynamodb.conditions.Attr("ioc_type").is_in(list(ioc_types)),
+            Limit=5,
+        )
+        return resp.get("Items", []) or []
+    except Exception as exc:
+        logger.warning("buyer-screen IOC lookup failed value=%s: %s",
+                       _redact(value, "ioc"), exc)
+        return []
+
+
+def _buyer_screen_stolen_credential_hits(email):
+    """Stolen-session credential rows for one email (SHA-256 matched_email). Never raises."""
+    try:
+        resp = dynamodb.Table(STOLEN_SESSIONS_TABLE_API).query(
+            IndexName="email-index",
+            KeyConditionExpression=boto3.dynamodb.conditions.Key("matched_email").eq(_sha256(email)),
+            FilterExpression=boto3.dynamodb.conditions.Attr("session_type").eq("credential"),
+            Limit=5,
+        )
+        return resp.get("Items", []) or []
+    except Exception as exc:
+        logger.warning("buyer-screen stealer lookup failed email=%s: %s",
+                       _redact(email, "em"), exc)
+        return []
+
+
+def _buyer_screen_signal_email(email):
+    """One email -> signal dict. Corpus failures degrade to unknown, never raise."""
+    high_reasons = []
+    medium_reasons = []
+    try:
+        if _buyer_screen_ioc_hits(email, ("email",)):
+            high_reasons.append("known fraudster email in threat intel corpus")
+        if _buyer_screen_stolen_credential_hits(email):
+            high_reasons.append("breached credential found in stealer logs")
+        # Breach cache only -- NO live HIBP call (shared rate-limited key).
+        # _breach_cache_get never raises and returns None on a miss or an error.
+        if _breach_cache_get(email):
+            medium_reasons.append("breach exposure found")
+        domain = email.rsplit("@", 1)[-1] if "@" in email else ""
+        if domain and _buyer_screen_ioc_hits(domain, ("domain",)):
+            medium_reasons.append("email domain flagged in threat intel corpus")
+    except Exception as exc:
+        # Belt and braces: the helpers already swallow errors, so reaching
+        # here means something unexpected failed. The signal degrades to
+        # unknown rather than killing the screening.
+        logger.warning("buyer-screen email signal failed email=%s: %s",
+                       _redact(email, "em"), exc)
+        return {"type": "email", "level": "unknown",
+                "reasons": ["email check failed"]}
+    domain = email.rsplit("@", 1)[-1] if "@" in email else ""
+    if domain in _BUYER_SCREEN_DISPOSABLE_DOMAINS:
+        medium_reasons.append("disposable email domain")
+    if high_reasons:
+        return {"type": "email", "level": "high",
+                "reasons": high_reasons + medium_reasons}
+    if medium_reasons:
+        return {"type": "email", "level": "medium", "reasons": medium_reasons}
+    return {"type": "email", "level": "unknown",
+            "reasons": ["no email risk flags"]}
+
+
+def _buyer_screen_is_private_ip(ip):
+    """True for RFC1918 / loopback / link-local addresses, which carry no reputation."""
+    if ip.startswith("10.") or ip.startswith("192.168.") or ip.startswith("127."):
+        return True
+    if ip.startswith("172."):
+        try:
+            second = int(ip.split(".")[1])
+            if 16 <= second <= 31:
+                return True
+        except (ValueError, IndexError):
+            return False
+    if ip.startswith("169.254.") or ip == "::1":
+        return True
+    if ip.lower().startswith("fe80:"):
+        return True
+    return False
+
+
+def _buyer_screen_signal_ip(ip):
+    """One IP -> signal dict. Corpus-only in v1; no VirusTotal call (paid upstream)."""
+    if _buyer_screen_is_private_ip(ip):
+        return {"type": "ip", "level": "unknown",
+                "reasons": ["private IP address, cannot assess"]}
+    try:
+        hit = _buyer_screen_ioc_hits(ip, ("ip",))
+    except Exception as exc:
+        logger.warning("buyer-screen IP signal failed ip=%s: %s",
+                       _redact(ip, "ip"), exc)
+        return {"type": "ip", "level": "unknown",
+                "reasons": ["IP check failed"]}
+    if hit:
+        return {"type": "ip", "level": "high",
+                "reasons": ["IP address flagged in threat intel corpus"]}
+    return {"type": "ip", "level": "unknown",
+            "reasons": ["no IP flags in threat intel corpus"]}
+
+
+def _buyer_screen_addr_field(addr, *keys):
+    """First non-empty value for any of keys, lowercased and stripped, or ''."""
+    for key in keys:
+        value = (addr or {}).get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip().lower()
+    return ""
+
+
+def _buyer_screen_signal_address(shipping, billing):
+    """Shipping/billing pair -> signal dict, or None when no address was sent."""
+    if not shipping and not billing:
+        return None
+    medium_reasons = []
+    ship_zip = _buyer_screen_addr_field(shipping, "zip")
+    bill_zip = _buyer_screen_addr_field(billing, "zip")
+    ship_country = _buyer_screen_addr_field(shipping, "country_code", "country")
+    bill_country = _buyer_screen_addr_field(billing, "country_code", "country")
+    if shipping and billing:
+        if (ship_zip and bill_zip and ship_zip != bill_zip) or \
+           (ship_country and bill_country and ship_country != bill_country):
+            medium_reasons.append("billing and shipping addresses do not match")
+    ship_addr1 = _buyer_screen_addr_field(shipping, "address1")
+    if ship_addr1 and _BUYER_SCREEN_PO_BOX_RE.search(ship_addr1):
+        medium_reasons.append("shipping address is a PO box")
+    if medium_reasons:
+        return {"type": "address", "level": "medium", "reasons": medium_reasons}
+    return {"type": "address", "level": "unknown",
+            "reasons": ["no address flags"]}
+
+
+def _buyer_screen_parse_amount(value):
+    """Cart total_price (str '149.00' or number) -> Decimal, or None. Never raises."""
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value).strip())
+    except Exception:
+        return None
+
+
+def _buyer_screen_parse_created_at(value):
+    """ISO created_at -> aware datetime, or None. Never raises."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+    except Exception:
+        return None
+
+
+def _buyer_screen_signal_account(account, cart):
+    """Account + cart -> signal dict, or None when neither was sent."""
+    if not account and not cart:
+        return None
+    account = account or {}
+    cart = cart or {}
+    orders_count = account.get("orders_count")
+    created = _buyer_screen_parse_created_at(account.get("created_at"))
+    now = datetime.now(timezone.utc)
+    is_new = False
+    if isinstance(orders_count, int) and orders_count == 0:
+        is_new = True
+    if created is not None and (now - created).days < _BUYER_SCREEN_NEW_ACCOUNT_DAYS:
+        is_new = True
+    if not is_new:
+        # Old account, or one whose age and order history cannot be determined.
+        return {"type": "account", "level": "unknown",
+                "reasons": ["no account flags"]}
+    reasons = ["new account with no order history"]
+    total = _buyer_screen_parse_amount((cart or {}).get("total_price"))
+    if total is not None and total >= _BUYER_SCREEN_HIGH_VALUE:
+        reasons.append("new account with high-value order")
+    if account.get("verified_email") is False:
+        reasons.append("email not verified")
+    return {"type": "account", "level": "medium", "reasons": reasons}
+
+
+def handle_buyer_screen(params: dict) -> dict:
+    """POST /v1/buyer-screen -- keyless buyer screening for Shopify Buyer Fraud."""
+    params = params or {}
+    email_params = params.get("email")
+    email = ""
+    if isinstance(email_params, dict):
+        email = (email_params.get("from_address") or "").strip().lower()
+    ip = params.get("ip")
+    ip = ip.strip() if isinstance(ip, str) else ""
+    shipping = params.get("shipping_address")
+    shipping = shipping if isinstance(shipping, dict) else None
+    billing = params.get("billing_address")
+    billing = billing if isinstance(billing, dict) else None
+    account = params.get("account")
+    account = account if isinstance(account, dict) else None
+    cart = params.get("cart")
+    cart = cart if isinstance(cart, dict) else None
+
+    signals = []
+    if email and "@" in email:
+        signals.append(_buyer_screen_signal_email(email))
+    if ip:
+        signals.append(_buyer_screen_signal_ip(ip))
+    addr_signal = _buyer_screen_signal_address(shipping, billing)
+    if addr_signal is not None:
+        signals.append(addr_signal)
+    acct_signal = _buyer_screen_signal_account(account, cart)
+    if acct_signal is not None:
+        signals.append(acct_signal)
+
+    if not signals:
+        return _err("send at least one buyer signal (email, ip, address or account)")
+
+    worst_rank = max(_BUYER_SCREEN_LEVEL_RANK[s["level"]] for s in signals)
+    level = next(lvl for lvl, rank in _BUYER_SCREEN_LEVEL_RANK.items()
+                 if rank == worst_rank)
+    n_risky = sum(1 for s in signals if _BUYER_SCREEN_LEVEL_RANK[s["level"]] >= 1)
+    score = min(100, _BUYER_SCREEN_BASE_SCORE[level] + 5 * max(0, n_risky - 1))
+
+    source = (params.get("source") or "")[:40]
+    logger.info("buyer-screen signals=%d worst=%s score=%d source=%s",
+                len(signals), level, score, source or "unattributed")
+    return _ok({
+        "level": level,
+        "score": score,
+        "signals": signals,
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "note": ("Buyer screening over RelayShield's threat-intel corpus. "
+                 "Riskiest signal wins. A signal graded unknown means that "
+                 "check could not determine risk, not that the buyer is clear. "
+                 "Flag-only: never blocks a buyer."),
+    })
 
 
 def _check_ct(domain: str) -> dict:
@@ -15078,6 +15400,129 @@ def _log_hf_mcp_call(path: str, credit_cost: int) -> None:
         logger.warning("Failed to log HF MCP call for path=%s: %s", path, exc)
 
 
+# ---------------------------------------------------------------------------
+# Poppy-file check (Play 3, 2026-11-17) -- one additive trust signal for
+# counterparty-screen. Fetches the merchant's /.well-known/poppy.json and
+# validates it. Returns a signal dict; the caller folds `signal` into the
+# verdict alongside the corpus check and GoPlus failover. Missing Poppy is
+# NEUTRAL, never a block. A valid file is a small positive, never proof of
+# safety. All network failures fail open to neutral.
+# ---------------------------------------------------------------------------
+
+def _check_poppy_file(domain: str) -> dict:
+    """Fetch and validate a merchant's Poppy file.
+
+    Args:
+        domain: merchant domain, e.g. "example.com" (no scheme, no path).
+
+    Returns:
+        {"signal": "positive"|"neutral"|"negative",
+         "reason": str, "details": dict}
+    """
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    def _fetch_json(url: str, timeout: float = 5.0):
+        req = urllib.request.Request(url, headers={"User-Agent": "RelayShield-Poppy-Check/1.0"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            if resp.status != 200:
+                return None
+            return _json.loads(resp.read().decode("utf-8", "replace"))
+
+    base = {"signal": "neutral", "reason": "no poppy file", "details": {}}
+
+    domain = (domain or "").strip().lower()
+    if not domain or "/" in domain or "." not in domain:
+        return {**base, "reason": "invalid domain"}
+
+    # 1. Fetch the Poppy file. Timeout or network error = neutral (fail open).
+    try:
+        poppy = _fetch_json(f"https://{domain}/.well-known/poppy.json")
+    except Exception as exc:  # timeout, DNS, TLS, HTTP error, bad JSON
+        return {**base, "reason": f"poppy fetch failed: {type(exc).__name__}"}
+    if not isinstance(poppy, dict):
+        return {**base, "reason": "poppy file is not a JSON object"}
+
+    # 2. protocol_version must exist.
+    if not poppy.get("protocol_version"):
+        return {"signal": "negative", "reason": "poppy missing protocol_version",
+                "details": {"domain": domain}}
+
+    # 3. organization.domain must match the merchant domain exactly.
+    org = poppy.get("organization") or {}
+    org_domain = str(org.get("domain") or "").strip().lower()
+    if not org_domain:
+        return {"signal": "negative", "reason": "poppy missing organization.domain",
+                "details": {"domain": domain}}
+    if org_domain != domain:
+        return {"signal": "negative",
+                "reason": "poppy organization.domain mismatch",
+                "details": {"domain": domain, "poppy_domain": org_domain}}
+
+    # 4. At least one of agent / apis / web must be present.
+    if not (poppy.get("agent") or poppy.get("apis") or poppy.get("web")):
+        return {"signal": "negative",
+                "reason": "poppy has none of agent/apis/web",
+                "details": {"domain": domain}}
+
+    # 5. If apis URLs are present, they should belong to the merchant domain
+    #    (or a clearly delegated host). An apis URL pointing at an unrelated
+    #    domain is a negative signal.
+    for entry in (poppy.get("apis") or []):
+        if not isinstance(entry, dict):
+            continue
+        api_url = str(entry.get("url") or "")
+        if not api_url:
+            continue
+        try:
+            host = urllib.parse.urlparse(api_url).hostname or ""
+        except Exception:
+            host = ""
+        host = host.lower()
+        if host and host != domain and not host.endswith("." + domain):
+            return {"signal": "negative",
+                    "reason": "poppy apis url points outside merchant domain",
+                    "details": {"domain": domain, "api_url": api_url}}
+
+    # 6. If an auth issuer is present, verify its RFC 8414 metadata:
+    #    issuer must match auth.issuer exactly, and poppy_domains must list
+    #    the merchant domain. A failure here is negative; no issuer at all
+    #    is neutral-positive (discovery-only file, still a valid signal).
+    auth = poppy.get("auth") or {}
+    issuer = str(auth.get("issuer") or "").strip()
+    if issuer:
+        try:
+            meta = _fetch_json(issuer.rstrip("/") + "/.well-known/oauth-authorization-server")
+        except Exception as exc:
+            return {"signal": "negative",
+                    "reason": f"issuer metadata fetch failed: {type(exc).__name__}",
+                    "details": {"domain": domain, "issuer": issuer}}
+        if not isinstance(meta, dict):
+            return {"signal": "negative",
+                    "reason": "issuer metadata is not a JSON object",
+                    "details": {"domain": domain, "issuer": issuer}}
+        meta_issuer = str(meta.get("issuer") or "").strip()
+        if meta_issuer != issuer:
+            return {"signal": "negative",
+                    "reason": "issuer metadata issuer mismatch",
+                    "details": {"domain": domain, "issuer": issuer,
+                                "metadata_issuer": meta_issuer}}
+        domains = meta.get("poppy_domains") or []
+        if domain not in [str(d).lower() for d in domains]:
+            return {"signal": "negative",
+                    "reason": "issuer poppy_domains does not list merchant domain",
+                    "details": {"domain": domain, "issuer": issuer}}
+        return {"signal": "positive",
+                "reason": "valid poppy file with verified issuer",
+                "details": {"domain": domain, "issuer": issuer}}
+
+    # Valid file, no issuer: discovery-only. Small positive, not proof of safety.
+    return {"signal": "positive",
+            "reason": "valid poppy file (discovery-only, no issuer)",
+            "details": {"domain": domain}}
+
+
 def handle_payg_request(path: str, method: str, event: dict) -> dict:
     headers   = event.get("headers") or {}
     # V1 clients send the signed payload as X-PAYMENT; V2 clients send it as
@@ -18056,6 +18501,7 @@ ROUTES = {
     "/v1/phone-reputation": handle_phone_reputation_keyless,  # keyless, corpus + attack-graph only (never Twilio)
     "/v1/email-check":      handle_email_check,     # keyless, same scoring model as checkemail@
     "/v1/composite-check":   handle_composite_check,  # keyless, url/wallet/email fan-out
+    "/v1/buyer-screen":     handle_buyer_screen,    # keyless, Shopify Buyer Fraud app
     "/v1/scan-file":        handle_scan_file,
     "/v1/sim-swap":         handle_sim_swap,
     "/v1/domain":           handle_domain,

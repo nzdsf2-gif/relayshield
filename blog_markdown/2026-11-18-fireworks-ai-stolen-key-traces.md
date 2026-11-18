@@ -1,7 +1,5 @@
 # A Stolen API Key, Unredacted Traces, and a Trojanized Extension
 
-**Draft for Wednesday, November 18, 2026. For Andrew's review.**
-**Status: draft only, not published. Do not publish without Andrew's go.**
 
 ---
 

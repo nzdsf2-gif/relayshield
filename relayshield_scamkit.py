@@ -807,6 +807,9 @@ APPROVED_FAMILIES = frozenset({
     "athena-stealthroute",
     "skyw4lker",
     "madape",
+    "blackapex",
+    "jieyou",
+    "themailer",
 })
 
 

@@ -442,6 +442,21 @@ class ProxyHandler(BaseHTTPRequestHandler):
     def _handle_one(self, req: dict, cfg: ProxyConfig, screener: Screener):
         req_id = req.get("id")
         method = req.get("method", "")
+        # MCP 2026-07-28: Mcp-Method and Mcp-Name headers carry the
+        # method and tool name so gateways can route and authorize
+        # without parsing the JSON body. Prefer the header when
+        # present; fall back to the JSON body. (One header pair per
+        # HTTP request, so for a batch it describes the first call.)
+        _hdr_method = (self.headers.get("Mcp-Method") or "").strip()
+        _hdr_name = (self.headers.get("Mcp-Name") or "").strip()
+        if _hdr_method or _hdr_name:
+            log.info("mcp headers: Mcp-Method=%s Mcp-Name=%s", _hdr_method, _hdr_name)
+        if _hdr_method:
+            method = _hdr_method
+        # Mcp-Name is the tool name for tools/call; stash it so
+        # _handle_tools_call can use it if the body omits it.
+        if _hdr_name:
+            req.setdefault("_mcp_name_header", _hdr_name)
         is_notification = "id" not in req
 
         # Notifications: forward fire-and-forget, no response.
@@ -586,7 +601,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
             body = json.dumps(_check_body).encode("utf-8")
             request = urllib.request.Request(
                 "https://api.relayshield.net/v1/passport/check",
-                data=body, headers={"Content-Type": "application/json"}, method="POST")
+                data=body, headers={"Content-Type": "application/json",
+                                     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"},
+                method="POST")
             with urllib.request.urlopen(request, timeout=10) as response:
                 data = json.loads(response.read().decode("utf-8"))
             if isinstance(data, dict):
@@ -658,6 +675,34 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return key
         self._sync_tenant_keys(tenant_id)
         return store.get(tenant_id, kind)
+
+    def _check_intent_binding(self, session_id, tool_name, args, policy1_mode="Off"):
+        """Check if a tool call is bound to an intent.
+
+        Returns (is_bound, binding_or_none). Cache is a lazy dict on
+        self.server (5-minute TTL, Option B), mirroring the Oct 31
+        self.server.session_bindings pattern, so no __init__ edit is
+        needed. STUB: the API lookup is TODO; a cache miss currently
+        returns not-bound. In Enforce mode the caller must fail closed.
+        """
+        import time
+        now = time.time()
+        if not hasattr(self.server, "intent_binding_cache") or self.server.intent_binding_cache is None:
+            self.server.intent_binding_cache = {}
+        if not hasattr(self, "_intent_binding_cache_ttl"):
+            self._intent_binding_cache_ttl = 300  # 5 minutes
+        cache_key = f"{session_id}:{tool_name}"
+        cached = self.server.intent_binding_cache.get(cache_key)
+        if cached is not None:
+            binding, expires_at = cached
+            if now < expires_at:
+                return binding is not None, binding
+            del self.server.intent_binding_cache[cache_key]
+        # Cache miss: TODO call the RelayShield API for the binding
+        # for session_id + tool_name, then cache the result.
+        binding = None
+        self.server.intent_binding_cache[cache_key] = (binding, now + self._intent_binding_cache_ttl)
+        return False, None
 
     def _fetch_tenant_policy(self, session):
         """Phase 2: fetch and cache a resolved tenant policy.
@@ -768,6 +813,37 @@ class ProxyHandler(BaseHTTPRequestHandler):
         except Exception:
             # Never fail the policy fetch because redaction wiring failed.
             # The Screener keeps its previous redaction settings.
+            pass
+
+        # Intent binding policy (2026-11-16, v2)
+        # Policy 1: Bound actions only (Off / Audit / Enforce).
+        # Policy 2: Step-up for high-risk actions.
+        # Stored per tenant on self.server.intent_policies, mirroring
+        # the existing self.server.tenant_policies pattern. Field
+        # location is top-level "intent_binding" first, falling back
+        # to the narrowed policy dict; verify against a live
+        # resolved-policy response if the values come back empty.
+        try:
+            _intent = {}
+            if isinstance(data, dict):
+                _intent_inner = data.get("data", data)
+                if isinstance(_intent_inner, dict):
+                    _intent = _intent_inner.get("intent_binding") or {}
+            if not isinstance(_intent, dict) or not _intent:
+                if isinstance(policy, dict):
+                    _intent = policy.get("intent_binding") or {}
+            if not isinstance(_intent, dict):
+                _intent = {}
+            if not hasattr(self.server, "intent_policies") or self.server.intent_policies is None:
+                self.server.intent_policies = {}
+            self.server.intent_policies[cache_key] = {
+                "policy1_mode": _intent.get("policy1_mode", "Off"),
+                "policy2_step_up_enabled": _intent.get("policy2_step_up_enabled", False),
+                "step_up_amount_threshold": _intent.get("step_up_amount_threshold", 0),
+                "step_up_triggers": _intent.get("step_up_triggers", []),
+            }
+        except Exception:
+            # Never fail the policy fetch because intent extraction failed.
             pass
         _key_errors = getattr(self.server, "tenant_policy_errors", None)
         if _key_errors is not None:

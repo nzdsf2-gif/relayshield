@@ -5517,6 +5517,234 @@ def _buyer_screen_signal_account(account, cart):
     return {"type": "account", "level": "medium", "reasons": reasons}
 
 
+# ---------------------------------------------------------------------------
+# Buyer-screen TAP agent check (revamp 2026-11-18) -- third dimension
+# ---------------------------------------------------------------------------
+# When the Buyer Fraud Worker detects an agentic buyer (Poppy file on the
+# buyer domain), it passes an "agent" block with the request. These
+# helpers verify the agent's Passport and intent binding by calling the
+# TAP verifier internals in-process (handle_passport_check /
+# handle_passport_status / _intent_binder). No HTTP hop, no x402 charge:
+# the TAP check is included in the $70/mo combined license, not
+# incremental (scope decision D5).
+#
+# Request "agent" shape (all fields optional; absent agent = not agentic):
+#   { "domain": "agent.example.com",
+#     "poppy": {"signal": "positive", "reason": "..."},  # Worker Poppy evidence
+#     "passport_id": "rsp_...",       # registry status lookup
+#     "passport_compact": "v1....",   # full crypto + revocation verification
+#     "binding_id": "bind_...",       # intent-binding record to check
+#     "tenant_id": "..." }            # binding-registry tenant (agent's key)
+#
+# The binding registry is tenant-scoped (_DynamoBindingStore.get returns
+# None for another tenant's binding), so the binding check needs the
+# agent's registry tenant. Without it the binding check is skipped
+# (fail open); the Passport verdict still stands.
+#
+# Privacy: passport_id / binding_id are opaque identifiers, never PII;
+# the raw buyer email/IP are never logged here (only _redact() digests
+# elsewhere in this handler).
+
+def _buyer_screen_response_data(resp):
+    """Extract the data dict from a _ok() response, or None (non-200 / malformed)."""
+    try:
+        if not isinstance(resp, dict) or resp.get("statusCode") != 200:
+            return None
+        body = json.loads(resp.get("body") or "{}")
+        if not body.get("ok"):
+            return None
+        data = body.get("data")
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def _buyer_screen_agent_passport(agent):
+    """Verify the agent's Passport.
+
+    Returns (outcome, reason) with outcome in:
+      "verified"    -- Passport is cryptographically valid and active.
+      "high"        -- expired, revoked, or failed verification.
+      "info"        -- registry read succeeded; no such Passport (not_found).
+      "unavailable" -- verifier unconfigured, timed out, or errored.
+      "none"        -- no Passport fields were presented at all.
+    """
+    compact = agent.get("passport_compact")
+    if isinstance(compact, str) and compact.strip():
+        try:
+            data = _buyer_screen_response_data(
+                handle_passport_check({"compact": compact.strip()}))
+        except Exception as exc:
+            logger.warning("buyer-screen passport check failed: %s", exc)
+            return ("unavailable", None)
+        if data is None:
+            # 503 unconfigured, or a malformed response: the verifier
+            # could not answer. Fail open at the call site.
+            return ("unavailable", None)
+        if data.get("revoked") or data.get("status") == "revoked":
+            return ("high", "agent Passport revoked")
+        status = str(data.get("status") or "")
+        if data.get("valid") is True:
+            return ("verified", "agent Passport verified")
+        if status == "expired":
+            return ("high", "agent Passport expired")
+        if status in ("malformed", "unsupported_version",
+                      "invalid_signature", "issuer_mismatch"):
+            return ("high", "agent Passport failed verification (%s)" % status)
+        return ("high", "agent Passport failed verification")
+    passport_id = agent.get("passport_id")
+    if isinstance(passport_id, str) and passport_id.strip():
+        try:
+            data = _buyer_screen_response_data(
+                handle_passport_status(passport_id.strip()))
+        except Exception as exc:
+            logger.warning("buyer-screen passport status failed: %s", exc)
+            return ("unavailable", None)
+        if data is None:
+            return ("unavailable", None)
+        status = str(data.get("status") or "")
+        if status == "active":
+            return ("verified", "agent Passport verified")
+        if status == "expired":
+            return ("high", "agent Passport expired")
+        if status == "revoked":
+            return ("high", "agent Passport revoked")
+        if status == "not_found":
+            return ("info", "agent Passport not found in RelayShield registry (informational)")
+        return ("unavailable", None)
+    return ("none", None)
+
+
+def _buyer_screen_agent_binding(agent, shop_host, cart_total):
+    """Read-only intent-binding check. Returns (outcome, reason).
+
+    Outcomes: "verified", "high", "unavailable", "none".
+    NEVER consumes: verify_at_settlement is deliberately not called here,
+    because an allow consumes the binding and would burn it before the
+    actual settlement. This is get_binding + signature / expiry /
+    counterparty / amount comparison only.
+    """
+    binding_id = agent.get("binding_id")
+    if not isinstance(binding_id, str) or not binding_id.strip():
+        return ("none", None)
+    tenant_id = agent.get("tenant_id")
+    if not isinstance(tenant_id, str) or not tenant_id.strip():
+        # The binding registry is tenant-scoped; without the agent's
+        # registry tenant the record cannot be resolved honestly.
+        return ("unavailable", None)
+    try:
+        binder = _intent_binder(tenant_id.strip(), "tap")
+    except Exception as exc:
+        logger.warning("buyer-screen intent binder failed: %s", exc)
+        return ("unavailable", None)
+    if binder is None:
+        # Intent binding not configured on this deployment.
+        return ("unavailable", None)
+    try:
+        binding = binder.get_binding(binding_id.strip())
+    except Exception as exc:
+        logger.warning("buyer-screen binding lookup failed: %s", exc)
+        return ("unavailable", None)
+    if binding is None:
+        return ("high", "claimed intent binding not found")
+    record = binding.record or {}
+    try:
+        if not binding.signature_valid():
+            return ("high", "intent binding signature does not verify")
+    except Exception:
+        return ("unavailable", None)
+    expires_at = record.get("expires_at")
+    try:
+        if expires_at is not None and time.time() > int(expires_at):
+            return ("high", "intent binding expired")
+    except (TypeError, ValueError):
+        pass
+    counterparty = str(record.get("counterparty") or "").strip().lower()
+    if counterparty and shop_host:
+        # Compare hostnames only, and only when the bound counterparty
+        # looks domain-like; a wallet address or opaque identifier is
+        # not comparable to a shop hostname and must not false-positive.
+        bound_host = counterparty.replace("https://", "").replace("http://", "").split("/")[0]
+        if "." in bound_host and bound_host != shop_host.lower():
+            return ("high", "intent binding counterparty mismatch")
+    amount = record.get("amount")
+    if amount is not None and cart_total is not None:
+        try:
+            if Decimal(str(amount)) != cart_total:
+                return ("high", "intent binding amount mismatch")
+        except Exception:
+            pass
+    currency = str(record.get("currency") or "").strip().upper()
+    cart_currency = None
+    if isinstance(agent.get("_cart_currency"), str):
+        cart_currency = agent["_cart_currency"].strip().upper()
+    if currency and cart_currency and currency != cart_currency:
+        return ("high", "intent binding currency mismatch")
+    return ("verified", "agent intent binding verified")
+
+
+def _buyer_screen_signal_agent(agent, shop_host, cart_total, cart_currency=None):
+    """Agent (TAP/PAP) signal for buyer-screen. Returns a signal dict or None.
+
+    None means "no agent signal": either the buyer is not agentic (no
+    agent block), or the verifier could not answer and the check fails
+    open (Q1). A returned signal is either level "high" (revoked /
+    expired / failed Passport, or a binding problem) or level "unknown"
+    (verified, or informational for an unverified agent per Q2). The
+    unknown level keeps the score unchanged: a verified agent is evidence,
+    not a discount, and an unverified agent is informational, not a flag.
+    """
+    if not isinstance(agent, dict) or not agent:
+        return None
+    try:
+        passport_outcome, passport_reason = _buyer_screen_agent_passport(agent)
+        if cart_currency is not None:
+            agent = dict(agent)
+            agent["_cart_currency"] = cart_currency
+        binding_outcome, binding_reason = _buyer_screen_agent_binding(
+            agent, shop_host, cart_total)
+    except Exception as exc:
+        # Belt and braces: the helpers already swallow errors, so reaching
+        # here means something unexpected failed. Fail open (Q1).
+        logger.warning("buyer-screen agent check failed: %s", exc)
+        return None
+    high_reasons = []
+    if passport_outcome == "high" and passport_reason:
+        high_reasons.append(passport_reason)
+    if binding_outcome == "high" and binding_reason:
+        high_reasons.append(binding_reason)
+    if high_reasons:
+        return {"type": "agent", "level": "high", "reasons": high_reasons}
+    reasons = []
+    if passport_outcome == "verified" and passport_reason:
+        reasons.append(passport_reason)
+    elif passport_outcome == "info" and passport_reason:
+        reasons.append(passport_reason)
+    if binding_outcome == "verified" and binding_reason:
+        reasons.append(binding_reason)
+    if reasons:
+        return {"type": "agent", "level": "unknown", "reasons": reasons}
+    presented = bool(
+        (isinstance(agent.get("passport_compact"), str)
+         and agent.get("passport_compact").strip())
+        or (isinstance(agent.get("passport_id"), str)
+            and agent.get("passport_id").strip())
+        or (isinstance(agent.get("binding_id"), str)
+            and agent.get("binding_id").strip()))
+    if presented:
+        # Every presented credential was unverifiable (verifier down or
+        # unconfigured). Fail open (Q1): no agent signal, flag nothing.
+        return None
+    domain = agent.get("domain")
+    domain = str(domain).strip() if domain is not None else ""
+    if domain:
+        reason = ("agentic buyer detected via Poppy file on %s, "
+                  "no Passport presented (informational)" % domain)
+    else:
+        reason = "agentic buyer detected, no Passport presented (informational)"
+    return {"type": "agent", "level": "unknown", "reasons": [reason]}
+
+
 def handle_buyer_screen(params: dict) -> dict:
     """POST /v1/buyer-screen -- keyless buyer screening for Shopify Buyer Fraud."""
     params = params or {}
@@ -5534,6 +5762,16 @@ def handle_buyer_screen(params: dict) -> dict:
     account = account if isinstance(account, dict) else None
     cart = params.get("cart")
     cart = cart if isinstance(cart, dict) else None
+    agent = params.get("agent")
+    agent = agent if isinstance(agent, dict) else None
+    shop_raw = params.get("shop") or ""
+    shop_host = ""
+    if isinstance(shop_raw, str) and shop_raw.strip():
+        shop_host = (shop_raw.strip().lower().replace("https://", "")
+                     .replace("http://", "").split("/")[0])
+    cart_total = _buyer_screen_parse_amount((cart or {}).get("total_price"))
+    cart_currency = (cart or {}).get("currency")
+    cart_currency = cart_currency if isinstance(cart_currency, str) else None
 
     signals = []
     if email and "@" in email:
@@ -5546,6 +5784,10 @@ def handle_buyer_screen(params: dict) -> dict:
     acct_signal = _buyer_screen_signal_account(account, cart)
     if acct_signal is not None:
         signals.append(acct_signal)
+    agent_signal = _buyer_screen_signal_agent(
+        agent, shop_host, cart_total, cart_currency)
+    if agent_signal is not None:
+        signals.append(agent_signal)
 
     if not signals:
         return _err("send at least one buyer signal (email, ip, address or account)")

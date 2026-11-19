@@ -12,6 +12,13 @@ only high/medium/unknown; every signal carries reasons; a failing corpus
 lookup degrades to unknown instead of killing the screening; the raw
 email never appears in the response. Corpus helpers are monkeypatched --
 no network, no DynamoDB, no upstreams.
+
+Revamp 2026-11-18 (v2): the BuyerScreenAgent class adds the TAP/PAP
+third dimension. When the Worker passes an "agent" block (Poppy-detected
+buyer), the Lambda verifies the agent's Passport and intent binding
+in-process and folds the verdict in as one more additive signal. A clean
+TAP result never clears a corpus flag; a verifier failure fails open
+with no agent signal. The 44 v1 tests are unchanged.
 """
 import json
 import pathlib
@@ -49,6 +56,28 @@ def _stub_aws():
 
 _stub_aws()
 sys.path.insert(0, str(ROOT))
+
+
+def _stub_missing_siblings():
+    """Stub relayshield_* sibling modules that cannot be found, so the
+    buyer-screen tests run on a minimal fixture (VM) as well as the full
+    repo (Mac). A module is only stubbed when importlib cannot find it
+    at all, so real modules always take precedence. The buyer-screen
+    code never touches these siblings; they are only needed because
+    relayshield_api.py imports them at module level."""
+    import importlib.util
+    for name in ("relayshield_agentic_api", "relayshield_breach_monitor",
+                 "relayshield_corpus_provenance", "relayshield_intel_labels",
+                 "relayshield_intent_binding", "relayshield_openapi_spec",
+                 "relayshield_passport", "relayshield_phone_reputation",
+                 "relayshield_scamkit", "relayshield_scamkit_fetch",
+                 "relayshield_siem_connector", "relayshield_sim_swap_consent",
+                 "relayshield_tap_ti", "relayshield_vt_budget"):
+        if name not in sys.modules and importlib.util.find_spec(name) is None:
+            sys.modules[name] = unittest.mock.MagicMock()
+
+
+_stub_missing_siblings()
 import relayshield_api as api  # noqa: E402
 
 
@@ -449,6 +478,377 @@ class BuyerScreenCorpusFailure(unittest.TestCase):
             d = _data_of(api.handle_buyer_screen(_email_params()))
         self.assertEqual(d["level"], "unknown")
         self.assertIn("check failed", d["signals"][0]["reasons"][0])
+
+
+class BuyerScreenAgent(unittest.TestCase):
+    """TAP/PAP third dimension (revamp 2026-11-18).
+
+    The Worker passes an "agent" block when it detects a Poppy file on
+    the buyer domain. The Lambda verifies the agent's Passport and intent
+    binding in-process (no HTTP, no x402 charge) and folds the verdict in
+    as one more additive signal. Fixtures below monkeypatch the TAP
+    verifier internals (handle_passport_check / handle_passport_status /
+    _intent_binder); nothing here touches the network or DynamoDB.
+    """
+
+    def _passport_ok(self, **data):
+        return lambda params: api._ok(data)
+
+    def _passport_unavailable(self):
+        # 503: verifier unconfigured (or timed out upstream). Fail open.
+        return lambda params: api._err("verifier unavailable", 503)
+
+    def _passport_raises(self):
+        def _raise(params):
+            raise RuntimeError("verifier timed out")
+        return _raise
+
+    def _binder(self, bindings):
+        return lambda tenant_id, rail="tap": _FakeBinder(bindings)
+
+    def _run_agent(self, params, passport_check=None, passport_status=None,
+                   binder=None, **kw):
+        patches = _patch_corpus(**kw)
+        if passport_check is not None:
+            patches.append(unittest.mock.patch.object(
+                api, "handle_passport_check", passport_check))
+        if passport_status is not None:
+            patches.append(unittest.mock.patch.object(
+                api, "handle_passport_status", passport_status))
+        if binder is not None:
+            patches.append(unittest.mock.patch.object(
+                api, "_intent_binder", binder))
+        for p in patches:
+            p.start()
+        try:
+            return api.handle_buyer_screen(params)
+        finally:
+            for p in patches:
+                p.stop()
+
+    def _agent_signal(self, data):
+        sigs = [s for s in data["signals"] if s["type"] == "agent"]
+        self.assertEqual(len(sigs), 1, data["signals"])
+        return sigs[0]
+
+    def test_no_agent_block_no_agent_signal(self):
+        d = _data_of(_run(_email_params()))
+        self.assertEqual([s["type"] for s in d["signals"]], ["email"])
+
+    def test_non_dict_agent_ignored(self):
+        d = _data_of(_run({**_email_params(), "agent": "agent.example.com"}))
+        self.assertEqual([s["type"] for s in d["signals"]], ["email"])
+
+    def test_passport_valid_is_unknown_no_flag(self):
+        d = _data_of(self._run_agent(
+            {**_email_params(),
+             "agent": {"domain": "agent.example.com",
+                       "passport_compact": "v1.valid-compact"}},
+            passport_check=self._passport_ok(
+                valid=True, status="valid", revoked=False)))
+        self.assertEqual(d["level"], "unknown")
+        self.assertEqual(d["score"], 15)
+        sig = self._agent_signal(d)
+        self.assertEqual(sig["level"], "unknown")
+        self.assertIn("Passport verified", sig["reasons"][0])
+
+    def test_passport_missing_is_informational_not_medium(self):
+        # Q2: an unverified agent is informational, NOT medium, until
+        # Passport adoption grows. The score must not move.
+        d = _data_of(self._run_agent(
+            {**_email_params(),
+             "agent": {"domain": "agent.example.com",
+                       "poppy": {"signal": "positive",
+                                 "reason": "valid poppy file"}}}))
+        self.assertEqual(d["level"], "unknown")
+        self.assertEqual(d["score"], 15)
+        sig = self._agent_signal(d)
+        self.assertEqual(sig["level"], "unknown")
+        self.assertIn("no Passport presented (informational)",
+                      sig["reasons"][0])
+
+    def test_passport_expired_is_high(self):
+        d = _data_of(self._run_agent(
+            {**_email_params(),
+             "agent": {"domain": "agent.example.com",
+                       "passport_compact": "v1.expired-compact"}},
+            passport_check=self._passport_ok(
+                valid=False, status="expired", revoked=False)))
+        self.assertEqual(d["level"], "high")
+        self.assertEqual(d["score"], 90)
+        sig = self._agent_signal(d)
+        self.assertEqual(sig["level"], "high")
+        self.assertIn("expired", sig["reasons"][0])
+
+    def test_passport_revoked_is_high(self):
+        d = _data_of(self._run_agent(
+            {**_email_params(),
+             "agent": {"domain": "agent.example.com",
+                       "passport_compact": "v1.revoked-compact"}},
+            passport_check=self._passport_ok(
+                valid=True, status="revoked", revoked=True)))
+        self.assertEqual(d["level"], "high")
+        sig = self._agent_signal(d)
+        self.assertIn("revoked", sig["reasons"][0])
+
+    def test_passport_bad_signature_is_high(self):
+        d = _data_of(self._run_agent(
+            {**_email_params(),
+             "agent": {"domain": "agent.example.com",
+                       "passport_compact": "v1.tampered"}},
+            passport_check=self._passport_ok(
+                valid=False, status="invalid_signature", revoked=False)))
+        self.assertEqual(d["level"], "high")
+        self.assertIn("failed verification", self._agent_signal(d)["reasons"][0])
+
+    def test_passport_id_active_is_verified(self):
+        d = _data_of(self._run_agent(
+            {**_email_params(),
+             "agent": {"domain": "agent.example.com",
+                       "passport_id": "rsp_abc123"}},
+            passport_status=lambda pid: api._ok(
+                {"passport_id": pid, "status": "active"})))
+        self.assertEqual(d["level"], "unknown")
+        self.assertIn("Passport verified",
+                      self._agent_signal(d)["reasons"][0])
+
+    def test_passport_id_expired_is_high(self):
+        d = _data_of(self._run_agent(
+            {**_email_params(),
+             "agent": {"domain": "agent.example.com",
+                       "passport_id": "rsp_abc123"}},
+            passport_status=lambda pid: api._ok(
+                {"passport_id": pid, "status": "expired"})))
+        self.assertEqual(d["level"], "high")
+
+    def test_passport_id_not_found_is_informational(self):
+        d = _data_of(self._run_agent(
+            {**_email_params(),
+             "agent": {"domain": "agent.example.com",
+                       "passport_id": "rsp_nope"}},
+            passport_status=lambda pid: api._ok(
+                {"passport_id": pid, "status": "not_found"})))
+        self.assertEqual(d["level"], "unknown")
+        self.assertEqual(d["score"], 15)
+        self.assertIn("not found", self._agent_signal(d)["reasons"][0])
+
+    def test_binding_verified_with_valid_passport(self):
+        import time as _time
+        now = int(_time.time())
+        record = {"payer": "agent.example.com",
+                  "counterparty": "shop.myshopify.com",
+                  "amount": "149.00", "currency": "USD",
+                  "issued_at": now - 60, "expires_at": now + 3600}
+        d = _data_of(self._run_agent(
+            {**_email_params(),
+             "shop": "https://shop.myshopify.com",
+             "cart": {"total_price": "149.00", "currency": "USD"},
+             "agent": {"domain": "agent.example.com",
+                       "passport_compact": "v1.valid-compact",
+                       "binding_id": "bind_1", "tenant_id": "tnt_agent"}},
+            passport_check=self._passport_ok(
+                valid=True, status="valid", revoked=False),
+            binder=self._binder({"bind_1": _FakeBinding(record)})))
+        self.assertEqual(d["level"], "unknown")
+        self.assertEqual(d["score"], 15)
+        sig = self._agent_signal(d)
+        self.assertEqual(sig["level"], "unknown")
+        self.assertTrue(any("Passport verified" in r for r in sig["reasons"]))
+        self.assertTrue(any("binding verified" in r for r in sig["reasons"]))
+
+    def test_binding_not_found_is_high(self):
+        d = _data_of(self._run_agent(
+            {**_email_params(),
+             "agent": {"domain": "agent.example.com",
+                       "passport_compact": "v1.valid-compact",
+                       "binding_id": "bind_nope", "tenant_id": "tnt_agent"}},
+            passport_check=self._passport_ok(
+                valid=True, status="valid", revoked=False),
+            binder=self._binder({})))
+        self.assertEqual(d["level"], "high")
+        self.assertIn("binding not found",
+                      self._agent_signal(d)["reasons"][0])
+
+    def test_binding_counterparty_mismatch_is_high(self):
+        import time as _time
+        now = int(_time.time())
+        record = {"payer": "agent.example.com",
+                  "counterparty": "other-shop.myshopify.com",
+                  "amount": "149.00", "currency": "USD",
+                  "issued_at": now - 60, "expires_at": now + 3600}
+        d = _data_of(self._run_agent(
+            {**_email_params(),
+             "shop": "https://shop.myshopify.com",
+             "cart": {"total_price": "149.00", "currency": "USD"},
+             "agent": {"domain": "agent.example.com",
+                       "passport_compact": "v1.valid-compact",
+                       "binding_id": "bind_1", "tenant_id": "tnt_agent"}},
+            passport_check=self._passport_ok(
+                valid=True, status="valid", revoked=False),
+            binder=self._binder({"bind_1": _FakeBinding(record)})))
+        self.assertEqual(d["level"], "high")
+        self.assertIn("counterparty mismatch",
+                      self._agent_signal(d)["reasons"][0])
+
+    def test_binding_amount_mismatch_is_high(self):
+        import time as _time
+        now = int(_time.time())
+        record = {"payer": "agent.example.com",
+                  "counterparty": "shop.myshopify.com",
+                  "amount": "9.00", "currency": "USD",
+                  "issued_at": now - 60, "expires_at": now + 3600}
+        d = _data_of(self._run_agent(
+            {**_email_params(),
+             "shop": "https://shop.myshopify.com",
+             "cart": {"total_price": "149.00", "currency": "USD"},
+             "agent": {"domain": "agent.example.com",
+                       "passport_compact": "v1.valid-compact",
+                       "binding_id": "bind_1", "tenant_id": "tnt_agent"}},
+            passport_check=self._passport_ok(
+                valid=True, status="valid", revoked=False),
+            binder=self._binder({"bind_1": _FakeBinding(record)})))
+        self.assertEqual(d["level"], "high")
+        self.assertIn("amount mismatch",
+                      self._agent_signal(d)["reasons"][0])
+
+    def test_binding_expired_is_high(self):
+        import time as _time
+        now = int(_time.time())
+        record = {"payer": "agent.example.com",
+                  "counterparty": "shop.myshopify.com",
+                  "amount": "149.00", "currency": "USD",
+                  "issued_at": now - 7200, "expires_at": now - 3600}
+        d = _data_of(self._run_agent(
+            {**_email_params(),
+             "agent": {"domain": "agent.example.com",
+                       "passport_compact": "v1.valid-compact",
+                       "binding_id": "bind_1", "tenant_id": "tnt_agent"}},
+            passport_check=self._passport_ok(
+                valid=True, status="valid", revoked=False),
+            binder=self._binder({"bind_1": _FakeBinding(record)})))
+        self.assertEqual(d["level"], "high")
+        self.assertIn("binding expired",
+                      self._agent_signal(d)["reasons"][0])
+
+    def test_binding_bad_signature_is_high(self):
+        import time as _time
+        now = int(_time.time())
+        record = {"payer": "agent.example.com",
+                  "counterparty": "shop.myshopify.com",
+                  "amount": "149.00", "currency": "USD",
+                  "issued_at": now - 60, "expires_at": now + 3600}
+        d = _data_of(self._run_agent(
+            {**_email_params(),
+             "agent": {"domain": "agent.example.com",
+                       "passport_compact": "v1.valid-compact",
+                       "binding_id": "bind_1", "tenant_id": "tnt_agent"}},
+            passport_check=self._passport_ok(
+                valid=True, status="valid", revoked=False),
+            binder=self._binder(
+                {"bind_1": _FakeBinding(record, valid=False)})))
+        self.assertEqual(d["level"], "high")
+        self.assertIn("signature does not verify",
+                      self._agent_signal(d)["reasons"][0])
+
+    def test_binding_without_tenant_skips_binding_check(self):
+        # The registry is tenant-scoped; without tenant_id the binding
+        # cannot be resolved, so it is skipped and the Passport verdict
+        # stands on its own.
+        d = _data_of(self._run_agent(
+            {**_email_params(),
+             "agent": {"domain": "agent.example.com",
+                       "passport_compact": "v1.valid-compact",
+                       "binding_id": "bind_1"}},
+            passport_check=self._passport_ok(
+                valid=True, status="valid", revoked=False),
+            binder=self._binder({})))
+        self.assertEqual(d["level"], "unknown")
+        sig = self._agent_signal(d)
+        self.assertTrue(any("Passport verified" in r for r in sig["reasons"]))
+        self.assertFalse(any("binding" in r for r in sig["reasons"]))
+
+    def test_verifier_unavailable_fails_open(self):
+        # Q1: verifier timeout / unconfigured -> no agent signal at all,
+        # flag nothing, return the existing buyer-screen verdict.
+        d = _data_of(self._run_agent(
+            {**_email_params(),
+             "agent": {"domain": "agent.example.com",
+                       "passport_compact": "v1.valid-compact"}},
+            passport_check=self._passport_unavailable()))
+        self.assertEqual(d["level"], "unknown")
+        self.assertEqual(d["score"], 15)
+        self.assertEqual(
+            [s for s in d["signals"] if s["type"] == "agent"], [])
+
+    def test_verifier_exception_fails_open(self):
+        d = _data_of(self._run_agent(
+            {**_email_params(),
+             "agent": {"domain": "agent.example.com",
+                       "passport_compact": "v1.valid-compact"}},
+            passport_check=self._passport_raises()))
+        self.assertEqual(d["level"], "unknown")
+        self.assertEqual(
+            [s for s in d["signals"] if s["type"] == "agent"], [])
+
+    def test_binder_unconfigured_fails_open(self):
+        d = _data_of(self._run_agent(
+            {**_email_params(),
+             "agent": {"domain": "agent.example.com",
+                       "passport_compact": "v1.valid-compact",
+                       "binding_id": "bind_1", "tenant_id": "tnt_agent"}},
+            passport_check=self._passport_ok(
+                valid=True, status="valid", revoked=False),
+            binder=lambda tenant_id, rail="tap": None))
+        self.assertEqual(d["level"], "unknown")
+        sig = self._agent_signal(d)
+        self.assertTrue(any("Passport verified" in r for r in sig["reasons"]))
+
+    def test_clean_tap_never_clears_corpus_flag(self):
+        # Corpus high + verified Passport: still high, same score. The
+        # TAP check is additive; it can never downgrade a corpus flag.
+        d = _data_of(self._run_agent(
+            {**_email_params("fraud@example.com"),
+             "agent": {"domain": "agent.example.com",
+                       "passport_compact": "v1.valid-compact"}},
+            passport_check=self._passport_ok(
+                valid=True, status="valid", revoked=False),
+            ioc={("fraud@example.com", ("email",)):
+                 [{"ioc_value": "fraud@example.com"}]}))
+        self.assertEqual(d["level"], "high")
+        self.assertEqual(d["score"], 90)
+
+    def test_agent_high_corroborates_corpus_medium(self):
+        # Corpus medium (55) + agent high (90): riskiest wins at 90, and
+        # the second risky signal adds +5 -> 95.
+        d = _data_of(self._run_agent(
+            {**_email_params("buyer@mailinator.com"),
+             "agent": {"domain": "agent.example.com",
+                       "passport_compact": "v1.expired-compact"}},
+            passport_check=self._passport_ok(
+                valid=False, status="expired", revoked=False)))
+        self.assertEqual(d["level"], "high")
+        self.assertEqual(d["score"], 95)
+
+
+class _FakeBinding:
+    """Minimal stand-in for intent_binding.Binding in agent tests."""
+
+    def __init__(self, record, valid=True):
+        self.record = record
+        self._valid = valid
+
+    def signature_valid(self):
+        return self._valid
+
+
+class _FakeBinder:
+    """Minimal stand-in for intent_binding.IntentBinder in agent tests."""
+
+    def __init__(self, bindings):
+        self._bindings = bindings
+
+    def get_binding(self, binding_id):
+        return self._bindings.get(binding_id)
 
 
 if __name__ == "__main__":

@@ -30,7 +30,9 @@
 PROFILE=relayshield
 REGION=us-east-1
 ACCOUNT=239677749008
-PROTECT="relayshield_watchlist relayshield_verdict_watches relayshield_discord_installs relayshield_intel_first_seen relayshield_operator_identities relayshield_kit_fingerprints relayshield_marketplace_listings"
+# 2026-11-20: durable tenant, license and security state tables added to the list below:
+# hosted_proxies (tenant registry), licenses, license_revocations, passports, payer_tenant_map, pinned_payees.
+PROTECT="relayshield_watchlist relayshield_verdict_watches relayshield_discord_installs relayshield_intel_first_seen relayshield_operator_identities relayshield_kit_fingerprints relayshield_marketplace_listings relayshield_hosted_proxies relayshield_licenses relayshield_license_revocations relayshield_passports relayshield_payer_tenant_map relayshield_pinned_payees"
 export AWS_PAGER=""
 aws() { command aws --profile "$PROFILE" --region "$REGION" --no-cli-pager "$@"; }
 

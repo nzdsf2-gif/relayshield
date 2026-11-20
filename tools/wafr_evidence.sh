@@ -144,6 +144,13 @@ for U in $(aws iam list-users --query 'Users[].UserName' --output text 2>/dev/nu
   [ "$N" = "0" ] && echo "   IAM user with no MFA device: $U"
 done
 echo "   (IAM users listed above with no MFA, if any; nothing printed means every IAM user has a device)"
+echo "-- IAM access keys: user, status, created, last used (key ids are not printed)"
+for U in $(aws iam list-users --query 'Users[].UserName' --output text 2>/dev/null); do
+  aws iam list-access-keys --user-name "$U" --query 'AccessKeyMetadata[].[AccessKeyId,Status,CreateDate]' --output text 2>/dev/null | while read -r KID ST CD; do
+    LU=$(aws iam get-access-key-last-used --access-key-id "$KID" --query 'AccessKeyLastUsed.LastUsedDate' --output text 2>/dev/null)
+    echo "   $U  status=$ST  created=$CD  last_used=${LU:-unknown}"
+  done
+done
 echo "-- alarm actions (who is notified) for each alarm"
 try aws cloudwatch describe-alarms --query 'MetricAlarms[].[AlarmName,length(AlarmActions)]' --output text
 

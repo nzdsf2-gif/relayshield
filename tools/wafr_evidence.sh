@@ -129,5 +129,23 @@ printf 'GuardDuty detectors: '; try aws guardduty list-detectors --query 'length
 printf 'Config recorders: ';    try aws configservice describe-configuration-recorders --query 'length(ConfigurationRecorders)'
 printf 'Regional WAF web ACLs: '; try aws wafv2 list-web-acls --scope REGIONAL --query 'length(WebACLs)'
 
+hdr "Information security policy evidence (sections 5, 9 and 11)"
+echo "-- CloudTrail trails: name, multi-region, logging now"
+try aws cloudtrail describe-trails --query 'trailList[].[Name,IsMultiRegionTrail,LogFileValidationEnabled]' --output text
+for TR in $(aws cloudtrail describe-trails --query 'trailList[].Name' --output text 2>/dev/null); do
+  printf '   %s IsLogging: ' "$TR"; try aws cloudtrail get-trail-status --name "$TR" --query 'IsLogging' --output text
+done
+echo "-- Config recorder status (recording now?)"
+try aws configservice describe-configuration-recorder-status --query 'ConfigurationRecordersStatus[].[name,recording]' --output text
+echo "-- root account MFA (1 = enabled) and IAM users without MFA"
+try aws iam get-account-summary --query 'SummaryMap.AccountMFAEnabled' --output text
+for U in $(aws iam list-users --query 'Users[].UserName' --output text 2>/dev/null); do
+  N=$(aws iam list-mfa-devices --user-name "$U" --query 'length(MFADevices)' --output text 2>/dev/null)
+  [ "$N" = "0" ] && echo "   IAM user with no MFA device: $U"
+done
+echo "   (IAM users listed above with no MFA, if any; nothing printed means every IAM user has a device)"
+echo "-- alarm actions (who is notified) for each alarm"
+try aws cloudwatch describe-alarms --query 'MetricAlarms[].[AlarmName,length(AlarmActions)]' --output text
+
 echo
 echo "== done. Paste everything above, unedited."

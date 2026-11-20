@@ -436,3 +436,197 @@ NEXT: Succeeded -> verifier stage `architecture` (Andrew dispatches or re-runs; 
   Complete on this small a spend. Tagging relayshield-api attributes ALL of that shared function's spend to Bundle D's code; acceptable for the prerequisite.
 * NEXT: Andrew runs the tool on the Mac (dry run, then `--apply`); wait up to 7 days for the dashboard; prices apply on his go; re-check Partner Central.
 
+## 2026-10-26 (prices SUBMITTED): CHANGE SET `5bf8i6hbov1600xq5q10bs0m2` SENT; AWS REVIEWS ASYNCHRONOUSLY. GREEN MEANS SUBMITTED, NOT LIVE.
+
+Actions run 40419471680 (apply, head a68264e, 23:24 UTC): the log's final lines are `SUBMITTED. ChangeSetId 5bf8i6hbov1600xq5q10bs0m2` and the document sent carries bulk 1.800, tech_stack 0.180, mcp_registry 0.320,
+prompt_injection 0.320, llm_credential 0.360 and monthly agentic_bundle_access 270. **Not yet verified live:** the verifier's `prices` stage is the check; do not call prices done until it reads PASS. One open change on the
+product until the change set finishes. PRM tagging is an AWS-account action, not a Marketplace change, so it does not collide.
+
+## 2026-10-26 (prices, re-run refused): THE SECOND APPLY WAS REFUSED BECAUSE THE FIRST HAD ALREADY TAKEN EFFECT. THE GUARD WORKED.
+
+Run 40419471680 attempt 2 (23:27 UTC, a re-run three minutes after the first apply) exited 2 with `REFUSED: the live prices are not the prices the spec was written against`, listing live agentic_bundle_access 270, bulk 1.800, llm_credential 0.360,
+mcp_registry 0.320, prompt_injection 0.320, tech_stack 0.180. Those ARE the new AWS-edition prices, so change set `5bf8i6hbov1600xq5q10bs0m2` completed within about three minutes and the tool refused to apply the same change twice.
+This is read from Andrew's screenshot of the refusal, NOT yet from the verifier: next, verifier stage `prices` must read PASS before prices are called done. Do not re-run apply.
+
+## 2026-10-26 (ALL FOUR VERIFIER STAGES PASS): THE LISTING SIDE OF THE BUNDLE D "DEPLOYED ON AWS" WORK IS COMPLETE AND READ BACK FROM AWS.
+
+Verifier run 40420394927 (stage all, 23:32 UTC, head a68264e), read from the job log: **endpoint 8/8, copy 4/4, architecture 3/3, prices PASS ("offer rate card is AFTER, the AWS-edition prices are live"), "ALL JUDGED CHECKS PASS".**
+Requests: fulfillment `8k3v6j9uihtt9hh4vnp7lwbwzi`, product info `6e7hu041897ertq2ajm01r59y`, architecture `7c016057sqdn42spdi30yevay`, prices change set `5bf8i6hbov1600xq5q10bs0m2`, API usage text fixed.
+**REMAINING, nothing else on the listing:** (1) PRM tagging on Andrew's Mac (`tools/prm_tag_resources.py`, dry run then `--apply`; NOT yet run as far as this session knows); (2) wait up to 7 days for the PRM dashboard; (3) re-check Partner Central: does the
+FTR still show Blocked, and on what; (4) live proof of the first-party path with a real AWS-licensed key (still unproven in production); (5) then Dave Shapiro. Lower priority: AgentCore Gateway option, stale lambda-drift issues, stale "two doors" code comments.
+
+## 2026-10-26 (two corrections from Andrew, both recorded): THE FTR NEEDS THE END-TO-END SUBSCRIPTION TEST; DAVE SHAPIRO IS CONTACTED ONLY AFTER THE WAFR GAPS ARE FIXED, RESUBMITTED, AND THE FTR PASSES.
+
+* **E2E test, his words:** the FTR will not show a released product until the end-to-end test is run; it was done for earlier licenses. **I had the record and did not volunteer it** (`bundle_b_launch_runbook.md` steps 7 and 8, and 8c).
+  The Bundle B precedent: a PRIVATE TEST OFFER targeted at buyer account `442429445748` ("TestUser"), granting the Entitled dimension once and pricing every metered dimension at `0.00000001` (non-zero on purpose so
+  `BatchMeterUsage` really runs); accept it in the buyer's browser -> agreement; the FULFILLMENT REDIRECT posts a registration token -> `ResolveCustomer` -> `GetEntitlements` -> pending row -> SNS subscribe-success provisions the API key -> one metered call
+  -> `BatchMeterUsage` with the LicenseArn. Those are exactly what AWS audits ("successful calls to the Entitlements Service", "successful metering records"). Bundle D has only `bundle_a_*` and `bundle_b_*` test-offer files in `aws_marketplace/`; **there is no `bundle_d_test_offer.json`**.
+  **THE SAME TEST IS THE MISSING LIVE PROOF of the first-party path:** the key it provisions carries `aws_customer_id`, so one call to `bulk-identity-risk` must answer `data_path: first_party`.
+  Not yet done: read how Bundle D's earlier test was run (it has 0 subscribers, so it may have used another route), then derive and dry-run a Bundle D test offer. One open change per product, so it waits for any in-flight request.
+* **Dave Shapiro, his words:** NOT when this license is unblocked. The earlier plan is: address some of the WAFR gap items and resubmit; **when that AND the FTR pass, contact him.** The WAFR is 37 High / 15 Medium (2026-10-18). The only written starting points found are `ftr_finish_2026-10-18.md` section 4
+  (the remaining High risks, each to carry a concrete plan in its Notes) and the sequence at LOG line 448 (re-tick and re-word the WAFR, save milestone, PDF under 3 MB, request FTR validation again, then email Dave). No dated remediation plan was found. Earlier lines in this log that make the Bundle D licence the trigger for contacting him are superseded.
+
+## 2026-10-27: WAFR/FTR GAP WORK STARTED. THE FTR GATE IS ZERO HIGH RISKS IN SEC, OPS AND REL ONLY (SECONDARY SOURCE). TESTS NOW RUN IN CI.
+
+* **Required to clear all 37 High? Probably not.** Search summaries of AWS's Partner Central "Request FTR" page: WAFR report under a year old, zero HRIs in Security, Operational Excellence and Reliability, solution named
+  in the workload, reviewer named, PDF under 3 MB; resubmittable. Perf/Cost/Sustainability do not gate. **UNVERIFIED against the guide itself (docs.aws.amazon.com is egress-blocked, WebFetch ENOTFOUND).** Andrew should confirm in Partner Central.
+* **Not known:** the per-pillar split of the 37 High / 15 Medium. Andrew reads OPS/SEC/REL High counts from the WAT Overview.
+* **Built:** `.github/workflows/tests.yml` + `tools/run_test_suite.py` + `tests_known_failing.txt` (13 files, may only shrink) + `tests_requirements.txt`. 104 files: 91 pass, 13 known-failing, measured with pytest, boto3, pyyaml, requests,
+  cryptography on Python 3.13. Different dependency sets give different baselines (boto3 absent turns 3 more red; cryptography absent turns 6 more red). Mutation-tested locally; **never run on GitHub yet**.
+* Plan and gap table: `wafr_ftr_gap_plan_2026-10-27.md`. NEXT: reserved concurrency, API alarm, log-retention tools (dry-run default, Stubber-checked); then IAM role split in stages.
+
+## 2026-10-28: PER-PILLAR WAFR COUNTS READ FROM ANDREW'S CHART. IF THE THREE-PILLAR RULE HOLDS, THE TARGET IS 24 HIGH RISKS, NOT 37.
+OPS 5H/5M, SEC 9H/1M, REL 10H/2M, PERF 4H/1M, COST 9H/0M, SUS 0H/6M (37 H / 15 M). Gate pillars (OPS+SEC+REL) = 24 High. The rule itself is still unconfirmed against AWS's page. Recorded in `wafr_ftr_gap_plan_2026-10-27.md` section 2.
+
+## 2026-10-28 (rule CONFIRMED): THE FTR WAFR GATE IS ZERO HRIs IN SEC, OPS, REL. READ FROM AWS'S PAGE BY ANDREW.
+Five requirements: report under 1 year old; zero HRIs in Security, Operational Excellence, Reliability; solution named in workload name or description; reviewer's full name and email in the reviewer owner field; done in the Well-Architected Tool.
+Target is 24 High (5 OPS, 9 SEC, 10 REL). The earlier "UNVERIFIED" on the pillar rule is closed. Still unchecked: workload name/description names the solution; reviewer owner field is filled.
+
+## 2026-10-28 (build): `tools/wafr_hardening.py` WRITTEN AND TESTED, NOT RUN AGAINST AWS. REL 1/6/7/10.
+Steps `concurrency`, `alarm`, `retention`; dry run default; spec `tools/wafr_hardening_spec.json` (api 100, bundle-fulfillment 10, stripe-webhook 10 reserved; those numbers are MY PROPOSAL, not measured). `test_wafr_hardening.py` 13 tests: fakes for decisions,
+botocore Stubber over the real service models for request/response shapes, six planted bugs all caught. Retention DELETES events older than 90 days on groups that had none; the dry run lists size and age first. The alarm step copies the AlarmActions
+of the existing Lambda Errors alarms (found by reading them) and blocks if there are none. NEXT: Andrew runs the dry run, reads it, then `--apply` per step. After apply, REL 1/7/10 Notes and ticks can change (reserved concurrency exists; alarm exists), with evidence = the tool's output.
+
+## 2026-10-29: CORRECTION. THE WAFR SECURITY HIGH-RISK LIST WAS SAVED (ON AN UNMERGED BRANCH). I WRONGLY REPEATED "NEVER SAVED". THE OPS HIGH-RISK LIST WAS NEVER READ.
+
+The gap plan (section 5) and the 2026-10-28 handoff said the OPS and SEC answers "were given in chat and never saved". That was inherited and unchecked. Found by `git fetch --all --prune` then `git log --all -S` with no pathspec:
+* **SEC high-risk list: SAVED** in commit `77ec256` on `origin/claude/kind-fermi-2y6dhb` (never merged to main), section "2026-10-27 (WAFR SECURITY HIGH-RISK LIST ...)". Copied below verbatim.
+* **OPS high-risk list: NEVER READ.** That same commit says "Operational Excellence and Reliability high-risk lists NOT yet read". Only the COUNT (5 High) was ever recorded. Andrew has not been asked for it in a way that reached a saved record; it needs the console filter Operational Excellence + High risk.
+* **The 2026-10-10 per-question OPS 1-11 / SEC 1-11 ANSWER TEXTS** (archive_08.md ~L520) really were chat-only. That is a different thing from the HRI lists.
+* The dashboard unit is a best practice not met (36 rows in SEC); the FTR gate counts HIGH-RISK QUESTIONS (9 SEC). A question stops being High when enough of its practices are genuinely met, not when one is.
+
+Dashboard list "issues by improvement plan item", filter Security + High risk, 36 rows (the dashboard's unit is a best practice not met, NOT a question; the lens counted 37 high-risk QUESTIONS in total across all six pillars; how many of those are Security was not shown).
+**SEC1 operate:** Separate workloads using accounts; Secure account root user and properties; Identify and prioritize risks using a threat model; Evaluate and implement new security services and features regularly.
+**SEC2 identities:** Use temporary credentials; Rely on a centralized identity provider; Employ user groups and attributes.
+**SEC3 permissions:** Grant least privilege access; Define permission guardrails for your organization; Manage access based on lifecycle; Establish emergency access process; Reduce permissions continuously; Analyze public and cross account access.
+**SEC5 network:** Create network layers; Implement inspection-based protection; Automate network protection.
+**SEC6 compute:** Provision compute from hardened images; Reduce manual management and interactive access; Automate compute protection.
+**SEC7 data classification:** Understand your data classification scheme; Automate identification and classification.
+**SEC8 data at rest:** Automate data at rest protection; Enforce access control.
+**SEC10 incident response:** Identify key personnel and external resources; Develop incident management plans; Prepare forensic capabilities; Develop and test security incident response playbooks; Pre-provision access; Run simulations.
+**SEC11 application security:** Perform regular penetration testing; Regularly assess security properties of the pipelines; Train for application security; Automate testing throughout the development and release lifecycle; Conduct code reviews; Centralize services for packages and dependencies; Build a program that embeds security ownership in workload teams.
+**Not in the list (so not HRI): SEC4 detect and investigate (logging, central analysis, response automation) and SEC9 data in transit.**
+Triage proposed to Andrew: (A) written plans and processes (threat model, incident plan, playbooks, forensic plan, key personnel, emergency access, data classification, security review cadence, training, ownership): drafted by Claude from the repo, true only once adopted; (B) cheap AWS configuration (root user MFA and key deletion, IAM Access Analyzer, GuardDuty/Security Hub/Inspector, Identity Center, WAF on the API, KMS/encryption defaults); (C) structural (separate accounts and SCP guardrails via AWS Organizations; one IAM role per Lambda per `iam_role_split.md`).
+
+## WHERE 2026-10-29 LEFT THINGS. WAFR/FTR THREAD: 24 HIGH RISKS TO CLEAR. DECISION: NO GUARDDUTY, WAF DEFERRED. READ THIS FIRST FOR THE WAFR THREAD.
+
+**Supersedes the WAFR parts of every earlier "WHERE ... LEFT THINGS" list, including the 2026-10-28 one (commit `755dc6f` on `origin/claude/laughing-meitner-m54bli`, not on this branch).** Branches holding WAFR facts that are NOT merged together: `claude/kind-fermi-2y6dhb` (SEC list), `claude/laughing-meitner-m54bli` (2026-10-28 handoff, hardening tool notes). Before claiming any WAFR fact is missing: `git fetch --all --prune && git log --all --oneline -S "<string>"`, no pathspec. Merge with `tools/resolve_md_conflict.py docs/claude_memory/LOG_CURRENT.md --write`.
+
+### The gate, CONFIRMED from AWS's page (Andrew, 2026-10-28)
+Zero High-risk issues in Security, Operational Excellence and Reliability; report under 1 year old; workload name/description names the solution (saved); reviewer owner field "Andrew Gibbs - andrew@relayshield.net" (saved). Perf, Cost, Sustainability do not gate.
+
+### Counts, from Andrew's dashboard screenshot 2026-10-29 (the chart, unchanged since 10-28)
+| Pillar | High | Medium | Gates |
+|---|---|---|---|
+| Operational Excellence | 5 | 5 | yes |
+| Security | 9 | 1 | yes |
+| Reliability | 10 | 2 | yes |
+| Performance Efficiency | 4 | 1 | no |
+| Cost Optimization | 9 | 0 | no |
+| Sustainability | 0 | 6 | no |
+The chart counts HIGH-RISK QUESTIONS. The Security "issues by improvement plan item" table counts unmet PRACTICES (36 in Security). A question leaves High only when enough of its practices are genuinely met.
+
+### Which High items are KNOWN and which are NOT
+* **SEC (9 questions, 36 practices): KNOWN**, recorded verbatim in the section "2026-10-29: CORRECTION" above. High questions are SEC1, 2, 3, 5, 6, 7, 8, 10, 11. SEC4 and SEC9 are not High.
+* **OPS (5 High): the questions are NOT KNOWN.** Never read. Andrew filters the dashboard "issues by improvement plan item" table to Operational Excellence + High risk and pastes the rows. **Save them here the moment they arrive.**
+* **REL (10 High of 13 questions): WHICH 10 is NOT KNOWN.** The answers are in `wafr_answers_reliability_2026-10-11.md` but the Tool's High/Medium result per question was never recorded. Same filter, Reliability + High risk.
+* The 2026-10-10 answer TEXTS for OPS 1-11 and SEC 1-11 were chat-only and are lost; they are not needed, the High lists are.
+
+### DECISIONS, 2026-10-29, Andrew's, do not re-open without new evidence
+* **NO GuardDuty now or near-term.** It closes no High question on its own: detection is SEC4, which is not High. Its only links are SEC1 "evaluate new security services" and weakly SEC6 "automate compute protection".
+* **WAF is DEFERRED, not rejected.** It could move SEC5 (network protection) from High to Medium at best, and only if "Create network layers" can honestly be ticked as not applicable (no VPC). Weak justification for about $10-12 per month plus $0.60 per million requests (UNVERIFIED: aws.amazon.com is egress-blocked, prices came from search summaries). Reopen only if SEC5 is the last High left, or after the FTR.
+* The Security count is driven by WRITTEN PLANS (SEC10 incident response, SEC11 application security, SEC7 data classification, SEC1 threat model and root user) and the one-role-per-Lambda IAM split (SEC3), not by paid services.
+
+### Built, not yet applied to AWS
+* `tools/wafr_hardening.py` (REL 1/6/7/10): dry run on Andrew's Mac was clean 2026-10-28; nothing applied. Reserved concurrency values (api 100, fulfillment 10, stripe 10) are my proposal, unmeasured. Apply order: `--step concurrency`, then `--step alarm` (READ the `notifies:` line first), then `--step retention`, each with `AWS_PROFILE=relayshield` and `--apply`.
+* `.github/workflows/tests.yml`: has never run on GitHub (main not pushed).
+
+### TODO, IN ORDER
+1. Andrew pastes the OPS High rows and the REL High rows. Claude saves them in this file the same turn.
+2. Claude builds, dry-run-default, with botocore Stubber checks: Lambda versions plus alias deploy change, AWS Backup plan, DLQs, tracing, API Gateway throttling and access logging, tag script, weekly-metrics CI deploy path (needs an IAM grant first). Claude drafts the written plans (incident response, forensics, playbooks, data classification, threat model, secure-development, DR and test plans) from the repo, marked draft until Andrew adopts them.
+3. Andrew runs, in stages: the REL hardening tool; `tools/protect_dynamodb_tables.sh` (PITR, run status unknown); IAM snapshot then `iam_split_roles.py` per function.
+4. Re-tick in the WA Tool WITH EVIDENCE only; save a milestone; PDF under 3 MB; request validation.
+5. Dave Shapiro is contacted only after the FTR passes.
+
+## 2026-10-29: OPS AND REL HIGH-RISK LISTS, READ FROM ANDREW'S SCREENSHOTS OF THE DASHBOARD TABLE "issues by improvement plan item" (filter pillar + High risk). VERBATIM. ALL THREE LISTS NOW COMPLETE (SEC 36, OPS 11, REL 37 practices).
+
+**These are unmet PRACTICES, not questions.** OPS: 5 High questions, 11 practices (2 pages, complete). REL: 10 High questions, 37 practices over 4 pages, ALL CAPTURED. SEC list is in the section "2026-10-29: CORRECTION" above (36 practices, complete).
+
+**OPS, 11 High practices (complete):** Evaluate internal customer needs; Mechanisms exist to manage responsibilities and ownership; Mechanisms exist to request additions, changes, and exceptions; Responsibilities between teams are predefined or negotiated; Escalation is encouraged; Communications are timely, clear, and actionable; Team members are encouraged to maintain and grow their skill sets; Resource teams appropriately; Implement distributed tracing; Ensure personnel capability; Create support plans for production workloads.
+
+**REL, page 1:** Manage service quotas across accounts and Regions; Accommodate fixed service quotas and constraints through architecture; Monitor and manage quotas; Automate quota management; Ensure that a sufficient gap exists between the current quotas and the maximum usage to accommodate failover; Provision redundant connectivity between private networks in the cloud and on-premises environments; Ensure IP subnet allocation accounts for expansion and availability; Prefer hub-and-spoke topologies over many-to-many mesh; Enforce non-overlapping private IP address ranges in all private address spaces where they are connected; Implement loosely coupled dependencies.
+**REL, page 2:** Do constant work; Control and limit retry calls; Fail fast and limit queues; Define and calculate metrics (Aggregation); Send notifications (Real-time processing and alarming); Automate responses (Real-time processing and alarming); Analyze logs; Monitor end-to-end tracing of requests through your system; Integrate functional testing as part of your deployment; Integrate resiliency testing as part of your deployment.
+**REL, page 3:** Deploy using immutable infrastructure; Use bulkhead architectures to limit scope of impact; Automate recovery for components constrained to a single location; Monitor all components of the workload to detect failures; Fail over to healthy resources; Rely on the data plane and not the control plane during recovery; Use static stability to prevent bimodal behavior; Send notifications when events impact availability; Architect your product to meet availability targets and uptime service level agreements (SLAs); Test scalability and performance requirements.
+**REL, page 4 (received 2026-10-29, the last page; REL total is 37 practices):** Test resiliency using chaos engineering; Conduct game days regularly; Define recovery objectives for downtime and data loss; Use defined recovery strategies to meet the recovery objectives; Test disaster recovery implementation to validate the implementation; Manage configuration drift at the DR site or Region; Automate recovery.
+
+**Observations, mine, not yet acted on:** (1) REL network practices (private connectivity, subnets, hub-and-spoke, non-overlapping ranges) assume a VPC; this workload has none, so the WA Tool's "question does not apply to this workload" with a Note may be the honest answer, Andrew's call. (2) "Implement distributed tracing" (OPS) and "Monitor end-to-end tracing" (REL) are ONE control: X-Ray active tracing on Lambda and API Gateway. (3) "Create support plans for production workloads" is a paid AWS Support plan, a spend decision for Andrew; price UNVERIFIED. (4) Several OPS practices are team-and-people practices on a one-person company; tick only what is true, otherwise write the gap or document the single-owner model.
+
+## WHERE 2026-10-29 (BUILD SESSION) LEFT THINGS. WAFR/FTR: CONTROLS BUILT, TESTED AND PUSHED TO `claude/sharp-bohr-72o23p`. NOT MERGED. NOTHING APPLIED TO AWS. READ THIS FIRST.
+
+**Supersedes the "WHERE 2026-10-29 LEFT THINGS" section above for the TODO order** (that one is the pre-build state; its decisions still stand). The branch is pushed; "deployed" would be false: Claude has no AWS credentials, and workflow dispatch is 403 for Claude. Every AWS-touching tool below was checked against the REAL boto3 service models with botocore Stubber and by planting bugs; none has run against AWS.
+
+### Built this session (all on `claude/sharp-bohr-72o23p`)
+| What | Files | Evidence it works, and what is NOT proven |
+|---|---|---|
+| **Observability tool**: X-Ray tracing on 4 Lambdas and the API stage, stage default throttle, CloudWatch dashboard plus 5 saved Logs Insights queries, account-concurrency quota alarm | `tools/wafr_observability.py`, `tools/wafr_observability_spec.json`, `test_wafr_observability.py` (31 tests) | Stubber over lambda, iam, apigateway, cloudwatch, logs, service-quotas models; 11 planted bugs all caught. **NOT proven:** that AWS accepts the dashboard body (the tool prints AWS's validation messages and exits 1 if any), that `update_stage` `replace` creates a missing throttle setting, that the profile may call `iam:SimulatePrincipalPolicy`. Throttle 100 rps / burst 200 is MY PROPOSAL |
+| **Deploy test gate**: `deploy_lambdas.yml` now `needs: tests` (calls `tests.yml`); a manual run bypasses it and prints a notice | `.github/workflows/deploy_lambdas.yml`, `.github/workflows/tests.yml` (`workflow_call`) | `test_deploy_versions.py` parses it and 8 planted bugs are caught. **NOT proven:** `tests.yml` has NEVER run on GitHub. If it is red for an environment reason, every push deploy is blocked until fixed (use manual dispatch meanwhile) |
+| **Version + alias publishing** after the import probe, never fails the deploy, warns loudly | same workflow; `iam_github_deploy_versions.json`; `tools/apply_deploy_versions_policy.sh` | The step's script was run against a stubbed `aws` in all three modes (ok, no alias yet, denied). **The deploy role does NOT yet have the permissions**; until the policy script runs, deploys succeed and print a "Versioning incomplete" warning. **The `live` alias is NOT what serves traffic**: API Gateway still invokes the unqualified function |
+| **Rollback workflow** (restores a version's CODE, probes, moves the alias) | `.github/workflows/rollback_lambda.yml` | Target-selection script run against a stub for previous / number / unpublished / garbage / injection input. Never run on GitHub; needs at least 2 published versions |
+| **Four DRAFT documents**, none adopted | `docs/reliability/recovery_objectives_and_dr_plan.md`, `game_day_plan.md`, `availability_target_and_load_test_plan.md`, `docs/ops/operating_model.md` | Written from repo facts. RTO/RPO, 99.5% target, and the load-test profile are PROPOSALS. Each has CONFIRM items only Andrew can answer. Nothing is a test result |
+| **Practice-to-evidence map** | `wafr_practice_map_2026-10-29.md` | Every OPS (11) and REL (37) High practice with its backing and status. The re-tick checklist |
+
+### Verified merge procedure (run in a clean copy, 2026-10-29)
+origin/main is BEHIND Andrew's local main (his holds `755dc6f`, the 10-28 handoff, unpushed). Merging this branch conflicts ONLY in `docs/claude_memory/LOG_CURRENT.md` (an append conflict); `tools/resolve_md_conflict.py` keeps both sides; the index regenerates; `--rotate --write` then brings the log from 113,656 to 59,031 characters. **Do NOT merge `claude/kind-fermi-2y6dhb`**: its useful content (the SEC list) is already copied into this log, and its log rotation conflicts. Its unique commits are otherwise Bundle D / handoff records already represented here.
+
+### TODO, IN ORDER
+1. **ANDREW: merge this branch** (block below), run `python3 test_workflows_parse.py`, push `main`. First push to main is the first real run of `tests.yml` and the deploy gate. Expect green with 13 known failures; if red for an environment reason, fix that before anything else.
+2. **ANDREW: dry runs, read them, then apply one step at a time.** `tools/wafr_hardening.py` (concurrency, alarm: READ the `notifies:` line, retention) then `tools/wafr_observability.py` (tracing, throttle, dashboard, quota). Python is `~/.rsvenv/bin/python` (needs boto3). Tracing may print BLOCKED if the shared role already has 10 managed policies: then the IAM role split (`iam_role_split.md`) is the prerequisite, not a failure of the tool.
+3. **ANDREW: `sh tools/apply_deploy_versions_policy.sh`**, then trigger one deploy and check the "Publish a version" step reads ✅ and not a warning. Then `AWS_PROFILE=relayshield sh tools/protect_dynamodb_tables.sh` (dry run first; its run status is unknown).
+4. **ANDREW decides:** buy an AWS Support plan (search summary: Business Support+ from $29/month; UNVERIFIED; older plans end 2027-01-01); throttle 100/200; reserved concurrency 100/10/10; whether the WA Tool's REL 2 was answered "none of these" instead of "question does not apply" (no VPC), which alone could take 4 practices off the list.
+5. **ANDREW: read the four DRAFT documents, answer the CONFIRM items, replace each STATUS line with "ADOPTED <date>" or edit.** A document that is not adopted is not evidence.
+6. **CLAUDE, next build:** async retry limits and DLQs (`MaximumRetryAttempts`, `MaximumEventAge`, needs an SQS grant: the shared role's inline budget is full, so a customer-managed policy or the role split), AWS Backup plan (needs a service role), DynamoDB and EventBridge alarms, API integration through the `live` alias (needs `lambda:InvokeFunction` permission on the alias for API Gateway), Service Quotas automatic management (not investigated).
+7. **SECURITY (9 High questions, 36 practices) is untouched this session.** Check whether `relayshield_incident_response_plan.md` (v1.0, May 2026, owner Andrew) already supports SEC10 before drafting a new one; it may need a forensics section and a test record rather than a rewrite. Then written plans (threat model, data classification, secure-development, emergency access), the IAM split (SEC3), root user MFA and key check (SEC1).
+8. **Hold game day 1** (PITR restore and bulkhead test) once steps 2 and 3 are done. It converts four DRAFT rows into evidence.
+9. **Only then re-tick in the WA Tool, with evidence cited in each Note**, save a milestone, PDF under 3 MB, request validation. Dave Shapiro only after the FTR passes.
+
+### ANDREW RUNS THIS: the merge (every line verified in a clean copy; the push is not)
+```zsh
+cd ~/dev/relayshield
+git checkout main
+git --no-pager fetch origin claude/sharp-bohr-72o23p
+git stash push --include-untracked -m "pre-merge untracked"
+git -c pull.rebase=false merge --no-edit FETCH_HEAD
+```
+EXPECT: "CONFLICT (content): Merge conflict in docs/claude_memory/LOG_CURRENT.md" and no other conflict. (If it merges cleanly, skip the next block.)
+STOP IF: a conflict in any `.py`, `.yml` or `.json`: another session edited the same code; send the `git status` output.
+
+Only if it conflicted, then:
+```zsh
+cd ~/dev/relayshield
+python3 tools/resolve_md_conflict.py docs/claude_memory/LOG_CURRENT.md --write
+python3 tools/claude_memory.py --index --write
+git add docs/claude_memory
+git commit --no-edit
+python3 tools/claude_memory.py --rotate --write
+python3 tools/claude_memory.py --index --write
+git add docs/claude_memory
+git commit -m "Rotate LOG_CURRENT after merge"
+python3 test_workflows_parse.py
+```
+EXPECT: "All 26 workflows parse and define jobs." (verified on this branch 2026-10-29) and `claude_memory.py --check` reporting both files under their caps.
+STOP IF: "unresolved" markers remain (`grep -c '^<<<<<<<' docs/claude_memory/LOG_CURRENT.md` must print 0).
+
+### Standing lessons from this session
+* **A record on an unmerged branch is invisible to the next session.** The SEC list sat on `kind-fermi` for two days and a session reported it "never saved". Fix at the source: a session that writes a record must say which branch holds it, and the handoff must name unmerged branches (this one does, above).
+* **Ask for the console list in the first reply, not the third.** The OPS and REL High lists were never read until Andrew was asked a pointed question. The ask costs him ten minutes and unblocks all the mapping.
+* **A paid control that closes zero High questions is not a control worth buying.** GuardDuty was ruled out on that basis (decision above); apply the same test to every purchase this thread proposes, the support plan included.
+* **Building the control is not closing the finding.** 48 practices are mapped; none is ticked; most are UNRUN or DRAFT. The `wafr_practice_map_2026-10-29.md` statuses are the honest count.
+
+## 2026-10-29 (merge + rotate session): `claude/sharp-bohr-72o23p` MERGED INTO `claude/happy-ptolemy-ygtv0n`, LOG ROTATED. NOT ON `main`. NOTHING APPLIED TO AWS.
+
+The WAFR/FTR build branch merged with NO conflict (main had already absorbed the 10-28 handoff). `--rotate --write` took LOG_CURRENT from 118,349 to about 60,000 characters (new `archive_10.md`); `--check`, `test_claude_md_size.py` and `test_workflows_parse.py` pass. The TODO order in "WHERE 2026-10-29 (BUILD SESSION) LEFT THINGS" stands unchanged. The count: the FTR gate is 24 High-risk QUESTIONS (OPS 5, SEC 9, REL 10); the practice lists behind them are OPS 11, SEC 36, REL 37 = 84 unmet practices. The branch addresses OPS and REL only (SEC untouched), and every control is UNRUN against AWS.
+
+## 2026-10-29 (WA Tool, Andrew's console): REL 2 MARKED "QUESTION DOES NOT APPLY". RELIABILITY HIGH 10 -> 9. GATE TOTAL NOW 23 (OPS 5, SEC 9, REL 9).
+
+Done by Andrew in the console, reason "Out of scope" with the no-VPC Notes (no Lambda is VPC-attached, evidence script 2026-10-11; only network surface is the API Gateway regional endpoint). Reliability pillar overview after saving, from his screenshot: 13/13 answered, High 9, Medium 2, No improvements identified 1, Not Applicable 1, Unanswered 0. **This proves the Tool recalculates the pillar count on save, and that a "does not apply" answer removes the question from the High count.** It was legitimate only because REL 2's four unmet practices all assume a VPC and there is none; it is not a route for any question whose practices apply (SEC5 was considered on 2026-10-29 and the decision to defer stands, because the public API Gateway endpoint is a network surface). REL 2 is no longer on the re-tick list. The per-question table of what to tick and after which step was given in chat this session and matches `wafr_practice_map_2026-10-29.md`; REL 4 and REL 5 have no controls built yet and cannot clear.
+

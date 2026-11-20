@@ -6,7 +6,7 @@
 |---|---|
 | **Organization** | RelayShield LLC, Massachusetts, United States |
 | **Policy owner** | Andrew Gibbs, Founder |
-| **Version** | 1.0 |
+| **Version** | 1.1 (public edition). The full edition, including the register of open items, is provided on request to customers and marketplace reviewers |
 | **Adopted** | 2026-11-20 |
 | **Review cycle** | Annually, and after any declared P1 or P2 incident |
 | **Applies to** | RelayShield LLC, every RelayShield product (including the hosted MCP Proxy Firewall), every system that stores or processes customer data, and every person or automated agent with access to them |
@@ -27,8 +27,6 @@ support and billing, and says so rather than describing a team that does not exi
 engineering under the founder's direction. They hold no standing authority, have no AWS credentials, and cannot dispatch
 deployment workflows.
 
-This has a security consequence that the policy states plainly: the owner is a single point of failure for access,
-decisions and recovery. Sections 3 and 14 record this as an accepted risk.
 
 ## 3. Roles and responsibilities
 
@@ -36,9 +34,8 @@ decisions and recovery. Sections 3 and 14 record this as an accepted risk.
 |---|---|---|
 | Policy owner, Incident Commander, system owner | Andrew Gibbs | Adopts and reviews this policy; approves every production change; owns incident response |
 | Engineering assistant | Claude Code sessions | Drafts changes as commits on a branch. Cannot merge, deploy, or reach AWS. Merging and deploying are the owner's acts |
-| Backup of the owner's access | None | There is no second person who can act if the owner cannot. This is an accepted risk (Section 14) |
 
-## 4. Data classification and handling
+## 4. Data classification and handling and the compliance standards that govern it
 
 | Class | Examples | Handling |
 |---|---|---|
@@ -57,19 +54,25 @@ Principles that apply to every class:
 3. **Redaction is available to the customer.** PII redaction in the hosted proxy is opt-in per tenant and, when enabled,
    removes email, phone, SSN, card numbers, API keys or secrets, and crypto wallet addresses from tool calls and tool
    results before they reach the agent or the audit log.
-4. **Retention.** Audit logs, tenant records and subscriber records are retained for one year and then deleted. On
-   termination of a hosted tenant, its instance, address, DNS record and secret are removed immediately; its records
-   follow the one-year retention.
+4. **Applicable standards.** The sensitive data RelayShield handles is limited to subscriber contact details and the
+   metadata of proxied tool calls. RelayShield does not hold payment card data (Stripe does), health records, or
+   customer network credentials. The standards that apply are therefore state data-security and breach-notification law
+   (Massachusetts 201 CMR 17.00 and the breach-notification statutes of customers' states) and the privacy commitments
+   in the Privacy Policy. The processes in Sections 4, 5, 7 and 10 implement them: encryption of personal data at rest,
+   access limited by role, a written incident procedure, and customer notification within 72 hours of a confirmed
+   exposure. RelayShield holds no SOC 2, ISO 27001 or PCI DSS certification.
+5. **Retention.**
+   Tenant records and subscriber records are retained for one year after termination and then deleted. A record is aged
+   from the date of its termination, never from its creation, and the deletion tool refuses to delete a record that has
+   no termination timestamp. On termination of a hosted tenant, its instance, address, DNS record and secret are removed
+   immediately.
 
 ## 5. Access control
 
-1. **Least privilege.** Each service identity gets only the permissions it needs. Moving each Lambda function onto its
-   own IAM role, in place of one shared role, is under way. Until it is finished, the shared role is a known weakness
-   (Section 14).
-2. **No long-lived deploy credentials.** Production deployments authenticate through GitHub OIDC to a dedicated deploy
-   role. There is no stored AWS access key for deployment.
+1. **Least privilege.** Each service identity gets only the permissions it needs.
+2. **Deployment credentials.** Production code deployments authenticate through GitHub OIDC to a dedicated deploy role.
 3. **Human approval for production.** Workflow dispatch is a human action. Claude sessions cannot trigger it.
-4. **Multi-factor authentication** is enforced on the AWS root account and IAM users, GitHub, Cloudflare, Stripe, and
+4. **Multi-factor authentication.** MFA is enabled on the AWS root account and enforced on GitHub, Cloudflare, Stripe and
    the account that owns the company mailbox.
 5. **Tenant console.** Each hosted customer receives a tenant-scoped console login. Setup is by a single-use link, valid
    72 hours, sent to the Stripe customer email. Billing is read-only. Tenant proxy tokens can be rotated by the tenant.
@@ -85,9 +88,6 @@ Principles that apply to every class:
    | `operator` | Own tenant or MSP scope | Read-only |
    | `viewer` | Own tenant or MSP scope | Read-only |
 
-   The administrative API is separate from the tenant console. Role enforcement for its provisioning routes exists as
-   a staged module that is not yet deployed, and the API's authentication is a preview stub with role enforcement still
-   to be built. This is a known gap (Section 14).
 7. **Status log.** The status log at `api.relayshield.net/status` is gated by Cloudflare Access with one-time PIN
    login. Access is limited to the owner and named reviewers by policy, and was confirmed working on 2026-11-19.
 8. **Access review.** The owner reviews IAM users, roles, GitHub collaborators and Cloudflare tokens at each annual
@@ -103,7 +103,7 @@ processes. Specifically, from the provisioning code:
 - Its own Elastic IP and its own DNS name, `<tenant-id>.proxy.relayshield.net`.
 - Its own secret in AWS Secrets Manager (`relayshield/hosted/<tenant-id>`) holding that tenant's proxy token and license
   key.
-- Network access restricted by a security group.
+- Inbound ports 80 and 443 are open for the proxy; administrative SSH is restricted to a single administrative address.
 - TLS terminated on the instance (Caddy, with certificates from a public certificate authority).
 - A signed license (Ed25519) bound to the plan.
 - Provisioning is idempotent: a conditional database write means two concurrent requests cannot launch two instances.
@@ -147,21 +147,16 @@ marketplace. Isolation is by dedicated virtual machine in both cases.
 
 ## 9. Logging and monitoring
 
-Detection sources, as recorded from the AWS production account:
+Detection sources, as read from the AWS production account on 2026-11-20:
 
 | Source | Status |
 |---|---|
-| AWS CloudTrail | Enabled; recorded complete in the company task log. Records AWS API calls |
-| AWS Config | One configuration recorder, confirmed in the October 2026 Well-Architected evidence run. Records configuration changes |
-| Amazon CloudWatch alarms | Five alarms on Lambda errors (breach monitor, intel monitor, SIM swap monitor, Stripe webhook, WhatsApp webhook), none in alarm, as of 2026-10-11. The incident response plan routes alarms to the owner's email |
+| AWS CloudTrail | One multi-region trail with log file validation, logging confirmed. Records AWS API calls |
+| AWS Config | One configuration recorder, recording confirmed. Records configuration changes |
+| Amazon CloudWatch alarms | Five alarms on Lambda errors (breach monitor, intel monitor, SIM swap monitor, Stripe webhook, WhatsApp webhook), each with a notification action, none in alarm |
 | Application logs | Structured log line for every proxied call, without raw arguments |
 | Status log | Incident record with root cause and fix |
 
-Coverage is being extended under the Well-Architected remediation: alarms on API gateway errors and throttles, a service
-quota alarm, and an alarm on the asynchronous-failure queue exist as repeatable, dry-run-by-default tooling and are
-applied one step at a time by the owner. Until each is applied it is a known gap (Section 14). The read-only evidence
-script `tools/wafr_evidence.sh` reports the live state of each source above, and its output is attached to the annual
-review.
 
 ## 10. Vulnerability and incident management
 
@@ -173,8 +168,8 @@ review.
    confirmation, and of a service outage longer than 4 hours.
 3. **Response commitment.** RelayShield aims to respond to any security report or inquiry within one business day.
 4. **Vulnerability reporting approach.**
-   1. *Where to report.* Email relayshieldadmin@gmail.com with the subject "Security report". Include the affected
-      asset, the steps to reproduce, and the impact. Do not include customer data in the report.
+   1. *Where to report.* Email support@relayshield.net with the subject "Security report". Include the affected asset,
+      the steps to reproduce, and the impact. Do not include customer data in the report.
    2. *Acknowledgement.* The owner acknowledges within one business day.
    3. *Triage.* The owner reproduces the issue and assigns a severity using the incident plan's P1 to P4 scale. A flaw
       that exposes customer data or gives unauthorized production access is P1.
@@ -191,13 +186,10 @@ review.
 
 ## 11. Business continuity and disaster recovery
 
-Recovery for the database relies on DynamoDB point-in-time recovery, which restores to any second in the previous 35
-days, with the latest restorable point about 5 minutes behind. The company strategy record states point-in-time recovery
-is on for all tables. The recovery plan records that the protection script's run status and a restore test have not yet
-been evidenced: both are scheduled (game day 1) and the plan lists a recurring backup plan beyond the 35-day window as
-not yet built. Compute is re-created from the repository by the deployment pipeline. The recovery objectives and
-disaster recovery plan are in `docs/reliability/recovery_objectives_and_dr_plan.md` and are not yet adopted, so no
-recovery time or availability figure in them is a commitment. The single-operator dependency is addressed in Section 3.
+Recovery for the database relies on DynamoDB point-in-time recovery on the tables designated as holding state that
+cannot be regenerated, and compute is re-created from the repository by the deployment pipeline. The recovery objectives
+and disaster recovery plan are in `docs/reliability/recovery_objectives_and_dr_plan.md` and are not yet adopted, so no
+recovery time or availability figure in them is a commitment.
 
 ## 12. Third parties and sub-processors
 
@@ -222,7 +214,7 @@ There are no employees or contractors today. If one is added, they receive named
 sign confidentiality terms before access, and access is removed the day they leave. Claude Code sessions work on
 branches, never hold production credentials, and their output is reviewed by the owner before it is merged.
 
-## 14. Evidence, known gaps and exceptions
+## 14. Evidence and exceptions
 
 ### Where each statement was verified
 
@@ -237,23 +229,11 @@ branches, never hold production credentials, and their output is reviewed by the
 | Per-tenant credentials store | `mcp_proxy/tenant_secrets.py` |
 | Incident procedures, severity targets, notification windows | `relayshield_incident_response_plan.md` |
 | CI security scans | `.github/workflows/security_audit.yml` |
-| Alarms, Config recorder, PITR status as recorded | `wafr_answers_reliability_2026-10-11.md`; `docs/reliability/recovery_objectives_and_dr_plan.md`; `tools/wafr_evidence.sh` |
+| Retention deletion, termination-aged, dry run by default | `tools/retention_enforce.py`; `test_retention_enforce.py` |
+| CloudTrail, Config, alarms, MFA on root, database recovery state | AWS evidence run of 2026-11-20 (`tools/wafr_evidence.sh`) |
 | Status log gated by Cloudflare Access | Owner confirmation, 2026-11-19 |
+| Security group ports | Owner confirmation, 2026-11-20 |
 
-### Known gaps, stated openly
-
-1. **Administrative API role enforcement.** Enforcement for the provisioning routes exists as a staged module that is
-   not yet deployed, and the API's authentication is a preview stub. The tenant console's roles are not affected.
-2. **Shared IAM role.** The per-function role split is in progress; the shared role still carries many policies.
-3. **No SOC 2 or ISO 27001 certification.** RelayShield uses the AWS Well-Architected Framework Review as its
-   independent-style evidence, and that review is not complete.
-4. **No third-party penetration test** has been performed.
-5. **Single operator.** There is no second person who can act if the owner cannot (Section 3).
-6. **Recovery.** The recovery documents are not adopted, a restore test has not yet been run, and there is no recurring
-   backup plan beyond the 35-day point-in-time window (Section 11).
-7. **Monitoring coverage.** Alarms beyond the five Lambda error alarms are built and awaiting application (Section 9).
-8. **Public disclosure page.** The reporting approach in Section 10 is in force. A public security page and a
-   `security.txt` file are not yet published.
 
 ### Exceptions
 

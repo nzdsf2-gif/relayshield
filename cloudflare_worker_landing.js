@@ -247,11 +247,11 @@ const HTML = `<!DOCTYPE html>
       <div class="card" data-drill="tap">
         <span class="tag">Live</span>
         <div class="icon">&#x1F4E6;</div>
-        <h3>Agent Verifiers</h3>
+        <h3>Agent Verifiers Bundle</h3>
         <p class="tagline">RelayShield Passport, intent binding, and TAP and PAP verification, checked together.</p>
         <p>Verify the agent, bind its intent, then check the action before settlement. The RelayShield Passport gives an agent a signed identity that can be checked and revoked. Intent binding records a signed binding for payer, counterparty, amount, currency, and artifact set, and a settle check allows or blocks that exact payment, once only. TAP verification covers card network transactions, and PAP verification covers merchant checkout. All checks screen against the RelayShield threat intelligence corpus.</p>
         <div class="links">
-          <a class="btn btn-primary btn-sm" href="https://api.relayshield.net/developers">$79/mo flat</a>
+          <a class="btn btn-primary btn-sm" href="#pricing" data-goto-tab="pricing">$79/mo flat</a>
         </div>
         <div class="drill-hint">Click for details &#x25B8;</div>
       </div>
@@ -375,7 +375,7 @@ const HTML = `<!DOCTYPE html>
     <div class="grid">
       <div class="price-card featured">
         <h3>TAP Verifier</h3>
-        <div class="for">Merchants accepting agentic payments</div>
+        <div class="for">Standalone TAP only, for merchants accepting agentic payments</div>
         <div class="amount">$49</div>
         <div class="per">flat monthly pricing</div>
         <ul>
@@ -400,7 +400,7 @@ const HTML = `<!DOCTYPE html>
           <li>100 free verifications per month</li>
           <li>Threat corpus screening</li>
         </ul>
-        <a class="btn btn-ghost" href="https://api.relayshield.net/developers">API docs</a>
+        <a class="btn btn-primary" href="https://api.relayshield.net/developers">Get the bundle</a>
       </div>
       <div class="price-card">
         <h3>Hosted MCP Proxy Firewall</h3>
@@ -686,7 +686,7 @@ const HTML = `<!DOCTYPE html>
 /* Product drill-down modal */
 var PRODUCT_DETAILS = {
   tap: {
-    tag: 'Live', title: 'Agent Verifiers',
+    tag: 'Live', title: 'Agent Verifiers Bundle',
     sub: 'RelayShield Passport, intent binding, and TAP and PAP verification, checked together',
     body: 'Three checks, in order, at the point where the action happens. 1. RelayShield Passport as identity: an agent presents a signed passport that can be issued, checked, and revoked. A revoked passport is blocked at the per-call check. 2. Intent Binding: before settlement, a signed binding records payer, counterparty, amount, currency, and artifact set, and a settle check allows only a match, once only. A repeat settle is blocked because the binding is consumed exactly once. Amount drift, recipient drift, scope expansion, a missing binding, and a revoked passport are blocked in Enforce and recorded for audit. 3. TAP and PAP transaction verifiers: TAP covers Visa Trusted Agent Protocol transactions, with RFC 9421 message signature verification, signing key validation against the Visa JWKS, intent mismatch detection, and threat corpus screening. PAP covers merchant checkout, with session token, DPoP proof, identity validation, and the same corpus screening.',
     body_html: 'Three ordered checks at the point where the action happens.<ol><li>RelayShield Passport as identity: an agent presents a signed passport that can be issued, checked, and revoked. A revoked passport is blocked at the per-call check.</li><li>Intent Binding: before settlement, a signed binding records payer, counterparty, amount, currency, and artifact set, and a settle check allows only a match, once only. A repeat settle is blocked because the binding is consumed exactly once. Amount drift, recipient drift, scope expansion, a missing binding, and a revoked passport are blocked in Enforce and recorded for audit.</li><li>TAP and PAP transaction verifiers: TAP covers Visa Trusted Agent Protocol transactions, with RFC 9421 message signature verification, signing key validation against the Visa JWKS, intent mismatch detection, and threat corpus screening. PAP covers merchant checkout, with session token, DPoP proof, identity validation, and the same corpus screening.</li></ol>',
@@ -1648,13 +1648,14 @@ const LOGO_PNG_BYTES = Uint8Array.from(atob(LOGO_PNG_BASE64), (c) => c.charCodeA
 
 // PRODUCT-FEED-2026-11-18: OpenAI Business Hub product feed (CSV).
 // PRODUCT-FEED-V2-2026-11-18: v2 feed, 9 required fields only.
-const PRODUCT_FEED_CSV = `item_id,title,description,url,brand,seller_name,image_url,availability,price
-rs-order-screening,RelayShield Order Screening,"Screen Shopify orders against live threat intel. Each order is checked against 850K+ indicators across 144 monitored Telegram marketplaces, with 11M+ citations. High-risk orders are tagged relayshield-high-risk, medium-risk flagged for review with a timeline note. RelayShield never blocks, cancels, or refunds an order, and never calls an order safe. Privacy-first: emails SHA-256 hashed, never stored raw, 90-day retention. Includes 100 free screenings.",https://apps.shopify.com/relayshield-order-screening,RelayShield,RelayShield LLC,https://relayshield.net/relayshield-logo.png,in_stock,29.00 USD
-rs-mcp-proxy-firewall-direct,RelayShield MCP Proxy Firewall (Direct),"Hosted MCP Proxy Firewall for a single developer or SMB. Screens every MCP tool call and tool result against live threat intel from 144 monitored Telegram marketplaces, 850K+ indicators, 11M+ citations. Intent binding (Policy 1 bound actions only, Policy 2 step-up for high-risk actions), opt-in PII redaction, and audit trail. Includes 20,000 screened calls per month, 0.002 USD per call overage. Dedicated hosted instance, no self-hosting.",https://relayshield.net,RelayShield,RelayShield LLC,https://relayshield.net/relayshield-logo.png,in_stock,49.00 USD
-rs-mcp-proxy-firewall-msp,"RelayShield MCP Proxy Firewall (MSP, per client org)","Hosted MCP Proxy Firewall for MSPs and distributors, priced per client org. Screens every MCP tool call and tool result against live threat intel from 144 monitored Telegram marketplaces, 850K+ indicators, 11M+ citations. Intent binding, opt-in PII redaction, per-tenant audit trail, and tenant-scoped console login. Includes 20,000 screened calls per client org per month, 0.002 USD per call overage. Dedicated hosted instance per client org.",https://relayshield.net,RelayShield,RelayShield LLC,https://relayshield.net/relayshield-logo.png,in_stock,69.00 USD
-rs-agent-verifiers-bundle,RelayShield Agent Verifiers Bundle,"Verification bundle for agentic commerce: TAP Verifier, PAP, Passport identity, Intent binding and settle check, plus threat corpus screening. Includes 100 free verifications per month. Verifier calls count toward the 20,000 screened-call pool. Built for agents that transact: verify the counterparty before the call, not after.",https://relayshield.net,RelayShield,RelayShield LLC,https://relayshield.net/relayshield-logo.png,in_stock,79.00 USD
-rs-tap-verifier,RelayShield TAP Verifier,"Standalone TAP (Trusted Agent Protocol) verifier. Verify TAP agent credentials before transacting, with threat corpus screening on the counterparty. For agents and businesses that need credential verification without the full verifiers bundle.",https://relayshield.net,RelayShield,RelayShield LLC,https://relayshield.net/relayshield-logo.png,in_stock,49.00 USD
-rs-personal-shield,RelayShield Personal Shield,"Threat intel monitoring for Telegram and WhatsApp. RelayShield watches 144 monitored Telegram marketplaces and flags stolen credentials, stealer logs, and scam-kit activity tied to you. Alerts via the Telegram and WhatsApp bots.",https://relayshield.net,RelayShield,RelayShield LLC,https://relayshield.net/relayshield-logo.png,in_stock,14.99 USD
+// PRODUCT-FEED-V3-2026-11-19: v3 feed, target_countries=US on all rows.
+const PRODUCT_FEED_CSV = `item_id,title,description,url,brand,seller_name,image_url,availability,price,target_countries
+rs-order-screening,RelayShield Order Screening,"Screen Shopify orders against live threat intel. Each order is checked against 850K+ indicators across 144 monitored Telegram marketplaces, with 11M+ citations. High-risk orders are tagged relayshield-high-risk, medium-risk flagged for review with a timeline note. RelayShield never blocks, cancels, or refunds an order, and never calls an order safe. Privacy-first: emails SHA-256 hashed, never stored raw, 90-day retention. Includes 100 free screenings.",https://apps.shopify.com/relayshield-order-screening,RelayShield,RelayShield LLC,https://relayshield.net/relayshield-logo.png,in_stock,29.00 USD,US
+rs-mcp-proxy-firewall-direct,RelayShield MCP Proxy Firewall (Direct),"Hosted MCP Proxy Firewall for a single developer or SMB. Screens every MCP tool call and tool result against live threat intel from 144 monitored Telegram marketplaces, 850K+ indicators, 11M+ citations. Intent binding (Policy 1 bound actions only, Policy 2 step-up for high-risk actions), opt-in PII redaction, and audit trail. Includes 20,000 screened calls per month, 0.002 USD per call overage. Dedicated hosted instance, no self-hosting.",https://relayshield.net,RelayShield,RelayShield LLC,https://relayshield.net/relayshield-logo.png,in_stock,49.00 USD,US
+rs-mcp-proxy-firewall-msp,"RelayShield MCP Proxy Firewall (MSP, per client org)","Hosted MCP Proxy Firewall for MSPs and distributors, priced per client org. Screens every MCP tool call and tool result against live threat intel from 144 monitored Telegram marketplaces, 850K+ indicators, 11M+ citations. Intent binding, opt-in PII redaction, per-tenant audit trail, and tenant-scoped console login. Includes 20,000 screened calls per client org per month, 0.002 USD per call overage. Dedicated hosted instance per client org.",https://relayshield.net,RelayShield,RelayShield LLC,https://relayshield.net/relayshield-logo.png,in_stock,69.00 USD,US
+rs-agent-verifiers-bundle,RelayShield Agent Verifiers Bundle,"Verification bundle for agentic commerce: TAP Verifier, PAP, Passport identity, Intent binding and settle check, plus threat corpus screening. Includes 100 free verifications per month. Verifier calls count toward the 20,000 screened-call pool. Built for agents that transact: verify the counterparty before the call, not after.",https://relayshield.net,RelayShield,RelayShield LLC,https://relayshield.net/relayshield-logo.png,in_stock,79.00 USD,US
+rs-tap-verifier,RelayShield TAP Verifier,"Standalone TAP (Trusted Agent Protocol) verifier. Verify TAP agent credentials before transacting, with threat corpus screening on the counterparty. For agents and businesses that need credential verification without the full verifiers bundle.",https://relayshield.net,RelayShield,RelayShield LLC,https://relayshield.net/relayshield-logo.png,in_stock,49.00 USD,US
+rs-personal-shield,RelayShield Personal Shield,"Threat intel monitoring for Telegram and WhatsApp. RelayShield watches 144 monitored Telegram marketplaces and flags stolen credentials, stealer logs, and scam-kit activity tied to you. Alerts via the Telegram and WhatsApp bots.",https://relayshield.net,RelayShield,RelayShield LLC,https://relayshield.net/relayshield-logo.png,in_stock,14.99 USD,US
 `;
 
 // CHANGELOG-ROUTE-2026-11-18
@@ -1913,3 +1914,5 @@ if (url.pathname === "/healthz") {
     });
   },
 };
+
+// VERIFIERS-CONSOLIDATION-2026-11-18

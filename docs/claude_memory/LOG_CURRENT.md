@@ -426,3 +426,11 @@ REL question numbers are VERIFIED against `wafr_answers_reliability_2026-10-11.m
 3. Carried from 2026-11-15 END OF DAY, unchanged: confirm the privacy Worker deploy and close SHOP-PRIV-1; after approval, the listing and cleanup items. That section's line "Local main is NOT pushed" is stale: `origin/main` already holds the Shopify merge (70024c7).
 4. Still unproven: that the live Worker equals `main` (version `41037aa4` from 11-15). The fixture path behaved as the code says, which is partial evidence only.
 * **Lessons:** (a) a number stated about a live system gets one call to it first; (b) a command that pushes `main` is checked against the workflow path filters before it is handed over.
+
+## 2026-11-20: INFORMATION SECURITY POLICY DRAFTED (`docs/security/information_security_policy.md`). DRAFT, NOT ADOPTED. NO SUCH DOCUMENT EXISTED BEFORE.
+
+Asked for the Vultr MSP marketplace security survey (Docubark). `git fetch --all --prune`, history search with no pathspec, a Drive search and `origin/main..main` on Andrew's clone (empty) all agreed: no information security policy existed, for AWS or otherwise. The adopted IRP v1.0 and the draft operating model, DR plan and WAFR practice map were the nearest things.
+* **Written from code, not from the founder-side survey answer.** Verified: dedicated EC2 per tenant, own Elastic IP, DNS and Secrets Manager secret (`relayshield_hosted_provision.py`); 72-hour single-use console setup link; opt-in PII redaction; hash-chained audit log storing argument hashes only; Ed25519 verdicts; telemetry off by default; CI is Bandit + pip-audit + Gitleaks on push and PR to `main`.
+* **NOT verified, marked CONFIRM in the document:** Cloudflare Access gating on the status log (nothing in the repo); console RBAC enforcement (`cloudflare_worker_mcpfw_api.js` says auth is a preview stub with RBAC a TODO); MFA everywhere; security group rules, EBS encryption, IMDSv2; PITR enabled; retention periods; Vultr hosting model (no Vultr string exists in the repo); a vulnerability-reporting address; any pen test.
+* **Correction made while writing:** the IRP names Safety; the workflow runs pip-audit. The policy says what the workflow does.
+* **Rule kept:** no survey may say "policy adopted" until Andrew writes ADOPTED and a date at the top. No data vendor is named in it.

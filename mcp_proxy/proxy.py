@@ -310,6 +310,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         cfg: ProxyConfig = self.server.cfg
+        # GET-MCP-DISCOVERY-2026-11-20: MCP clients (e.g. Lindy) GET the
+        # server URL to discover/verify it before POSTing JSON-RPC.
+        # Return a 200 discovery JSON instead of the 404 fallthrough.
+        if self.path == "/mcp" or self.path == "/mcp/" or self.path == "/":
+            self._send_json({"ok": True,
+                             "service": "relayshield-mcp-proxy",
+                             "transport": "streamable-http",
+                             "mcp": "/mcp"})
+            return
         if self.path == "/_rs/dashboard" or self.path == "/_rs/dashboard/":
             try:
                 html_path = os.path.join(

@@ -1094,20 +1094,99 @@ def _health_deadline(context):
     return time.monotonic() + max(0, remaining / 1000.0 - 90.0)
 
 
-def _wait_for_health(subdomain, deadline_monotonic=None):
+def _cert_matches_hostname(cert, hostname):
+    """True when a peer certificate covers hostname (SAN DNS entries,
+    wildcard-aware, CN fallback). Manual check: the via-IP health
+    check connects by Elastic IP, so the SSL context cannot verify
+    the hostname automatically (check_hostname needs a DNS name).
+    CANARY: HEALTH-CHECK-VIA-IP-2026-11-18"""
+    hostname = hostname.lower()
+    names = []
+    for key, value in cert.get("subjectAltName", ()):
+        if key == "DNS":
+            names.append(value.lower())
+    if not names:
+        for rdn in cert.get("subject", ()):
+            for key, value in rdn:
+                if key == "commonName":
+                    names.append(value.lower())
+    for name in names:
+        if name == hostname:
+            return True
+        if name.startswith("*."):
+            suffix = name[1:]
+            if hostname.endswith(suffix):
+                prefix = hostname[:-len(suffix)]
+                if prefix and "." not in prefix:
+                    return True
+    return False
+
+
+def _health_check_via_ip(eip, subdomain, timeout=10):
+    """One health probe against the proxy's Elastic IP (no DNS).
+    Opens TCP to the EIP on 443, TLS with SNI=subdomain, verifies the
+    CA chain AND the certificate hostname manually, then GETs the
+    health path with Host: subdomain. Returns (status, body).
+    Raises on connect/TLS/cert/HTTP errors; the caller treats any
+    raise as "not ready yet" and retries."""
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    raw = socket.create_connection((eip, 443), timeout=timeout)
+    try:
+        tls = ctx.wrap_socket(raw, server_hostname=subdomain)
+    except Exception:
+        raw.close()
+        raise
+    with tls:
+        cert = tls.getpeercert()
+        if not cert or not _cert_matches_hostname(cert, subdomain):
+            raise ValueError("certificate does not cover %s" % subdomain)
+        tls.sendall(
+            ("GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n"
+             % (HEALTH_PATH, subdomain)).encode("ascii"))
+        chunks = []
+        total = 0
+        tls.settimeout(timeout)
+        while True:
+            data = tls.recv(4096)
+            if not data:
+                break
+            chunks.append(data)
+            total += len(data)
+            if total > 65536:
+                break
+        raw_text = b"".join(chunks).decode("utf-8", "replace")
+        first_line = raw_text.split("\r\n", 1)[0]
+        parts = first_line.split(" ")
+        if len(parts) < 2 or not parts[1].isdigit():
+            raise ValueError("bad HTTP response: %r" % first_line[:100])
+        status = int(parts[1])
+        body = raw_text.split("\r\n\r\n", 1)[1] if "\r\n\r\n" in raw_text else ""
+        return status, body
+
+
+def _wait_for_health(subdomain, deadline_monotonic=None, eip=None):
     """Poll the health endpoint (no auth) until HTTP 200, up to 10
     minutes. DNS NXDOMAIN, connection refused, TLS errors, and
     non-200 responses in the first minutes are "not ready yet", not
     failure (Caddy is still obtaining its certificate and DNS is
-    still propagating). Returns True on HTTP 200, False on timeout."""
+    still propagating). Returns True on HTTP 200, False on timeout.
+    When eip is given, the probe connects to the Elastic IP directly
+    with SNI=subdomain and verifies the certificate hostname
+    manually, so it never depends on the Lambda's own DNS resolution
+    (which fails with Errno 16 in this environment)."""
     url = "https://" + subdomain + HEALTH_PATH
-    try:
-        infos = socket.getaddrinfo(subdomain, 443, proto=socket.IPPROTO_TCP)
-        _log("health check for %s resolves to %s"
-             % (subdomain, sorted({i[4][0] for i in infos})))
-    except Exception as exc:
-        _log("health check for %s DNS resolution failed: %s "
-             "(stage=dns) %s" % (subdomain, exc, traceback.format_exc()))
+    if eip:
+        _log("health check for %s will probe Elastic IP %s directly "
+             "(no DNS resolution)" % (subdomain, eip))
+    else:
+        try:
+            infos = socket.getaddrinfo(subdomain, 443, proto=socket.IPPROTO_TCP)
+            _log("health check for %s resolves to %s"
+                 % (subdomain, sorted({i[4][0] for i in infos})))
+        except Exception as exc:
+            _log("health check for %s DNS resolution failed: %s "
+                 "(stage=dns) %s" % (subdomain, exc, traceback.format_exc()))
     budget = HEALTH_TIMEOUT_SECONDS
     if deadline_monotonic is not None:
         budget = max(0, min(budget,
@@ -1122,16 +1201,26 @@ def _wait_for_health(subdomain, deadline_monotonic=None):
                  "reached" % subdomain)
             return False
         try:
-            req = urllib.request.Request(url, method="GET")
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                status = resp.status
-                body = resp.read().decode("utf-8", "replace")
+            if eip:
+                status, body = _health_check_via_ip(eip, subdomain)
                 if status == 200:
                     _log("health check passed for %s on attempt %d "
-                         "(body: %s)" % (subdomain, attempt, body[:200]))
+                         "(via %s, body: %s)"
+                         % (subdomain, attempt, eip, body[:200]))
                     return True
                 _log("health check for %s returned HTTP %s on attempt %d"
                      % (subdomain, status, attempt))
+            else:
+                req = urllib.request.Request(url, method="GET")
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    status = resp.status
+                    body = resp.read().decode("utf-8", "replace")
+                    if status == 200:
+                        _log("health check passed for %s on attempt %d "
+                             "(body: %s)" % (subdomain, attempt, body[:200]))
+                        return True
+                    _log("health check for %s returned HTTP %s on attempt %d"
+                         % (subdomain, status, attempt))
         except Exception as exc:
             _log("health check for %s not ready on attempt %d: %s "
                  "(stage=%s, type=%s, errno=%s) traceback: %s"
@@ -1837,7 +1926,8 @@ def lambda_handler(event, context):
             # Health poll. DNS NXDOMAIN / TLS errors in the first minutes
             # are "not ready yet". On timeout the instance is left running
             # for diagnosis (it is NOT deleted here).
-            if not _wait_for_health(subdomain, _health_deadline(context)):
+            if not _wait_for_health(subdomain, _health_deadline(context),
+                                    eip=eip):
                 raise RuntimeError(
                     "health check for %s did not return 200 within %d "
                     "seconds" % (subdomain, HEALTH_TIMEOUT_SECONDS))

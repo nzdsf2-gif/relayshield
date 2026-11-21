@@ -859,6 +859,58 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.server.known_recipients = store
         return store
 
+    def _screen_wallet_payment(self, recipient, amount_usdc=None, tenant_id="", api_key=None):
+        # WALLET-PAYMENT-SCREEN-B-2026-11-20: screen a Wallet MCP payment
+        # recipient via counterparty-screen (TI corpus + GoPlus failover
+        # + pin check inside the endpoint). Returns a verdict dict with
+        # payment_screen (low/medium/high/unknown), recommendation
+        # (proceed/review/do_not_pay), and risk_flags.
+        # Fail-open: any error, non-200, or 402 returns unknown, so a
+        # payment is never blocked because the screen itself is
+        # unavailable. The corpus screener that already ran is the
+        # backstop. The outcome is logged so a silent 402 is visible.
+        _out = {"payment_screen": "unknown", "recommendation": "review",
+                "risk_flags": ["payment screen not run"]}
+        if not recipient:
+            return _out
+        try:
+            _body = json.dumps({"address": recipient, "chain_id": "8453",
+                                "amount_usdc": amount_usdc,
+                                "source": "mcp-proxy-firewall"}).encode("utf-8")
+            _headers = {"Content-Type": "application/json",
+                        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
+            if api_key:
+                _headers["Authorization"] = "Bearer " + str(api_key)
+            _req = urllib.request.Request(
+                "https://api.relayshield.net/v1/payg/counterparty-screen",
+                data=_body, headers=_headers, method="POST")
+            with urllib.request.urlopen(_req, timeout=5) as _resp:
+                _data = json.loads(_resp.read().decode("utf-8"))
+            _inner = (_data.get("data", _data) or {}) if isinstance(_data, dict) else {}
+            _level = str(_inner.get("risk_level") or "unknown").lower()
+            _rec = str(_inner.get("recommendation") or "review").lower()
+            _flags = list(_inner.get("risk_flags") or [])
+            _out = {"payment_screen": _level, "recommendation": _rec, "risk_flags": _flags}
+        except Exception as _exc:
+            log.warning("wallet payment screen failed (fail-open): %s", _exc)
+            _out = {"payment_screen": "unknown", "recommendation": "review",
+                    "risk_flags": ["payment screen error, fail-open"]}
+        return _out
+
+    def _is_wallet_payment_tool(self, tool_name, arguments):
+        # A Wallet MCP payment tool call: state-changing, with a
+        # recipient and an amount, and a payment-like tool name.
+        # The name list is a heuristic; extend it as Wallet MCP
+        # payment tool names are confirmed.
+        if _tool_is_read_only(tool_name, arguments):
+            return False
+        if not _extract_recipient(arguments):
+            return False
+        if _extract_amount_minor(arguments) is None:
+            return False
+        _name = str(tool_name or "").lower()
+        return any(_k in _name for _k in ("send", "transfer", "pay", "payment", "swap", "bridge"))
+
     def _intent_gate(self, session_key, tool_name, arguments, cfg, req=None, screen_verdict=None):
         # Returns None to fall through, or a JSON-RPC error response to block.
         # Policy 1: Bound actions only. Policy 2: Step-up for high-risk actions.
@@ -1333,6 +1385,38 @@ class ProxyHandler(BaseHTTPRequestHandler):
         # else the transport session ID, else the (agent IP,
         # upstream) pair as in behavior.py.
         # corr and session_key moved above, after agent_id, before first audit call (Phase 3a call-site step 2v3)
+        # WALLET-PAYMENT-SCREEN-B-2026-11-20: Wallet MCP payment screen.
+        # For a payment tool call, screen the recipient via
+        # counterparty-screen (corpus + GoPlus + pin check). A HIGH /
+        # do_not_pay verdict, or a PIN_MISMATCH flag, becomes a content
+        # flag for the gate, so Policy 2 step-up applies and Enforce
+        # blocks without a human_approval attestation. UNKNOWN / timeout
+        # fails open.
+        try:
+            if self._is_wallet_payment_tool(tool_name, arguments):
+                _pay_recipient = _extract_recipient(arguments)
+                _pay_amount = _extract_amount_minor(arguments)
+                _pay_screen = self._screen_wallet_payment(
+                    _pay_recipient, amount_usdc=_pay_amount,
+                    tenant_id=_audit_tenant,
+                    api_key=self._tenant_key(_audit_tenant, "screener_key") if _audit_tenant else None)
+                _pay_level = str((_pay_screen or {}).get("payment_screen") or "unknown").lower()
+                _pay_rec = str((_pay_screen or {}).get("recommendation") or "review").lower()
+                _pay_flags = list((_pay_screen or {}).get("risk_flags") or [])
+                log.info(json.dumps({
+                    "event": "wallet_payment_screen",
+                    "tool": tool_name,
+                    "recipient": _pay_recipient,
+                    "payment_screen": _pay_level,
+                    "recommendation": _pay_rec,
+                    "risk_flags": _pay_flags,
+                }))
+                if _pay_level == "high" or _pay_rec == "do_not_pay" or any("PIN_MISMATCH" in str(f) for f in _pay_flags):
+                    _reasons = list((verdict or {}).get("reasons") or [])
+                    _reasons.append("wallet payment screen: " + ("; ".join(_pay_flags) if _pay_flags else "high risk counterparty"))
+                    verdict = {"verdict": "flag", "level": "high", "reasons": _reasons}
+        except Exception as _exc:
+            log.warning("wallet payment screen hook failed (fail-open): %s", _exc)
         _gate = self._intent_gate(session_key, tool_name, arguments, cfg, req=req, screen_verdict=verdict)
         # Context-engine item 1: pick up the profile consultation
         # _intent_gate stored per-request. Defaults above stand when

@@ -1221,6 +1221,28 @@ branch.** The gate is ZERO High-risk issues in Security, Operational Excellence 
    default run), and enabling must MERGE into the existing environment because `update_function_configuration` replaces all of it.
    Order: merge and let the deploy run, apply the plumbing, then enable. Detail: `LOG_CURRENT.md`, "REL 4".
 
+## THIS REPOSITORY IS PUBLIC. OPEN SECURITY ITEMS NEVER LIVE IN IT.
+
+**Added 2026-11-21, after Andrew's instruction on 2026-11-20 to "remove the gaps section off the public repo", and after a commit of mine was
+stopped because it wrote the same weaknesses into `LOG_CURRENT.md` one turn later.** `nzdsf2-gif/relayshield` is public
+(`list_repos` says `"visibility":"public"`), so every file on `main` AND on every `claude/...` branch pushed to it is world-readable, and a
+push is cached and indexed even if later reverted. The private repo is `nzdsf2-gif/relayshield-mcp-proxyfw`.
+
+**THE RULE.** A weakness, gap, missing control, unverified claim about a control, admin address or account name is never written into
+`LOG_CURRENT.md`, the archive, a code comment, a commit message, a test name or any document in this repository. This includes a "known gaps"
+section and a TODO phrased as "X is not enforced". Write the neutral engineering task ("harden hosted instance launch settings"), and keep the
+register in the FULL edition of the document, held by Andrew or in the private repo.
+
+* **Security documents have two editions.** `docs/security/information_security_policy.md` is the PUBLIC edition. The FULL edition, with the
+  register of open items, goes to partners and reviewers as a file and is NOT committed here. The recipe to rebuild the public edition from a
+  full one is in the "WHERE 2026-11-20/21" entry of `LOG_CURRENT.md`.
+* **History was not rewritten.** `e5a7508` and `9ab98cf` still hold the first, gap-bearing text. Removing it needs a force-push of `main`, which
+  nobody does without Andrew asking.
+* **A control is claimed from a read, never from a document.** Two statements in the first policy draft, taken from `RelayShield_Strategy.md`
+  and from a confirmation, were contradicted by the `tools/wafr_evidence.sh` read of 2026-11-20 and were corrected. A claim in a document sent
+  to a third party is checked against that script's output first.
+* **Before any push to a public repo that touches security text, grep the diff:** `git diff --cached | grep -i -E "gap|not enforced|not yet|stub|unverified|missing"`.
+
 ## Writing conventions
 
 - **No em-dashes** in published copy. Applies to the short syndication versions too.

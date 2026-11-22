@@ -27,8 +27,10 @@ import re
 
 from .screener import (_PROMPT_INJECTION_PATTERNS, _has_synthetic_hints,
                        extract_indicators, worst_category,
+                       _tool_name_has_shell_token,
                        POISON_PROMPT_INJECTION, POISON_PII_LEAK,
-                       POISON_MALICIOUS_URL, POISON_UNKNOWN_SYNTHETIC)
+                       POISON_MALICIOUS_URL, POISON_UNKNOWN_SYNTHETIC,
+                       POISON_SHELL_INJECTION)
 from . import taxonomy
 
 DISCOVERY_METHODS = frozenset(
@@ -180,6 +182,18 @@ def screen_discovery(method: str, resp, screener=None) -> dict:
             f"instruction-like phrasing in publicly cacheable {method} descriptions",
             "mcp_2026_008_unknown_synthetic")
 
+    # SHELL-INJECTION-SCREEN-2026-11-22 (CVE-2026-129995): a tools/list
+    # response exposing shell-out tool names is flagged as shell-capable.
+    # Shape-based, not version-based: tools/list carries no server
+    # version, so a patched 3.8.5 and a vulnerable server look alike.
+    # Flag only, never block, per the discovery rule. The reason names
+    # the pattern, never the tool name (attacker-authored).
+    if method == "tools/list":
+        for _name in names:
+            if _tool_name_has_shell_token(_name):
+                hit(POISON_SHELL_INJECTION,
+                    "shell-capable tool exposed in tools/list response")
+                break
     if screener is not None:
         try:
             blob = (([instructions] if instructions else []) + texts)

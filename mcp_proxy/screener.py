@@ -100,6 +100,9 @@ POISON_CREDENTIAL_EXFILTRATION = "credential_exfiltration"
 POISON_SSRF = "ssrf_internal_url"
 POISON_BEHAVIORAL_ANOMALY = "behavioral_anomaly"
 POISON_ATTACK_CHAIN = "attack_chain"
+# SHELL-INJECTION-SCREEN-2026-11-22 (CVE-2026-129995): shell
+# metacharacters in tool-call arguments (mcp-ssh-manager ssh_backup_*).
+POISON_SHELL_INJECTION = "shell_injection"
 POISON_POLICY_DENY = "policy_deny"
 POISON_POLICY_APPROVAL = "policy_approval"
 POISON_CLEAN = "clean"
@@ -110,6 +113,7 @@ _CATEGORY_RANK = {
     POISON_PII_LEAK: 2,
     POISON_SECRET_LEAK: 3,
     POISON_PROMPT_INJECTION: 4,
+    POISON_SHELL_INJECTION: 4,
     POISON_OAUTH_TAMPERING: 5,
     POISON_BEHAVIORAL_ANOMALY: 6,
     POISON_MALICIOUS_URL: 7,
@@ -131,6 +135,36 @@ def worst_category(categories) -> str:
         if _CATEGORY_RANK.get(c, 0) > _CATEGORY_RANK.get(best, 0):
             best = c
     return best
+
+
+# Shell-capable tool-name tokens (CVE-2026-129995). A tool whose name
+# carries one of these anywhere (not just as the first token) can shell
+# out: backup, shell, exec, ssh, terminal, cron, schedule, script.
+# Deliberately NOT included: 'command' (list_commands is genuinely
+# read-only) and 'run' (dry_run is not a shell-out). Shared by the
+# proxy gate (_tool_is_read_only) and the discovery screen.
+_SHELL_TOKENS = ("backup", "shell", "exec", "ssh", "terminal", "cron",
+                 "schedule", "script")
+
+
+def _tool_name_has_shell_token(tool_name) -> bool:
+    """True if any underscore/hyphen token in the tool name is a shell token.
+
+    Plural tokens match their singular (backups -> backup), so a server
+    naming a shell-out tool list_backups is caught. Matching is exact
+    after stripping one trailing 's'; prefixes do not match, so
+    'scheduled' does not match 'schedule' and 'shellfish' does not
+    match 'shell'.
+    """
+    name = (tool_name or "").lower()
+    for tok in name.replace("-", "_").split("_"):
+        if not tok:
+            continue
+        if tok in _SHELL_TOKENS:
+            return True
+        if tok.endswith("s") and tok[:-1] in _SHELL_TOKENS:
+            return True
+    return False
 
 
 # Instruction-like phrasing that does not match any known
@@ -305,6 +339,75 @@ def extract_indicators(obj, _depth=0, _seen=None) -> dict:
         "domains": sorted(domains),
         "ips": sorted(ips),
     }
+
+
+# Shell metacharacters for the CVE-2026-129995 argument screen.
+# Command separators: ';', '&&', '|', newline, carriage return.
+# ('||' is covered by '|'.) Command substitution: '$(', backtick.
+# Redirection: '>'. Bare '$', '*', '?', '<', and bare '&' are
+# deliberately not flagged: prices, globs, HTML, and ordinary text.
+_SHELL_SEPARATORS = (";", "&&", "|", "\n", "\r")
+_SHELL_SUBSTITUTIONS = ("$(", "`")
+_SHELL_REDIRECTIONS = (">",)
+
+
+def _shell_metachar_class(value: str):
+    """Return the shell-metacharacter class in a string value, or None.
+
+    Classes: 'command separator', 'command substitution', 'redirection'.
+    A value that is entirely a URL is skipped: a URL query can
+    legitimately contain ';', and the URL is a fetch target, not a
+    shell command. Non-string values are not passed here.
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    stripped = value.strip()
+    if stripped and _URL_RE.fullmatch(stripped):
+        return None
+    for sep in _SHELL_SEPARATORS:
+        if sep in value:
+            return "command separator"
+    for sub in _SHELL_SUBSTITUTIONS:
+        if sub in value:
+            return "command substitution"
+    for red in _SHELL_REDIRECTIONS:
+        if red in value:
+            return "redirection"
+    return None
+
+
+def _scan_shell_arguments(arguments):
+    """Walk tool-call arguments for shell metacharacters (CVE-2026-129995).
+
+    Returns [(argument path, metacharacter class)] for each string value
+    carrying one, in walk order, capped at 10. Numbers, booleans, and
+    null are skipped. Same depth cap (10) as extract_indicators.
+    Never raises: on internal error it logs and returns [], so normal
+    screening continues (fail-open).
+    """
+    hits = []
+    try:
+        _walk_shell(arguments, "", 0, hits)
+    except Exception as exc:
+        log.warning("shell argument scan failed (fail-open): %s", exc)
+        return []
+    return hits[:10]
+
+
+def _walk_shell(node, path, depth, hits):
+    if depth > 10 or len(hits) >= 10:
+        return
+    if isinstance(node, str):
+        cls = _shell_metachar_class(node)
+        if cls:
+            hits.append((path or "arguments", cls))
+        return
+    if isinstance(node, dict):
+        for k, v in node.items():
+            _walk_shell(v, f"{path}.{k}" if path else str(k), depth + 1, hits)
+    elif isinstance(node, (list, tuple)):
+        for i, v in enumerate(node):
+            _walk_shell(v, f"{path}[{i}]", depth + 1, hits)
 
 
 # Protocol pivoting (SSRF) detection. MCP servers that build outbound
@@ -721,6 +824,35 @@ class Screener:
                         "cause_codes": scored["cause_codes"],
                         "tool_name": tool_name,
                     }
+        # SHELL-INJECTION-SCREEN-2026-11-22 (CVE-2026-129995): shell
+        # metacharacters in tool-call arguments. A server that builds a
+        # shell command from an argument (mcp-ssh-manager ssh_backup_*)
+        # runs the metacharacter as a command. Flag, never block here:
+        # the gate decides (Policy 2 step-up) from the flag verdict.
+        # Fail-open: the scan logs on internal error and screening
+        # continues normally.
+        _shell_hits = _scan_shell_arguments(arguments)
+        if _shell_hits:
+            _shell_reasons = [
+                f"shell metacharacter ({cls}) in argument '{path}'"
+                for path, cls in _shell_hits[:5]
+            ]
+            _shell_classes = sorted({cls for _, cls in _shell_hits})
+            scored = _confidence.score_verdict("BLOCK", [{
+                "code": "SHELL_METACHARACTER",
+                "detail": "; ".join(_shell_classes),
+            }])
+            return {
+                "verdict": "flag",
+                "level": "high",
+                "score": 90,
+                "reasons": _shell_reasons,
+                "poison_category": POISON_SHELL_INJECTION,
+                "screened": {"arguments": arguments},
+                "confidence": scored["confidence"],
+                "cause_codes": scored["cause_codes"],
+                "tool_name": tool_name,
+            }
         indicators = extract_indicators(arguments)
         if self.oauth_screening_enabled:
             oauth_verdict = self._screen_oauth_arguments(indicators)

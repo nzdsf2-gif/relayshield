@@ -74,6 +74,12 @@ CAUSE_CODES = {
         "kind": "threat",
         "description": "Private key or secret material in tool result",
     },
+    # SHELL-INJECTION-SCREEN-2026-11-22 (CVE-2026-129995).
+    "SHELL_METACHARACTER": {
+        "weight": 88,
+        "kind": "threat",
+        "description": "Shell metacharacter in tool call argument (command injection attempt, CVE-2026-129995)",
+    },
     "PROMPT_INJECTION": {
         "weight": 80,
         "kind": "threat",
@@ -264,6 +270,7 @@ def score_verdict(verdict, signals):
 # caller does not declare explicit signals.
 CATEGORY_CAUSE_CODES = {
     "prompt_injection": ["PROMPT_INJECTION"],
+    "shell_injection": ["SHELL_METACHARACTER"],
     "kit_match": ["KIT_MATCH"],
     "malicious_url": ["MALICIOUS_URL_HIGH"],
     "ssrf_internal_url": ["SSRF_INTERNAL_URL"],

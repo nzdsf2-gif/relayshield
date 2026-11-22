@@ -27,7 +27,7 @@ from .policy import PolicyEngine
 from .quarantine import QuarantineManager
 from .reputation import ReputationStore
 from .kill_chain_store import ChainHistoryStore, PivotRegistry
-from .screener import Screener, extract_indicators
+from .screener import Screener, extract_indicators, _tool_name_has_shell_token
 from .sequence_scoring import (KillChainScorer, SequenceScoringConfig,
                                _external_endpoints, make_session_key)
 from .telemetry import Telemetry
@@ -854,6 +854,36 @@ class ProxyHandler(BaseHTTPRequestHandler):
         except Exception:
             # Never fail the policy fetch because intent extraction failed.
             pass
+        # DELEGATION-CHAIN-2026-11-21: capture the provenance and
+        # full chain the console resolved for this tenant. Stored
+        # per tenant alongside intent_policies; the gate reads
+        # them to stamp the deciding link on a verdict.
+        try:
+            _prov = {}
+            _chain = []
+            if isinstance(data, dict):
+                _prov_inner = data.get("data", data)
+                if isinstance(_prov_inner, dict):
+                    _prov = _prov_inner.get("intent_binding_provenance") or {}
+                    _chain = _prov_inner.get("delegation_chain") or []
+            if not isinstance(_prov, dict) or not _prov:
+                if isinstance(policy, dict):
+                    _prov = policy.get("intent_binding_provenance") or {}
+            if not isinstance(_chain, list) or not _chain:
+                if isinstance(policy, dict):
+                    _chain = policy.get("delegation_chain") or []
+            if not isinstance(_prov, dict):
+                _prov = {}
+            if not isinstance(_chain, list):
+                _chain = []
+            if not hasattr(self.server, "intent_policy_provenance") or self.server.intent_policy_provenance is None:
+                self.server.intent_policy_provenance = {}
+            self.server.intent_policy_provenance[cache_key] = _prov
+            if not hasattr(self.server, "delegation_chain") or self.server.delegation_chain is None:
+                self.server.delegation_chain = {}
+            self.server.delegation_chain[cache_key] = _chain
+        except Exception:
+            pass
         _key_errors = getattr(self.server, "tenant_policy_errors", None)
         if _key_errors is not None:
             _key_errors.pop(cache_key, None)
@@ -920,9 +950,69 @@ class ProxyHandler(BaseHTTPRequestHandler):
         _name = str(tool_name or "").lower()
         return any(_k in _name for _k in ("send", "transfer", "pay", "payment", "swap", "bridge"))
 
+    def _delegation_stamp_for(self, session, reason, triggers):
+        """DELEGATION-CHAIN-2026-11-21: build the delegation stamp for a gate verdict.
+
+        Returns {deciding_link, deciding_field, deciding_reason,
+        delegation_chain} or None when there is nothing to
+        attribute. Never raises: a stamp failure must not change
+        the gate outcome. The deciding field is the policy field
+        whose value caused the verdict; the deciding link is the
+        level that set that field, from the resolved-policy
+        provenance. Non-policy reasons (passport, intent drift,
+        binding step-up) attribute to the session's own level.
+        """
+        try:
+            session = session or {}
+            tenant_id = session.get("console_tenant_id") or session.get("tenant_id") or ""
+            location_id = session.get("location_id") or ""
+            cache_key = f"{tenant_id}:{location_id}" if (tenant_id and location_id) else tenant_id
+            provenance = {}
+            chain = []
+            if cache_key:
+                prov = getattr(self.server, "intent_policy_provenance", None) or {}
+                if isinstance(prov, dict):
+                    provenance = prov.get(cache_key) or {}
+                ch = getattr(self.server, "delegation_chain", None) or {}
+                if isinstance(ch, dict):
+                    chain = ch.get(cache_key) or []
+            if not isinstance(provenance, dict):
+                provenance = {}
+            if not isinstance(chain, list):
+                chain = []
+            triggers = triggers or []
+            field = ""
+            if reason == "missing_binding":
+                field = "policy1_mode"
+            elif reason in ("step_up_attestation_missing", "step_up_flag"):
+                if "amount" in triggers:
+                    field = "step_up_amount_threshold"
+                elif "unknown_recipient" in triggers or "content_flag" in triggers:
+                    field = "policy2_step_up_enabled"
+                else:
+                    field = "binding_step_up"
+            elif reason:
+                field = reason
+            link = ""
+            if field and field in provenance and isinstance(provenance.get(field), dict):
+                link = str(provenance[field].get("level") or "")
+            if not link:
+                link = "location" if location_id else "client_org"
+            return {
+                "deciding_link": link,
+                "deciding_field": field,
+                "deciding_reason": reason or "",
+                "delegation_chain": chain,
+            }
+        except Exception:
+            return None
+
     def _intent_gate(self, session_key, tool_name, arguments, cfg, req=None, screen_verdict=None):
         # Returns None to fall through, or a JSON-RPC error response to block.
         # Policy 1: Bound actions only. Policy 2: Step-up for high-risk actions.
+        # DELEGATION-CHAIN-2026-11-21: per-request stamp, cleared
+        # here so a previous call cannot leak into this one.
+        self._delegation_stamp = None
         if _tool_is_read_only(tool_name, arguments):
             return None
         store = getattr(self.server, "session_bindings", None) or {}
@@ -1020,6 +1110,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     "triggers": _policy2_triggers,
                     "binding_step_up": bool(_session_step_up_would_require),
                 }))
+                # DELEGATION-CHAIN-2026-11-21: record the flag so
+                # the allowed-call audit entry can carry the chain.
+                try:
+                    self._delegation_stamp = self._delegation_stamp_for(session, "step_up_flag", _policy2_triggers)
+                except Exception:
+                    self._delegation_stamp = None
             return None
         if session is None:
             return _error_response(0, -32000, "Blocked by RelayShield: state-changing tool requires a session binding", {"reason": "missing_binding", "tool": tool_name})
@@ -1365,7 +1461,13 @@ class ProxyHandler(BaseHTTPRequestHandler):
         if cfg.screening_enabled:
             try:
                 s0 = time.monotonic()
-                verdict = screener.screen_tool_call(tool_name, arguments, api_key=self._tenant_key(_audit_tenant, "screener_key") if _audit_tenant else None)
+                # SHELL-INJECTION-SCREEN-2026-11-22: the PII patch
+                # (2026-11-15) removed api_key from screen_tool_call,
+                # but this call site was never updated, so every call
+                # raised TypeError and screening silently fell back
+                # to allow. Drop the stale argument so the screener
+                # (including the shell check) actually runs.
+                verdict = screener.screen_tool_call(tool_name, arguments)
                 screen_ms = (time.monotonic() - s0) * 1000
             except Exception as exc:
                 log.error("screener error: %s", exc)
@@ -1447,6 +1549,31 @@ class ProxyHandler(BaseHTTPRequestHandler):
                             _gate_data["tenant_id"] = _gate_session.get("tenant_id")
                         if _gate_session.get("binding_id"):
                             _gate_data["binding_id"] = _gate_session.get("binding_id")
+            except Exception:
+                pass
+            # DELEGATION-CHAIN-2026-11-21: record the gate block
+            # in the audit trail with the deciding link and field.
+            try:
+                _gate_reason = ""
+                _gate_triggers = []
+                if isinstance(_gate, dict) and isinstance(_gate.get("error"), dict):
+                    _gd = _gate["error"].get("data") or {}
+                    if isinstance(_gd, dict):
+                        _gate_reason = str(_gd.get("reason") or "")
+                        _gate_triggers = list(_gd.get("step_up_triggers") or [])
+                _stamp = self._delegation_stamp_for(_gate_session, _gate_reason, _gate_triggers)
+                self.server.audit.record(
+                    agent_id, upstream_url, tool_name, arguments,
+                    decision="block", poison_category="intent_binding",
+                    reasons=[("Gate blocked: " + _gate_reason) if _gate_reason else "Blocked by RelayShield intent gate"],
+                    policy_decision="block",
+                    duration_ms=(time.monotonic() - t0) * 1000,
+                    tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location, screened_call=True,
+                    profile_version=_profile_version, profile_fallback=_profile_fallback, profile_high_risk=_profile_high_risk,
+                    deciding_link=(_stamp or {}).get("deciding_link", "") if _stamp else "",
+                    deciding_field=(_stamp or {}).get("deciding_field", "") if _stamp else "",
+                    delegation_chain=(_stamp or {}).get("delegation_chain", []) if _stamp else [],
+                )
             except Exception:
                 pass
             return _gate
@@ -1728,6 +1855,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
             )
 
         # Phase 4: audit the allowed call.
+        # DELEGATION-CHAIN-2026-11-21: when the gate flagged in
+        # Audit mode, the stamp carries the chain; otherwise it
+        # is empty and the row shows no chain (graceful fallback).
+        _dstamp = getattr(self, "_delegation_stamp", None) or {}
         self.server.audit.record(
             agent_id, upstream_url, tool_name, arguments,
             decision="allow",
@@ -1738,7 +1869,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
             policy_decision=policy_decision,
             duration_ms=(time.monotonic() - t0) * 1000,
             tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location, screened_call=True,
-            profile_version=_profile_version, profile_fallback=_profile_fallback, profile_high_risk=_profile_high_risk, citations=_audit_citations
+            profile_version=_profile_version, profile_fallback=_profile_fallback, profile_high_risk=_profile_high_risk, citations=_audit_citations,
+            deciding_link=_dstamp.get("deciding_link", ""),
+            deciding_field=_dstamp.get("deciding_field", ""),
+            delegation_chain=_dstamp.get("delegation_chain", []),
         )
 
         return upstream_resp
@@ -2053,7 +2187,7 @@ def run():
 
 # Intent-binding helpers, Item 3, verb classification, not upstream names.
 _READ_VERBS = ("list", "get", "read", "search", "describe", "query", "lookup", "check", "view", "show", "find", "count")
-_STATE_VERBS = ("create", "update", "delete", "write", "set", "put", "post", "patch", "insert", "remove", "move", "rename", "publish", "send", "pay", "transfer", "refund", "charge", "purchase", "order", "submit", "execute", "run", "upload", "share", "grant", "revoke")
+_STATE_VERBS = ("create", "update", "delete", "write", "set", "put", "post", "patch", "insert", "remove", "move", "rename", "publish", "send", "pay", "transfer", "refund", "charge", "purchase", "order", "submit", "execute", "run", "upload", "share", "grant", "revoke", "backup", "schedule")
 _WRITE_ARGS = ("amount", "amount_minor", "value", "total", "price", "payment_amount", "recipient", "counterparty", "payee", "to", "destination", "destination_address")
 
 def _tool_verb(tool_name):
@@ -2069,6 +2203,13 @@ def _tool_verb(tool_name):
 def _tool_is_read_only(tool_name, arguments):
     if tool_name in ("initialize", "tools/list", "ping"):
         return True
+    # SHELL-INJECTION-SCREEN-2026-11-22 (CVE-2026-129995): any shell
+    # token anywhere in the tool name makes it state-changing, so a
+    # server naming a shell-out tool list_* (e.g. list_backups) cannot
+    # skip the intent gate. 'command' and 'run' are deliberately not
+    # shell tokens: list_commands stays read-only, dry_run unaffected.
+    if _tool_name_has_shell_token(tool_name):
+        return False
     verb = _tool_verb(tool_name)
     if verb in _STATE_VERBS:
         return False

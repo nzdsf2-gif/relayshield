@@ -3326,3 +3326,13 @@ The Shopify app keeps one number per shop after uninstall: the count of screenin
 ## SHOP-REV-2: Shopify item 4.5.3 resubmitted with the pass and fail screencast (added 2026-11-17, open: waiting on Shopify)
 
 Status "In review" since 2026-11-17. Read Shopify's reply word for word. No Worker deploys, leave `relayshield-test` and the app installed, keep the Drive screencast shared and unrenamed, keep the fixture. If it bounces again, the next step is making the fixture shop-agnostic (keep `fixture-` and `@relayshield.net`, drop the shop check) so a reviewer can reproduce a fail on their own dev store; it needs a code change, a test in `shopify/test_worker_session.mjs` and a deploy. Details: `docs/claude_memory/LOG_CURRENT.md` ("2026-11-17: SHOPIFY ITEM 4.5.3") and `shopify_screencast_script_2026-11-16.md`. Also confirm `shopify_screencast_script_2026-11-16.md` reached `origin/main`.
+
+
+## WAFR-SEC8-10: Security questions, state at end of 2026-11-24 (added 2026-11-24, open)
+
+The FTR gate is still **23 High questions** (OPS 5, SEC 9, REL 9); nothing was re-ticked this session. Current state and the ordered list are the last "WHERE ... LEFT THINGS" section of `docs/claude_memory/LOG_CURRENT.md` ("WHERE 2026-11-24 (END OF DAY, WAFR SEC 8 + SEC 10 SESSION)"), which supersedes this entry if they disagree.
+
+Founder's open items: counsel's signed acknowledgment; speak to the backup contact; read `docs/security/tabletop_prep.md`; confirm assuming the responder role works with MFA; point-in-time recovery cost from the `protect_dynamodb_tables.sh` dry run; first run of `tools/wafr_data_at_rest.py` (dry run), then `--apply` one step at a time; hold the tabletop and commit the record.
+
+Claude's next: wait for the founder's explicit "go" before any history rewrite; SEC 2 temporary credentials; SEC 3 role split; SEC 7 data classification; SEC 11 documents. Never record names or weakness specifics here: this repository is public.
+

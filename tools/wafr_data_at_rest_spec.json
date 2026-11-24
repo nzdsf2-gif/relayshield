@@ -1,0 +1,6 @@
+{
+  "account": "239677749008",
+  "region": "us-east-1",
+  "_note": "expected_public_buckets: buckets that are public ON PURPOSE (static sites, public downloads). The tool never applies a public access block to these and the account-level block waits while any exist. Empty is Claude's assumption (2026-11-24), not a fact: the first dry run lists every bucket, and anything it reports as CONFLICT is a bucket that is public today.",
+  "expected_public_buckets": []
+}

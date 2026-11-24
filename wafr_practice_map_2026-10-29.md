@@ -67,6 +67,13 @@ and states why in the Note.
 | Manage configuration drift at the DR site or Region | Lambda drift check exists; Workers, API Gateway, IAM not covered | PARTIAL |
 | Automate recovery (DR) | restore is manual | NOT BUILT |
 
+## Security: SEC 8 data at rest (added 2026-11-24; the other 34 SEC practices are in `LOG_CURRENT.md`)
+
+| Practice | Backing | Status |
+|---|---|---|
+| Automate data at rest protection | `tools/wafr_data_at_rest.py` plus `.github/workflows/data_at_rest_check.yml` (weekly `--check`, red on any gap). Detection is automated; remediation is run by hand, so say that in the Note | UNRUN (needs `apply_data_at_rest_read_policy.sh` first) |
+| Enforce access control | public access blocked per bucket and per account, encryption on by configuration (`wafr_data_at_rest.py --apply`); least-privilege IAM on the stores is NOT covered, that is SEC 3 and the role split | UNRUN, PARTIAL |
+
 ## What would move the most, in order
 
 1. Merge this branch, push `main`, see `tests.yml` and the deploy gate go green. Costs nothing.

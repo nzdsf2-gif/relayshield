@@ -3334,5 +3334,5 @@ The FTR gate is still **23 High questions** (OPS 5, SEC 9, REL 9); nothing was r
 
 Founder's open items: counsel's signed acknowledgment; speak to the backup contact; read `docs/security/tabletop_prep.md`; confirm assuming the responder role works with MFA; point-in-time recovery cost from the `protect_dynamodb_tables.sh` dry run; first run of `tools/wafr_data_at_rest.py` (dry run), then `--apply` one step at a time; hold the tabletop and commit the record.
 
-Claude's next: wait for the founder's explicit "go" before any history rewrite; SEC 2 temporary credentials; SEC 3 role split; SEC 7 data classification; SEC 11 documents. Never record names or weakness specifics here: this repository is public.
+Claude's next: **SEC 2 first (founder's decision 2026-11-24): temporary credentials, centralized identity, groups**; then SEC 3 role split; SEC 7 data classification; SEC 11 documents. Never record names or weakness specifics here: this repository is public.
 

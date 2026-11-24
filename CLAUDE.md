@@ -1211,6 +1211,14 @@ unauthenticated request returns the page). Everything committed to it, in any fi
    whose pushes deploy, every clone diverges, GitHub keeps old commits reachable by SHA until support purges them). It is the founder's decision and is
    never done as a closing task.
 
+## NEXT WAFR SESSION STARTS WITH SEC 2. DECIDED BY THE FOUNDER, 2026-11-24.
+
+SEC 2 ("identities") is the next Security question to work, ahead of SEC 3, 7 and 11. Its unmet practices in the saved High list are *Use temporary
+credentials*, *Rely on a centralized identity provider* and *Employ user groups and attributes*. **It changes how the founder signs in to AWS, so the first
+step is a decision from him, asked once with a recommendation attached** (IAM Identity Center, or an assumed role with MFA for admin work), not a build.
+Then build dry-run-first with the repo's WAFR pattern. What this session left, and what it did not close (NO High question is closed yet), is the last
+"WHERE ... LEFT THINGS" section of `LOG_CURRENT.md`. Do not record the founder's audit findings here or anywhere in the repo (public repository rule above).
+
 ## THE WAFR / FTR THREAD: WHERE IT LIVES, AND THE SEVEN RULES THAT HOLD IT TOGETHER
 
 **Added 2026-10-29, at Andrew's request, after a session told him the Security high-risk list "was never saved" when it was on an unmerged

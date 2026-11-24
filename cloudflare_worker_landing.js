@@ -1744,6 +1744,17 @@ const CHANGELOG_HTML = `<!DOCTYPE html>
 <h3>Added</h3>
 <ul>
 <li>Intent binding proxy enforcement (Policy 1 Bound actions only, Policy 2 step-up for high-risk actions). Patch v2 applied 2026-11-17; gate verified on all 3 fleet instances 2026-11-17; console Policies tab now shows the Intent Binding panel.</li>
+<!-- CHANGELOG-COMPREHENSIVE-2026-11-23 -->
+<li>IETF Ph2 MSP hierarchy narrowing, 2026-11-19: the console now enforces per-tenant and per-location intent-binding thresholds, with the child (location) value winning where both are set. A narrowing that would widen a parent scope is rejected with a clear error code.</li>
+<li>Landing verifiers consolidation, 2026-11-19: the verifier cards on relayshield.net are consolidated into a single Agents Verifiers section, so the Firewall, TAP verifier, and related checks are found in one place.</li>
+<li>GET /mcp discovery fix, 2026-11-20: the GET /mcp endpoint now returns the MCP discovery document correctly, so MCP clients that probe the endpoint before connecting (including Lindy) can discover the Firewall's tools.</li>
+<li>Provision DNS health-check fix, 2026-11-20: the provision Lambda now verifies the tenant subdomain DNS record before reporting success, so a provision that cannot resolve is caught at provision time instead of surfacing as a dead proxy URL. Applies to provisions after this date.</li>
+<li>Wallet pre-payment screen, 2026-11-21: the Firewall now screens wallet payment calls before they execute, checking the counterparty and the payment details against the threat-intelligence corpus. A flagged payment is held for review instead of moving.</li>
+<li>Audit Trail live proxy pull (Option B), 2026-11-21: the console Audit Trail now pulls live calls from each tenant's hosted proxy and merges them with the stored console entries, so the trail shows real screened calls. Demo data sits behind a toggle, off by default.</li>
+<li>Verdict-delegation chain in the Audit Trail, 2026-11-21: a gated call that was blocked or flagged now shows the full delegation chain in the Audit Trail row, so the tenant can see which policy and which binding produced the verdict.</li>
+<li>Shell-injection screen (CVE-2026-129995), 2026-11-22: the Firewall now screens tool-call arguments for shell metacharacters, covering the mcp-ssh-manager backup tools, and no longer treats shell, backup, and schedule tools as read-only. This also restores tool-call screening, which a prior change had silently disabled; flags that were previously invisible may now appear in the Audit Trail. Deployed to tnt_lindy_test_001; fleet deploy still owed.</li>
+<li>Binding detail in the Audit Trail (IETF intent binding, step 4), 2026-11-22: each verdict row that carries a binding now shows a "Show binding" detail row, joining the gate verdict to the TAP binding and its settle outcome (payer, counterparty, amount, step-up, verdicts, policy action, system outcome, status, expiry).</li>
+<li>Audit flag-stamp, 2026-11-23: flag-only screen verdicts (shell injection and other screens that let the call through) are now stamped into the Audit Trail entry, so a flagged call shows its poison category, reasons, and risk instead of rendering as a clean call. Previously the flag appeared in the proxy log only. Deployed to tnt_lindy_test_001.</li>
 </ul>
 <h3>Changed</h3>
 <ul><li>None yet.</li></ul>

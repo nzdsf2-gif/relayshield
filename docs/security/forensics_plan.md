@@ -73,4 +73,4 @@ incident closes. CONFIRM with counsel that 12 months is enough.
 1. CloudTrail trail S3 bucket: name, lifecycle, object lock.
 2. Is `wafr_hardening.py --step retention` applied, and is PITR on for every table?
 3. Where does the evidence copy live?
-4. Evidence retention period, after counsel's view.
+4. Evidence retention period: Andrew considers 12 months acceptable (2026-11-24); counsel to confirm.

@@ -35,15 +35,16 @@ RelayShield operates as a sole-founder company. All incident response responsibi
 **Contact:** relayshieldadmin@gmail.com  
 **Backup notification channel:** AWS CloudWatch alarms → relayshieldadmin@gmail.com  
 
-**Backup contact:** a trusted person named in the private contact sheet. Her role is to reach the Incident Commander if he cannot be reached by the normal channel, and to act as scribe in exercises. She has **no AWS access and no authority to change production**. CONFIRM: contact details recorded privately, and whether she should hold anything further.  
-**Legal counsel and breach-notification contact:** a licensed attorney named in the private contact sheet. Called before any regulatory notification and whenever customer data may be exposed. CONFIRM: contact details recorded privately, jurisdiction and bar admission, and that she accepts the role in writing. This replaces the line below that said counsel was to be identified before the first paying customer.  
+**Backup contact:** a trusted person named in the private contact sheet (kept outside this repository; see below). Their role is to reach the Incident Commander if he cannot be reached by the normal channel, and to act as scribe in exercises. They have **no AWS access and no authority to change production**.  
+**Legal counsel and breach-notification contact:** a licensed attorney admitted in Massachusetts, named in the private contact sheet. Called before any regulatory notification and whenever customer data may be exposed. Counsel's written acceptance of this role is kept with the contact sheet. This replaces the line below that said counsel was to be identified before the first paying customer.  
+**Private contact sheet:** names, phone numbers and email addresses for the two roles above are kept in the Incident Commander's private documents, not in this public repository, and are reviewed at each annual review. CONFIRM: the sheet exists and both people hold a copy.  
 
 Third-party escalation contacts:
 - **AWS Support:** console.aws.amazon.com/support (activate Business Support if P1)
 - **Twilio Security:** security@twilio.com
 - **Stripe Security:** security@stripe.com
 - **HIBP (Troy Hunt):** via haveibeenpwned.com/API
-- **Legal / breach notification:** the attorney, see above
+- **Legal / breach notification:** the attorney named in the private contact sheet, see above
 
 ---
 

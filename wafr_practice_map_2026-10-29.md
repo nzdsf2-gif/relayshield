@@ -74,6 +74,17 @@ and states why in the Note.
 | Automate data at rest protection | `tools/wafr_data_at_rest.py` plus `.github/workflows/data_at_rest_check.yml` (weekly `--check`, red on any gap). Detection is automated; remediation is run by hand, so say that in the Note | UNRUN (needs `apply_data_at_rest_read_policy.sh` first) |
 | Enforce access control | public access blocked per bucket and per account, encryption on by configuration (`wafr_data_at_rest.py --apply`); least-privilege IAM on the stores is NOT covered, that is SEC 3 and the role split | UNRUN, PARTIAL |
 
+## Security: SEC 10 incident response (added 2026-11-24; all DRAFT, nothing adopted, nothing run)
+
+| Practice | Backing | Status |
+|---|---|---|
+| Identify key personnel and external resources | incident plan v1.1 section 3: the backup contact backup contact, the attorney legal counsel (CONFIRM contact details, counsel's admission and written acceptance) | DRAFT, ANDREW |
+| Develop incident management plans | `relayshield_incident_response_plan.md` v1.0 adopted, v1.1 draft | v1.0 EVIDENCE EXISTS; may already count |
+| Prepare forensic capabilities | `docs/security/forensics_plan.md`, `tools/ir_capture_evidence.py` (tested, not run against AWS); CONFIRM list in the plan | DRAFT, UNRUN |
+| Develop and test security incident response playbooks | `docs/security/incident_playbooks.md` PB-1 to PB-8; "test" is met only by the tabletop | DRAFT, not tested |
+| Pre-provision access | `tools/apply_ir_responder_role.sh` creates the read-only MFA role | UNRUN |
+| Run simulations | `docs/security/tabletop_exercise_1.md`; met only when the record is filled in and committed | NOT HELD, ANDREW |
+
 ## What would move the most, in order
 
 1. Merge this branch, push `main`, see `tests.yml` and the deploy gate go green. Costs nothing.

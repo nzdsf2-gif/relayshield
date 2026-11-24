@@ -1,9 +1,10 @@
 # RelayShield — Incident Response Plan
 
-**Version:** 1.0  
-**Effective Date:** May 2026  
+**Version:** 1.1 DRAFT (v1.0 adopted May 2026; v1.1 takes effect when the owner adopts it)  
+**Effective Date:** May 2026 (v1.0)  
 **Owner:** Andrew Gibbs, Founder — RelayShield LLC  
 **Review Cycle:** Annually or after any declared incident  
+**Changes in v1.1 (2026-11-24):** named backup contact and legal counsel (section 3); playbooks (section 7); forensics plan and evidence tool (section 8); responder access and annual simulation (section 9). CONFIRM items are marked.  
 
 ---
 
@@ -34,12 +35,15 @@ RelayShield operates as a sole-founder company. All incident response responsibi
 **Contact:** relayshieldadmin@gmail.com  
 **Backup notification channel:** AWS CloudWatch alarms → relayshieldadmin@gmail.com  
 
+**Backup contact:** a trusted person named in the private contact sheet. Her role is to reach the Incident Commander if he cannot be reached by the normal channel, and to act as scribe in exercises. She has **no AWS access and no authority to change production**. CONFIRM: contact details recorded privately, and whether she should hold anything further.  
+**Legal counsel and breach-notification contact:** a licensed attorney named in the private contact sheet. Called before any regulatory notification and whenever customer data may be exposed. CONFIRM: contact details recorded privately, jurisdiction and bar admission, and that she accepts the role in writing. This replaces the line below that said counsel was to be identified before the first paying customer.  
+
 Third-party escalation contacts:
 - **AWS Support:** console.aws.amazon.com/support (activate Business Support if P1)
 - **Twilio Security:** security@twilio.com
 - **Stripe Security:** security@stripe.com
 - **HIBP (Troy Hunt):** via haveibeenpwned.com/API
-- **Legal / breach notification:** retained attorney (to be identified before first paying customer)
+- **Legal / breach notification:** the attorney, see above
 
 ---
 
@@ -145,6 +149,8 @@ Within 5 business days of P1/P2 resolution:
 
 ## 7. Specific Incident Scenarios
 
+Step-by-step playbooks, with commands, are in `docs/security/incident_playbooks.md` (PB-1 to PB-8). The short scenarios below say what to recognise; the playbooks say what to do. Playbooks are DRAFT until adopted.
+
 ### Scenario A — DynamoDB Unauthorized Read
 **Indicators:** CloudTrail shows GetItem/Scan calls from unexpected IAM principal or IP  
 **Actions:** Disable IAM entity → assess scope via CloudTrail → note all data accessed is KMS-encrypted → rotate data key if key access is also suspected → notify customers if exposure confirmed
@@ -169,7 +175,7 @@ Within 5 business days of P1/P2 resolution:
 
 ## 8. Evidence Preservation
 
-For all P1/P2 incidents:
+The full forensics plan is `docs/security/forensics_plan.md`; evidence is captured with `tools/ir_capture_evidence.py` BEFORE containment. For all P1/P2 incidents:
 - Export relevant CloudTrail logs to S3 before any remediation that might overwrite them
 - Screenshot CloudWatch metrics showing anomalous period
 - Do not delete or rotate compromised IAM keys until after exporting their CloudTrail activity
@@ -178,6 +184,10 @@ For all P1/P2 incidents:
 ---
 
 ## 9. Plan Maintenance
+
+**Responder access.** A read-only role, `relayshield-ir-responder` (MFA required), is created ahead of time by `tools/apply_ir_responder_role.sh` so investigation never waits on someone granting access mid-incident.
+
+**Simulation.** One tabletop exercise per year, and after any change to section 3 or a new playbook. The script and record form are `docs/security/tabletop_exercise_1.md`. Findings are fixed within a week and the commit cited in the record.
 
 | Trigger | Action |
 |---|---|

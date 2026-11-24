@@ -1,0 +1,15 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AccountPrincipalsWithMfaOnly",
+      "Effect": "Allow",
+      "Principal": { "AWS": "arn:aws:iam::239677749008:root" },
+      "Action": "sts:AssumeRole",
+      "Condition": {
+        "Bool": { "aws:MultiFactorAuthPresent": "true" },
+        "NumericLessThan": { "aws:MultiFactorAuthAge": "3600" }
+      }
+    }
+  ]
+}

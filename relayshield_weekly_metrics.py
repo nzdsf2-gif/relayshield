@@ -1581,9 +1581,9 @@ def _build_email(metrics: dict) -> str:
 
 <h3 style="color: #e94560;">New orders this week</h3>
 <table border="0" cellpadding="4">
-  <tr><td>Orders (last 7 days)</td><td><b>{s['new_orders_week']['count']}</b></td></tr>
-  <tr><td>Total amount (first month)</td><td><b>${s['new_orders_week']['total_amount']}</b></td></tr>
-  {_new_orders_rows(s['new_orders_week']['orders'])}
+  <tr><td>Orders (last 7 days)</td><td><b>{s.get('new_orders_week', {}).get('count', 0)}</b></td></tr>
+  <tr><td>Total amount (first month)</td><td><b>${s.get('new_orders_week', {}).get('total_amount', 0)}</b></td></tr>
+  {_new_orders_rows(s.get('new_orders_week', {}).get('orders', []))}
 </table>
 
 <h3 style="color: #e94560;">API keys by discovery surface</h3>

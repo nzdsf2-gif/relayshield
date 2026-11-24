@@ -1205,6 +1205,38 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     self.schema_store.update_from_tools_list(tools, tenant_id=tenant_id)
             except Exception:
                 pass
+            # CLAUDE-ANNOTATIONS-2026-11-23: Anthropic's Connectors
+            # Directory requires every tool to carry a human-readable
+            # `title` plus `readOnlyHint` / `destructiveHint`. The four
+            # RelayShield check tools are read-only. Inject the
+            # annotations into the tools/list response as it is
+            # forwarded, so Claude sees them. Only the four known
+            # check tools are annotated; other upstream tools are left
+            # alone. Never overwrite a title or annotations the server
+            # already sets.
+            try:
+                _tools = upstream_resp.get("result", {}).get("tools", [])
+                _titles = {
+                    "check_breach": "Check breach exposure",
+                    "check_email": "Check an email address",
+                    "check_link": "Check a link",
+                    "check_wallet": "Check a wallet address",
+                }
+                for _t in _tools:
+                    if not isinstance(_t, dict):
+                        continue
+                    _title = _titles.get(_t.get("name"))
+                    if _title is None:
+                        continue
+                    if not _t.get("title"):
+                        _t["title"] = _title
+                    _ann = _t.get("annotations")
+                    if not isinstance(_ann, dict):
+                        _ann = {}
+                        _t["annotations"] = _ann
+                    _ann.setdefault("readOnlyHint", True)
+            except Exception:
+                pass
         if not cfg.result_screening_enabled:
             return
         try:
@@ -1859,13 +1891,25 @@ class ProxyHandler(BaseHTTPRequestHandler):
         # Audit mode, the stamp carries the chain; otherwise it
         # is empty and the row shows no chain (graceful fallback).
         _dstamp = getattr(self, "_delegation_stamp", None) or {}
+        # AUDIT-FLAG-STAMP-2026-11-23: a flag-only screen (shell
+        # injection, etc.) lets the call through, but the flag must be
+        # stamped into the audit entry or the Audit Trail shows a clean
+        # call. The screener verdict carries the flag; behavior_result
+        # is clean for these calls, so prefer the verdict when it flags.
+        # The verdict score is 0-100; risk_score is 0.0-1.0.
+        _audit_category = behavior_result.get("poison_category", "clean")
+        _audit_reasons = behavior_result.get("reasons", [])
+        _audit_risk = behavior_result.get("risk_score", 0.0)
+        if verdict.get("verdict") == "flag":
+            _audit_category = verdict.get("poison_category", "clean")
+            _audit_reasons = verdict.get("reasons", [])
+            _audit_risk = min(1.0, verdict.get("score", 0) / 100.0)
         self.server.audit.record(
             agent_id, upstream_url, tool_name, arguments,
             decision="allow",
-            poison_category=behavior_result.get(
-                "poison_category", "clean"),
-            reasons=behavior_result.get("reasons", []),
-            risk_score=behavior_result.get("risk_score", 0.0),
+            poison_category=_audit_category,
+            reasons=_audit_reasons,
+            risk_score=_audit_risk,
             policy_decision=policy_decision,
             duration_ms=(time.monotonic() - t0) * 1000,
             tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location, screened_call=True,

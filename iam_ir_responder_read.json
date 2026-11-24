@@ -1,0 +1,21 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EveryReadTheEvidenceToolMakes",
+      "Effect": "Allow",
+      "Action": [
+        "cloudtrail:LookupEvents",
+        "iam:ListAccessKeys",
+        "iam:GetAccessKeyLastUsed",
+        "lambda:GetFunction",
+        "lambda:GetFunctionConfiguration",
+        "lambda:GetFunctionConcurrency",
+        "lambda:ListVersionsByFunction",
+        "lambda:ListAliases",
+        "lambda:GetAlias"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

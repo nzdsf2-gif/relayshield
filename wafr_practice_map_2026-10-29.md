@@ -78,7 +78,7 @@ and states why in the Note.
 
 | Practice | Backing | Status |
 |---|---|---|
-| Identify key personnel and external resources | incident plan v1.1 section 3: the backup contact backup contact, the attorney legal counsel (CONFIRM contact details, counsel's admission and written acceptance) | DRAFT, ANDREW |
+| Identify key personnel and external resources | incident plan v1.1 section 3: a backup contact and a legal counsel, named in a private contact sheet (CONFIRM the sheet exists and counsel's signed acknowledgment) | DRAFT, ANDREW |
 | Develop incident management plans | `relayshield_incident_response_plan.md` v1.0 adopted, v1.1 draft | v1.0 EVIDENCE EXISTS; may already count |
 | Prepare forensic capabilities | `docs/security/forensics_plan.md`, `tools/ir_capture_evidence.py` (tested, not run against AWS); CONFIRM list in the plan | DRAFT, UNRUN |
 | Develop and test security incident response playbooks | `docs/security/incident_playbooks.md` PB-1 to PB-8; "test" is met only by the tabletop | DRAFT, not tested |

@@ -171,5 +171,31 @@ class RealServiceModels(unittest.TestCase):
             self.assertEqual(T.iam_state(iam, "u")["access_keys"][0]["last_used"]["ServiceName"], "s3")
 
 
+class GrantMatchesTool(unittest.TestCase):
+    """The responder role's explicit grant must name every AWS read the tool makes. The first version trusted AWS-managed
+    policies to cover them, and lambda:GetFunction was not covered; the proof step in the apply script caught it."""
+    ACTION = {"lookup_events": "cloudtrail:LookupEvents", "get_function": "lambda:GetFunction",
+              "list_versions_by_function": "lambda:ListVersionsByFunction", "list_aliases": "lambda:ListAliases",
+              "get_function_concurrency": "lambda:GetFunctionConcurrency", "list_access_keys": "iam:ListAccessKeys",
+              "get_access_key_last_used": "iam:GetAccessKeyLastUsed"}
+
+    def test_every_call_the_tool_makes_is_mapped_and_granted(self):
+        import re
+        src = (ROOT / "tools" / "ir_capture_evidence.py").read_text()
+        calls = set(re.findall(r"\b(?:ct|lam|iam)\.([a-z_]+)\(", src)) | set(re.findall(r"\b(?:lam)\.(?:list_\w+|get_\w+)", src))
+        calls = {c.split(".")[-1] for c in calls}
+        calls |= set(re.findall(r"_pages\(lam\.([a-z_]+)", src))
+        self.assertTrue(calls, "found no AWS calls in the tool: the pattern is stale")
+        granted = set(json.load(open(ROOT / "iam_ir_responder_read.json"))["Statement"][0]["Action"])
+        for c in calls:
+            self.assertIn(c, self.ACTION, f"{c} is called by the tool but has no entry in this test's map")
+            self.assertIn(self.ACTION[c], granted, f"{self.ACTION[c]} is not in iam_ir_responder_read.json")
+
+    def test_apply_script_proves_every_granted_read(self):
+        sh = (ROOT / "tools" / "apply_ir_responder_role.sh").read_text()
+        for a in self.ACTION.values():
+            self.assertIn(a, sh, f"apply_ir_responder_role.sh does not prove {a}")
+
+
 if __name__ == "__main__":
     unittest.main()

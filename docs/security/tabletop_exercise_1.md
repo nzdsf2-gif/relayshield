@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | **NOT HELD.** This is the script and the record form. The practice "Run simulations" is met only by a dated record below that a person actually filled in |
+| **Status** | **NOT HELD, and deliberately waiting until both participants have been spoken to.** This is the script and the record form. The practice "Run simulations" is met only by a dated record below that a person actually filled in |
 | **Length** | About 45 minutes |
 | **Part of** | `relayshield_incident_response_plan.md` v1.1, section 9; WAFR SEC 10 |
 
@@ -18,10 +18,10 @@ that is" and every place the plan was wrong. The findings are the point. A table
 |---|---|---|
 | Incident Commander | Andrew Gibbs | answers as he would in a real incident |
 | Facilitator | any person, or Claude in chat, but a person must be present | reads the injects, holds the clock, does not answer for the Commander |
-| Scribe | the backup contact (backup contact) | writes the timeline and the findings |
-| Legal counsel | the attorney | joins for injects 5 and 6, or is phoned in the exercise |
+| Scribe | the backup contact | writes the timeline and the findings |
+| Legal counsel | the attorney named in the private contact sheet | joins for injects 5 and 6, or is phoned in the exercise |
 
-CONFIRM both are willing to take these roles before the date is set.
+CONFIRM both are willing to take these roles, and that counsel has signed the role acknowledgment, before the date is set.
 
 ## Rules
 

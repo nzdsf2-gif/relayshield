@@ -810,6 +810,12 @@ APPROVED_FAMILIES = frozenset({
     "blackapex",
     "jieyou",
     "themailer",
+    "bluekit",
+    "eviltokens",
+    "haozi",
+    "iron-man-system",
+    "kali365",
+    "knightoffice",
 })
 
 

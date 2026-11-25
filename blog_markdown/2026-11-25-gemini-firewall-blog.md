@@ -1,11 +1,14 @@
 # Your Gemini CLI agent can now sit behind the RelayShield Firewall
 
-Date: 2026-11-25 (draft for Andrew's review, prepared 2026-11-24)
-Status: Draft. Do not publish until Andrew approves. Based on the Gemini Firewall guide of 2026-11-21 and the live test of 2026-11-22.
-
-## Draft
-
 Agent payments stopped being a demo last week. On November 17, Google made Gemini Tasks free for hundreds of millions of people, and Gemini now pays through AP2 on Visa and Mastercard network tokens. The same week, ChatGPT Wallet launched with Proof x401. Agents are now spending real money at real checkouts, and the question is no longer whether an agent can pay. It is whether anything checks the payment before it goes through.
+
+## Why MCP servers need a firewall
+
+MCP gives an agent a way to call tools on a server: read a file, check a link, send a payment. The agent trusts the server. It takes the tool list the server advertises, and it acts on the results the server returns. That trust is the vulnerability.
+
+A server can advertise a tool that does something different from what its description says. A tool result can carry instructions that were not in the user's request, and the agent follows them because it treats tool output as data to act on. This is prompt injection through the tool channel, and it is how a compromised or malicious server gets an agent to exfiltrate data, approve a payment, or call another tool the user never asked for. A server can also change after the agent connects: a benign server can be updated to a malicious one, and the agent has no way to tell, because MCP has no built-in verification of the server or its tools.
+
+The agent cannot fix this on its own. It has no independent way to check whether a tool description is honest, whether a result is clean, or whether the server it connected to yesterday is the same one today. The check has to sit between the agent and the server, on every call and every result. That is what a firewall does: it screens the tool list, the call, and the result at the gate, blocks or flags what fails, and records what happened so the attempt is visible. The protocol does not provide that enforcement. The firewall is the enforcement.
 
 That check has two halves. AP2 proves the agent is authorized to spend. RelayShield proves the counterparty is legitimate. A signed AP2 mandate for a spoofed storefront is still a signed mandate, so the mandate alone does not make the payee safe. The Firewall is the enforcement for the second half: it screens every tool call at the gate, and the agent cannot skip it.
 
@@ -80,16 +83,3 @@ It does not patch vulnerable MCP servers. The Firewall catches the attempt at th
 ## Where to start
 
 If you run a Gemini CLI agent that touches money, links, or wallets, put it behind the Firewall and see what it flags. The free extension gives you the checks with no signup. The Firewall adds the enforcement, the audit trail, and the policies that decide what gets through.
-
----
-
-## Review notes (not for publication)
-
-- Framing: developer-first, per Andrew's 2026-11-21 approval. Tasks consumers excluded, stated plainly.
-- Honest claim: Firewall path proved 2026-11-22 via direct curl check_link through a live tenant plus the Audit Trail entry. Do NOT claim Gemini CLI invoked the tool in session; that run is still owed.
-- AP2 verifier: verified live 2026-11-23 against a real, independently minted v0.2 mandate from the official AP2 SDK. Never call it Gemini-issued; a live Gemini-issued mandate is not capturable.
-- Updated from the Nov 21 guide: the guide said the AP2 verifier needed a go and the console Audit Trail showed demo data. Both are now out of date: AP2 is verified live, and the Audit Trail pulls live proxy entries.
-- Not claimed: fleet-wide GET /mcp fix. The fix is proved on the test tenant; the fleet deploy has not run. No fleet claim appears in this draft.
-- Prices: $49 direct, 20,000 screened calls included, $0.002 per call over. Firewall figures only. The What it Costs section now leads with the $109/mo Firewall plus Agent Verifiers bundle (Andrew, 2026-11-24), which saves $19 against the $128 separate total.
-- Zero em dashes in the draft body. Sources: ~/workspace/your_files/relayshield-gemini-firewall-guide-2026-11-21.md; Gemini CLI MCP docs https://google-gemini.github.io/gemini-cli/docs/tools/mcp-server.html; Google Tasks announcement Nov 17, 2026 https://blog.google/innovation-and-ai/products/gemini-app/tasks-in-gemini-free-new-features/
-- Publish path, same as the Lindy and CB posts: blog.relayshield.net, then Threads, Hugging Face, and Dev.to (Google SSO as relayshieldadmin@gmail.com). Andrew posts Mastodon and Farcaster himself.

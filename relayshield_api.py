@@ -19499,13 +19499,14 @@ class _DynamoBindingStore:
 
     def __init__(self, tenant_id: str, rail: str, console_tenant_id: str = "",
                  location_id: str = "", msp_id: str = "",
-                 distributor_id: str = ""):
+                 distributor_id: str = "", passport_id: str = ""):
         self._tenant_id = tenant_id
         self._rail = rail
         self._console_tenant_id = console_tenant_id
         self._location_id = location_id
         self._msp_id = msp_id
         self._distributor_id = distributor_id
+        self._passport_id = passport_id
         self._table = dynamodb.Table(INTENT_BINDINGS_TABLE)
 
     def save(self, binding) -> None:
@@ -19514,6 +19515,12 @@ class _DynamoBindingStore:
             self._table.put_item(
                 Item={
                     "binding_id": binding.binding_id,
+                    # Cascade revocation C1: parent passport the binding
+                    # was minted from, stamped at mint time. The gate
+                    # (C2) and the settle check (C3) read it off the
+                    # binding item. Set by _intent_binder via the store
+                    # constructor; empty until that wiring lands.
+                    "passport_id": self._passport_id,
                     "record": json.dumps(record, sort_keys=True),
                     "signature": binding.signature,
                     "public_key": binding.public_key,
@@ -19820,7 +19827,7 @@ def _binding_policy():
 
 def _intent_binder(tenant_id: str, rail: str, console_tenant_id: str = "",
                    location_id: str = "", msp_id: str = "",
-                   distributor_id: str = ""):
+                   distributor_id: str = "", passport_id: str = ""):
     """A binder for one request, or None when signing is unconfigured."""
     signer = _binding_signer()
     if signer is None:
@@ -19830,7 +19837,8 @@ def _intent_binder(tenant_id: str, rail: str, console_tenant_id: str = "",
         store=_DynamoBindingStore(
             tenant_id=tenant_id, rail=rail,
             console_tenant_id=console_tenant_id, location_id=location_id,
-            msp_id=msp_id, distributor_id=distributor_id),
+            msp_id=msp_id, distributor_id=distributor_id,
+            passport_id=passport_id),
         policy=_binding_policy(),
         counterparty_screener=_CorpusCounterpartyScreener(),
         artifact_screener=_CorpusArtifactScreener(),
@@ -19878,12 +19886,22 @@ def _binding_refused_response(refusal) -> dict:
 
 def _bind_core(params: dict, tenant_id: str, rail_default: str,
                console_tenant_id: str = "", location_id: str = "",
-               msp_id: str = "", distributor_id: str = "") -> dict:
+               msp_id: str = "", distributor_id: str = "",
+               passport_id: str = "") -> dict:
     rail = str(params.get("rail") or rail_default)
+    # Cascade revocation C3 wiring: the parent passport the binding
+    # is minted from. It comes from the request (params["passport_id"])
+    # when the caller does not pass it explicitly. It is stamped on
+    # the DynamoDB item by C1 via _intent_binder; empty until a
+    # passport is presented, in which case C2/C3 fall back to the
+    # session check.
+    if not passport_id:
+        passport_id = str(params.get("passport_id") or "")
     binder = _intent_binder(
         tenant_id=tenant_id, rail=rail,
         console_tenant_id=console_tenant_id, location_id=location_id,
-        msp_id=msp_id, distributor_id=distributor_id)
+        msp_id=msp_id, distributor_id=distributor_id,
+        passport_id=passport_id)
     if binder is None:
         return _err("Intent binding is not configured on this deployment.", 503)
     intent = _intent_binding.PaymentIntent(
@@ -19907,6 +19925,51 @@ def _bind_core(params: dict, tenant_id: str, rail_default: str,
         logger.exception("intent binding issuance failed: %s", exc)
         return _err("The binding could not be registered, so it was not issued.", 500)
     return _ok({"binding": binding.to_dict()}, 201)
+
+
+def _binding_parent_status(binding_id: str, tenant_id: str):
+    """Parent passport status for a binding, or None when there is
+
+    no parent to check. Cascade revocation C3 reads the parent off
+    the DynamoDB binding item (C1 stamps passport_id there; the
+    Binding and signed record do not carry it), then the passport
+    record. Returns "revoked", "expired", "active", or None. A
+    lookup failure logs and returns None (fail open); only a KNOWN
+    revoked/expired parent blocks the settle.
+    """
+    try:
+        item = dynamodb.Table(INTENT_BINDINGS_TABLE).get_item(
+            Key={"binding_id": binding_id}).get("Item")
+    except Exception as exc:
+        logger.warning("cascade parent binding read failed for %s: %s",
+                       binding_id, exc)
+        return None
+    if not item or item.get("tenant_id") != tenant_id:
+        return None
+    parent_id = item.get("passport_id") or ""
+    if not parent_id:
+        return None
+    try:
+        record = _passport_registry_get(parent_id)
+    except Exception as exc:
+        logger.warning("cascade parent passport read failed for %s: %s",
+                       parent_id, exc)
+        return None
+    if record is None:
+        logger.warning("cascade parent passport %s not found for binding %s",
+                       parent_id, binding_id)
+        return None
+    if record.get("status") == "revoked":
+        return "revoked"
+    expires_at = record.get("expires_at")
+    if expires_at:
+        try:
+            expires = _passport._parse_timestamp(expires_at)
+        except Exception:
+            return "active"
+        if datetime.now(timezone.utc) >= expires:
+            return "expired"
+    return "active"
 
 
 def _settle_core(params: dict, tenant_id: str) -> dict:
@@ -19939,6 +20002,19 @@ def _settle_core(params: dict, tenant_id: str) -> dict:
     )
     try:
         binding = binder.get_binding(binding_id)
+        # Cascade revocation C3: the parent passport of this binding
+        # must still be valid before the settle is allowed. The
+        # Binding and signed record do not carry passport_id (C1
+        # stamps it on the DynamoDB item only), so read the parent
+        # off the item. A known revoked or expired parent blocks the
+        # settle (no money moves). A missing parent (binding minted
+        # before the C1 wiring) or a lookup failure does not block on
+        # its own; it logs and falls through to verify_at_settlement.
+        _c3_parent_status = _binding_parent_status(binding_id, tenant_id)
+        if _c3_parent_status == "revoked":
+            return _err("The parent passport for this binding was revoked.", 403)
+        if _c3_parent_status == "expired":
+            return _err("The parent passport for this binding expired.", 403)
         decision = binder.verify_at_settlement(
             binding_id, executed, attestations=attestations)
     except Exception as exc:

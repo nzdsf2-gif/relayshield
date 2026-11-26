@@ -125,9 +125,123 @@ STOP IF: the third command says `AccessDenied`: send me the exact text. That is 
 
 ---
 
-## PHASE 2: "Use temporary credentials" (NOT part of the steps above)
+## PHASE 2: "Use temporary credentials"
 
-Step 1's `legacy` rows list IAM users that still hold an active access key or a console password, with when each key was last used. Do NOT deactivate anything from that list on a hunch: a key that was used recently is a service depending on it, and deactivating it takes that service down. Come back to a session with the `legacy` output and I will hand over, one key at a time, an inactive-then-observe step (deactivate, wait, then delete) that starts with the keys last used longest ago. Anything that is a SERVICE credential rather than a human one moves to a role, which is its own build.
+STATUS: DRAFT, built and tested (`tools/wafr_keys.py`, `test_wafr_keys.py`, 48 tests, checked against the real IAM, CloudTrail and STS models) and NOT run against AWS. Start only after steps 1 to 8 above passed.
+
+**What it does and does not do.** It retires long-lived IAM credentials ONE AT A TIME, reversibly first. It does not move a service onto a role: a credential that a service still needs stays, and is documented privately as a service key. Whether the Tool accepts documented service keys as meeting the practice is UNKNOWN; the count only moves when you see it move.
+
+**Three rules the tool enforces, so you do not have to remember them:**
+* Every write runs only from an Identity Center session. That proves the new sign-in works before the old one goes, and stops it deactivating the key that is running it. The rollback (`--reactivate`) is exempt, so it works even if SSO is what broke.
+* A key used in the last 7 days is a service depending on it, and is refused.
+* Delete is refused unless the key is already Inactive and CloudTrail shows it was deactivated 7 or more days ago.
+
+Output names users and key ids. It stays in your terminal: never paste it into a repo file or an issue, and it is not wired into any workflow on purpose.
+
+**ANDREW RUNS THIS (P2.1: the ranked report, read-only; nothing here changes anything):**
+
+```zsh
+cd ~/dev/relayshield
+AWS_PROFILE=relayshield python3 tools/wafr_keys.py
+```
+
+EXPECT: three blocks (access keys, console passwords, root account), keys ranked never-used first, and a `NEXT:` line naming the safest candidate. Each key shows which service and region last used it.
+STOP IF: `Refusing to run: credentials resolve to account 620534471984`: the profile is wrong. STOP IF a `BLOCKED` row: tell me the row's wording, without the key id.
+
+**FOR INFORMATION, DO NOT RUN (how to read P2.1):**
+
+```text
+NEVER-USED / IDLE   a candidate. Go to P2.2.
+IN USE              used in the last 7 days, so something depends on it. Do NOT deactivate. Find what uses it
+                    (the service/region shown is the clue). If it is a service, it becomes a documented service
+                    key, kept in a private note and not in this repo, and is its own later build to replace.
+INACTIVE            already deactivated. Goes to P2.4 once 7 days have passed.
+PASSWORD            a console password on an IAM user. Goes to P2.5.
+root account key    removing it is done signed in as root, in the console: Security credentials, delete. Not here.
+```
+
+**ANDREW RUNS THIS (P2.2: preview deactivating ONE key; it asks which, so there is no placeholder):**
+
+```zsh
+cd ~/dev/relayshield
+read "KEYID?Access key id to deactivate (the NEXT line of P2.1): "
+AWS_PROFILE=relayshield python3 tools/wafr_keys.py --deactivate "$KEYID"
+```
+
+EXPECT: `TODO      deactivate ... (never used)` or `(last used Nd ago)`, then `Dry run only`.
+STOP IF: `REFUSED ... IAM Identity Center session`: `aws sso login --profile relayshield` and run it again. STOP IF `REFUSED ... was used N day(s) ago`: do not override it; see P2.1's table. If this is the key your own old profile uses, note that deactivating it ends the `relayshield-legacy` fallback: do it only once SSO has been your daily sign-in for a few days.
+
+**ANDREW RUNS THIS (P2.3: deactivate it, which is reversible):**
+
+```zsh
+cd ~/dev/relayshield
+read "KEYID?Same access key id: "
+AWS_PROFILE=relayshield python3 tools/wafr_keys.py --deactivate "$KEYID" --apply
+```
+
+EXPECT: `CHANGED   ... is now Inactive`, with the rollback command printed.
+STOP IF: anything broke in the next days (a bot silent, a worker failing, a deploy red): undo it with the next block, then tell me what it was, because that is a service key.
+
+**ANDREW RUNS THIS (rollback, any time, works without SSO):**
+
+```zsh
+cd ~/dev/relayshield
+read "KEYID?Access key id to turn back on: "
+AWS_PROFILE=relayshield-legacy python3 tools/wafr_keys.py --reactivate "$KEYID" --apply
+```
+
+EXPECT: `CHANGED   ... is Active again`.
+STOP IF: `Refusing to run ... 620534471984`: the profile name is wrong; use whichever profile points at account 239677749008. UNVERIFIED: that `relayshield-legacy` still works, which depends on a key you may already have deactivated: if it does not, use the SSO profile (`relayshield`), which the rollback accepts too.
+
+**OBSERVE: 7 days.** Watch whatever the key could have been serving. The tool will not let you delete sooner.
+
+**ANDREW RUNS THIS (P2.4: after 7 days with nothing broken, delete it for good):**
+
+```zsh
+cd ~/dev/relayshield
+read "KEYID?Access key id to delete: "
+AWS_PROFILE=relayshield python3 tools/wafr_keys.py --delete "$KEYID"
+```
+
+EXPECT: `TODO      PERMANENTLY delete ... (Inactive N days)` and `Dry run only`. If you are happy, run the next block.
+STOP IF: `BLOCKED ... CloudTrail has no UpdateAccessKey record`: if you deactivated it with this tool, add `--observed-since YYYY-MM-DD` with that date (it is used only where CloudTrail is silent, and the later date always wins). I could not verify CloudTrail's field names from here; the tool compares them case-insensitively. STOP IF `REFUSED ... Come back in N`: wait.
+
+**ANDREW RUNS THIS (P2.4b: the permanent delete, only after reading the dry run above):**
+
+```zsh
+cd ~/dev/relayshield
+read "KEYID?Access key id to delete: "
+AWS_PROFILE=relayshield python3 tools/wafr_keys.py --delete "$KEYID" --apply
+```
+
+EXPECT: `CHANGED   ... is deleted.`
+STOP IF: any `REFUSED` or `BLOCKED`: nothing was changed.
+
+Repeat P2.1 to P2.4b for the next candidate. One key at a time, always.
+
+**ANDREW RUNS THIS (P2.5: remove a human IAM user's console password, only after the SSO portal has been your sign-in for a week):**
+
+```zsh
+cd ~/dev/relayshield
+read "IAMUSER?IAM user name whose console password to remove: "
+AWS_PROFILE=relayshield python3 tools/wafr_keys.py --remove-console "$IAMUSER"
+```
+
+EXPECT: `TODO      remove the console password of ...` and `Dry run only`. The user and its keys stay.
+STOP IF: `REFUSED ... signed in N day(s) ago`: you are still signing in the old way; use the portal and wait.
+
+**ANDREW RUNS THIS (P2.5b: remove it, after reading the dry run above):**
+
+```zsh
+cd ~/dev/relayshield
+read "IAMUSER?IAM user name whose console password to remove: "
+AWS_PROFILE=relayshield python3 tools/wafr_keys.py --remove-console "$IAMUSER" --apply
+```
+
+EXPECT: `CHANGED   the console password of ... is removed.`
+STOP IF: any `REFUSED` or `BLOCKED`: nothing was changed.
+
+**Done means** P2.1 shows no `PASSWORD`, no `NEVER-USED` or `IDLE`, no root key, and every remaining `IN USE` key is one you can name and have recorded privately as a service key.
 
 ## What to cite when ticking in the Tool
 
@@ -135,6 +249,6 @@ Step 1's `legacy` rows list IAM users that still hold an active access key or a 
 |---|---|---|
 | Rely on a centralized identity provider | Steps 1 to 7 passed | Identity Center enabled; `wafr_identity.py --check` clean; the portal sign-in worked |
 | Employ user groups and attributes | Same | Access is granted to groups `relayshield-readonly` and `relayshield-admins` through permission sets, not to a user |
-| Use temporary credentials | Phase 2 finished: `legacy` empty, or every remaining key a documented service key | The `legacy` output, kept privately, and the MFA-required setting from step 3.2 |
+| Use temporary credentials | Phase 2 finished (P2.1 clean except documented service keys) | The P2.1 report, kept privately, and the MFA-required setting from step 3.2. Say plainly that remaining service keys are documented, not replaced |
 
 The Tool's threshold for clearing a question is invisible. These three may or may not clear SEC 2; the count only moves when you see it move.

@@ -310,3 +310,26 @@ The founder expected SEC 2 to be simple and to resolve one of the 23. It is thre
 
 ### Not done, on purpose
 Nothing was applied or ticked. `data_at_rest_check.yml` and any other workflow that prints resource findings into a public repository's Actions logs should be reviewed against the public-repo rule: NOT checked this session.
+
+## WHERE 2026-11-26 (WAFR SEC 2 PHASE 2 SESSION) LEFT THINGS. PHASE 2 IS BUILT AND NOT RUN. NO HIGH QUESTION IS CLOSED: THE COUNT IS STILL 23. READ THIS FIRST FOR THE WAFR THREAD.
+
+**Supersedes the "Blocked on the founder" list in "WHERE 2026-11-26 (WAFR SEC 2 SESSION)"; the rest of that section stands.**
+
+### The founder's question, and the correction to it
+Asked: does completing phase 2 give SEC 2 a passing score and reduce the open gap. **The honest answer is: not by itself, and not provably.** Phase 2 addresses ONE of the three unmet practices ("Use temporary credentials"); the other two (centralized identity provider, user groups) depend on phase 1 steps 1 to 8, which no record shows as run. The Tool's threshold for clearing a question is invisible, so the count moves only when the founder sees it move. Any key a SERVICE still needs (a worker, a bot, a space that reaches AWS by key) cannot be retired by a tool and stays as a documented service key; whether the Tool counts that is unknown. Also, phase 2 cannot be completed from this container: it needs the founder's SSO session and his real keys.
+
+### What was built (on the branch, not run against AWS)
+* `tools/wafr_keys.py`: ranked read-only report (keys, where each was last used, console passwords, root key), then ONE action at a time: `--deactivate`, `--reactivate` (rollback), `--delete`, `--remove-console`. Dry run by default, refuses the wrong account. Enforced in code: every write needs an IAM Identity Center session (proves SSO works before the old way goes, and stops it deactivating the key that runs it; the rollback is exempt); a key used in the last 7 days is refused; delete needs an Inactive key AND CloudTrail showing deactivation 7 or more days ago (newest event wins; `--observed-since` is used only where CloudTrail is silent and the later date wins). Never deletes a user, never touches root, never wired to a workflow (output names users and key ids).
+* `test_wafr_keys.py`, 48 tests: fakes for decisions, Stubber over the REAL iam, cloudtrail and sts models for shapes. Four planted defects (SSO guard removed, recency guard removed, delete allowed on an Active key, oldest CloudTrail event winning) were each caught and removed. Stubber caught a wrong response-order assumption in my own test.
+* `docs/security/identity_center_runbook.md` phase 2 rewritten as labelled steps P2.1 to P2.5b with EXPECT and STOP IF, keys asked for at runtime (no placeholder), and the evidence row updated.
+
+### UNVERIFIED, and named so the next session does not assume
+1. CloudTrail's `UpdateAccessKey` request field names (`accessKeyId`, `status`): matched case-insensitively, but never seen from a real event. `--observed-since` exists so a wrong guess cannot loop the founder forever.
+2. That the `relayshield-legacy` profile still works for the rollback once its own key is deactivated: the runbook says to use the SSO profile then.
+3. Whether the Tool accepts documented service keys as meeting the practice.
+
+### Blocked on the founder (in order)
+1. Phase 1 steps 1 to 8 of the runbook, if not yet run, then bring back any `BLOCKED` or `AccessDenied`. 2. P2.1 (the report), reading each `IN USE` key's service and region: those are the service keys. 3. P2.2 to P2.4b for the never-used and idle keys, one at a time. 4. Tick only per the runbook's evidence table, after seeing the Tool's count move.
+
+### Not done, on purpose
+Nothing applied, nothing ticked. Replacing a service key with a role (for example a Cloudflare worker reaching AWS) is its own build and has not been scoped. SEC 3, 7 and 11 remain the next WAFR questions.

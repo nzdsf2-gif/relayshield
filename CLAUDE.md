@@ -1211,9 +1211,9 @@ unauthenticated request returns the page). Everything committed to it, in any fi
    whose pushes deploy, every clone diverges, GitHub keeps old commits reachable by SHA until support purges them). It is the founder's decision and is
    never done as a closing task.
 
-## SEC 2 IS BUILT AND NOT APPLIED (2026-11-26). THE FOUNDER CHOSE IAM IDENTITY CENTER.
+## SEC 2 IS BUILT AND NOT APPLIED (2026-11-26), PHASE 2 TOO. THE FOUNDER CHOSE IAM IDENTITY CENTER.
 
-`tools/wafr_identity.py`, its spec, `test_wafr_identity.py` and `docs/security/identity_center_runbook.md` exist and are checked against the real boto3 models; **nothing has been run against AWS and nothing is ticked, so the count is still 23.** The next move is the founder running the runbook. Three unmet practices sit under SEC 2 and "Use temporary credentials" is only evidenced once long-lived keys are gone (phase 2, key by key, never deactivated on a hunch: a recently used key is a service). Detail and the unverified responder-role trust point: last "WHERE ... LEFT THINGS" section of `LOG_CURRENT.md`. Do not record the founder's audit findings here or anywhere in the repo (public repository rule above). The next WAFR question to work has not been chosen: SEC 3, 7 and 11 remain.
+`tools/wafr_identity.py`, its spec, `test_wafr_identity.py` and `docs/security/identity_center_runbook.md` exist and are checked against the real boto3 models; **nothing has been run against AWS and nothing is ticked, so the count is still 23.** The next move is the founder running the runbook. Three unmet practices sit under SEC 2 and "Use temporary credentials" is only evidenced once long-lived keys are gone (phase 2, key by key, never deactivated on a hunch: a recently used key is a service). **Phase 2 is now built and not run (2026-11-26): `tools/wafr_keys.py`, `test_wafr_keys.py` (48 tests), runbook steps P2.1 to P2.5b.** It does not promise the count moves, and a key a service still needs stays as a documented service key. Detail and the unverified responder-role trust point: last "WHERE ... LEFT THINGS" section of `LOG_CURRENT.md`. Do not record the founder's audit findings here or anywhere in the repo (public repository rule above). The next WAFR question to work has not been chosen: SEC 3, 7 and 11 remain.
 
 ## THE WAFR / FTR THREAD: WHERE IT LIVES, AND THE SEVEN RULES THAT HOLD IT TOGETHER
 

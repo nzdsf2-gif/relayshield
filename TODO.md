@@ -1,5 +1,14 @@
 # RelayShield — Open Items
 
+## SEC 2 PHASE 2 FOLLOW-UPS (2026-11-26). DATED, DO NOT RUN EARLY.
+
+Context: `docs/security/identity_center_runbook.md` phase 2, `tools/wafr_keys.py`. Phase 1 is done. No credential names here (public repository): `python3 tools/wafr_keys.py` (P2.1) prints them to the terminal.
+
+- [ ] **ON OR AFTER 2026-12-03, NOT BEFORE: runbook P2.4b deletes** for the two keys deactivated on 2026-11-24 and 2026-11-26. Run P2.1 to find the Inactive ones; `--delete user:NAME --apply` for each. The tool refuses a key inside its 7 day window, so an early run is harmless but pointless. (The first becomes eligible about 2026-12-01.)
+- [ ] **OIDC for the five intel workflows (built 2026-11-26, on the branch).** Order matters: (1) merge the branch locally; (2) `AWS_PROFILE=relayshield python3 tools/oidc_workflow_grants.py` (read-only: trust check plus simulation as the role); (3) if it lists DENIED, `... --apply`; (4) ONLY THEN push `main`, because the workflows go live on push and a missing grant is a 403 on whichever day each next runs. Do not dispatch the substack workflow just to test: it redeploys that Lambda from the repo copy (DRIFT RULE). The first scheduled discovery run (Monday 2026-11-30) is the real test.
+- [ ] After that run is green: deactivate the stored-key IAM user's key (P2.2, P2.3), then observe 7 days. The key may also be in another repository's secrets; the observe window is how that would show.
+- [ ] Tick the SEC 2 practices in the Tool only per the runbook's evidence table. "Use temporary credentials" waits until P2.1 is clean except documented service keys.
+
 ## 🚪 FRONT-DOORS — discovery surfaces, added 2026-09-01
 
 *FD-8 added 2026-09-02. Founder direction: distribution for the Telegram bot is nascent and outreach does not scale. A

@@ -1,0 +1,27 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "InvokeIntelFunctions",
+      "Effect": "Allow",
+      "Action": ["lambda:InvokeFunction"],
+      "Resource": [
+        "arn:aws:lambda:us-east-1:239677749008:function:relayshield-intel-discovery",
+        "arn:aws:lambda:us-east-1:239677749008:function:relayshield-intel-feed",
+        "arn:aws:lambda:us-east-1:239677749008:function:relayshield-intel-kev"
+      ]
+    },
+    {
+      "Sid": "DeployIntelSubstackCode",
+      "Effect": "Allow",
+      "Action": ["lambda:UpdateFunctionCode"],
+      "Resource": ["arn:aws:lambda:us-east-1:239677749008:function:relayshield-intel-substack"]
+    },
+    {
+      "Sid": "ReadIntelMonitorLogs",
+      "Effect": "Allow",
+      "Action": ["logs:FilterLogEvents"],
+      "Resource": ["arn:aws:logs:us-east-1:239677749008:log-group:/aws/lambda/relayshield-intel-monitor:*"]
+    }
+  ]
+}

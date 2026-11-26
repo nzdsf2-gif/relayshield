@@ -1,0 +1,25 @@
+{
+  "account": "239677749008",
+  "region": "us-east-1",
+  "_note_region": "The Identity Center instance lives in ONE region, chosen when it is enabled. This must be that region; the dry run's 'instance' row says so if it finds none.",
+  "permission_sets": [
+    {
+      "name": "RelayShieldReadOnly",
+      "description": "Daily work: read everything, change nothing.",
+      "session": "PT8H",
+      "managed": ["arn:aws:iam::aws:policy/ReadOnlyAccess", "arn:aws:iam::aws:policy/SecurityAudit"]
+    },
+    {
+      "name": "RelayShieldAdmin",
+      "description": "Changes to the account. Short session on purpose.",
+      "session": "PT4H",
+      "managed": ["arn:aws:iam::aws:policy/AdministratorAccess"]
+    }
+  ],
+  "groups": [
+    {"name": "relayshield-readonly", "description": "May read the RelayShield account.", "permission_set": "RelayShieldReadOnly"},
+    {"name": "relayshield-admins", "description": "May administer the RelayShield account.", "permission_set": "RelayShieldAdmin"}
+  ],
+  "responder_role": "relayshield-ir-responder",
+  "responder_sso_permission_set": "RelayShieldAdmin"
+}

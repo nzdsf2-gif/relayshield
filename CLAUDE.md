@@ -1211,13 +1211,9 @@ unauthenticated request returns the page). Everything committed to it, in any fi
    whose pushes deploy, every clone diverges, GitHub keeps old commits reachable by SHA until support purges them). It is the founder's decision and is
    never done as a closing task.
 
-## NEXT WAFR SESSION STARTS WITH SEC 2. DECIDED BY THE FOUNDER, 2026-11-24.
+## SEC 2 IS BUILT AND NOT APPLIED (2026-11-26). THE FOUNDER CHOSE IAM IDENTITY CENTER.
 
-SEC 2 ("identities") is the next Security question to work, ahead of SEC 3, 7 and 11. Its unmet practices in the saved High list are *Use temporary
-credentials*, *Rely on a centralized identity provider* and *Employ user groups and attributes*. **It changes how the founder signs in to AWS, so the first
-step is a decision from him, asked once with a recommendation attached** (IAM Identity Center, or an assumed role with MFA for admin work), not a build.
-Then build dry-run-first with the repo's WAFR pattern. What this session left, and what it did not close (NO High question is closed yet), is the last
-"WHERE ... LEFT THINGS" section of `LOG_CURRENT.md`. Do not record the founder's audit findings here or anywhere in the repo (public repository rule above).
+`tools/wafr_identity.py`, its spec, `test_wafr_identity.py` and `docs/security/identity_center_runbook.md` exist and are checked against the real boto3 models; **nothing has been run against AWS and nothing is ticked, so the count is still 23.** The next move is the founder running the runbook. Three unmet practices sit under SEC 2 and "Use temporary credentials" is only evidenced once long-lived keys are gone (phase 2, key by key, never deactivated on a hunch: a recently used key is a service). Detail and the unverified responder-role trust point: last "WHERE ... LEFT THINGS" section of `LOG_CURRENT.md`. Do not record the founder's audit findings here or anywhere in the repo (public repository rule above). The next WAFR question to work has not been chosen: SEC 3, 7 and 11 remain.
 
 ## THE WAFR / FTR THREAD: WHERE IT LIVES, AND THE SEVEN RULES THAT HOLD IT TOGETHER
 

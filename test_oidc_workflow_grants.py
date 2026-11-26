@@ -97,8 +97,9 @@ class Fake:
         return {"Role": {"AssumeRolePolicyDocument": self.trust}}
 
     def simulate_principal_policy(self, PolicySourceArn, ActionNames, ResourceArns, **kw):
-        self.calls.append(("simulate", tuple(ActionNames)))
-        return {"EvaluationResults": [{"EvalActionName": a, "EvalResourceName": r,
+        self.calls.append(("simulate", tuple(ActionNames), tuple(ResourceArns)))
+        assert len(ActionNames) == 1 and len(ResourceArns) == 1, "one pair per call"
+        return {"EvaluationResults": [{"EvalActionName": a, "EvalResourceName": "${ResourceId}",
                                        "EvalDecision": "implicitDeny" if (a, r) in self.denied and not self.applied else "allowed"}
                                       for a in ActionNames for r in ResourceArns], "IsTruncated": False}
 
@@ -147,6 +148,14 @@ class Decisions(unittest.TestCase):
         self.assertEqual((rc, f.writes()), (0, []))
         self.assertIn("Nothing to apply", out)
 
+    def test_every_simulation_is_one_pair_and_reported_against_the_resource_asked(self):
+        f = Fake(denied=ALL)
+        rc, out = go(f)
+        sims = [c for c in f.calls if c[0] == "simulate"]
+        self.assertEqual(len(sims), len(ALL))
+        self.assertNotIn("ResourceId", out, "the simulator's echoed name must never be what the report shows")
+        self.assertIn("relayshield-intel-discovery", out)
+
     def test_trust_mismatch_is_reported_and_fails(self):
         trust = {"Statement": [{"Condition": {"StringEquals": {T.SUB_KEY: "repo:nzdsf2-gif/relayshield:environment:prod"}}}]}
         rc, out = go(Fake(trust=trust))
@@ -184,18 +193,20 @@ class RealModels(unittest.TestCase):
         role = {"Path": "/", "RoleName": T.ROLE, "RoleId": "AROAEXAMPLE0000000", "Arn": ROLE_ARN, "CreateDate": datetime.datetime(2026, 1, 1),
                 "AssumeRolePolicyDocument": json.dumps(trust)}
 
-        def sim_exp(st):
-            return {"PolicySourceArn": ROLE_ARN, "ActionNames": st["Action"], "ResourceArns": st["Resource"]}
+        PAIRS = sorted(ALL, key=lambda p: [(a, r) for s_ in DOC["Statement"] for a in s_["Action"] for r in s_["Resource"]].index(p))
 
-        def sim_resp(st, decision):
-            return {"EvaluationResults": [{"EvalActionName": a, "EvalResourceName": r, "EvalDecision": decision} for a in st["Action"] for r in st["Resource"]],
-                    "IsTruncated": False}
+        def sim_exp(a, r):
+            return {"PolicySourceArn": ROLE_ARN, "ActionNames": [a], "ResourceArns": [r]}
+
+        def sim_resp(a, r, decision):
+            # the real service echoed '${ResourceId}' as the resource name: the tool must not depend on it
+            return {"EvaluationResults": [{"EvalActionName": a, "EvalResourceName": "${ResourceId}", "EvalDecision": decision}], "IsTruncated": False}
         s.add_response("get_role", {"Role": role}, {"RoleName": T.ROLE})
-        for st in DOC["Statement"]:
-            s.add_response("simulate_principal_policy", sim_resp(st, "implicitDeny"), sim_exp(st))
+        for a, r in PAIRS:
+            s.add_response("simulate_principal_policy", sim_resp(a, r, "implicitDeny"), sim_exp(a, r))
         s.add_response("put_role_policy", {}, {"RoleName": T.ROLE, "PolicyName": T.POLICY_NAME, "PolicyDocument": json.dumps(DOC)})
-        for st in DOC["Statement"]:
-            s.add_response("simulate_principal_policy", sim_resp(st, "allowed"), sim_exp(st))
+        for a, r in PAIRS:
+            s.add_response("simulate_principal_policy", sim_resp(a, r, "allowed"), sim_exp(a, r))
         lines = []
         with s:
             rc = T.run(iam, lambda: "239677749008", True, out=lines.append, doc=DOC)

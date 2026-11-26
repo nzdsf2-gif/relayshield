@@ -50,13 +50,20 @@ def needs(doc):
 
 
 def simulate(iam, doc):
-    """-> list of (action, resource, decision) for every pair the file asks for. Reads only."""
+    """-> list of (action, resource, decision), ONE simulation per action and resource pair. Reads only.
+
+    Asking for several resources at once returned a single result named '${ResourceId}' for lambda:InvokeFunction on a real
+    account (2026-11-26), which cannot be read as a verdict on any one function. One pair per call is unambiguous, and the
+    result is reported against the resource that was ASKED about, never the name the simulator echoes back."""
     out = []
     arn = f"arn:aws:iam::{ACCOUNT}:role/{ROLE}"
     for _sid, actions, resources in needs(doc):
-        for r in paged_marker(iam.simulate_principal_policy, "EvaluationResults",
-                              PolicySourceArn=arn, ActionNames=actions, ResourceArns=resources):
-            out.append((r["EvalActionName"], r.get("EvalResourceName", "?"), r["EvalDecision"]))
+        for a in actions:
+            for r in resources:
+                res = list(paged_marker(iam.simulate_principal_policy, "EvaluationResults",
+                                        PolicySourceArn=arn, ActionNames=[a], ResourceArns=[r]))
+                decision = res[0]["EvalDecision"] if len(res) == 1 else "unclear:%d results" % len(res)
+                out.append((a, r, decision))
     return out
 
 
@@ -105,7 +112,7 @@ def run(iam, account_of, apply, out=print, doc=None):
         return 1
     denied = [(a, r) for a, r, d in res if d != "allowed"]
     for a, r, d in res:
-        out(f"  {'allowed ' if d == 'allowed' else 'DENIED  '}  {a}  {r.rsplit(':', 1)[-1] if a.startswith('lambda') else r}")
+        out(f"  {'allowed ' if d == 'allowed' else 'DENIED  '}  {a}  {r.split('function:')[-1] if a.startswith('lambda') else r}" + ('' if d == 'allowed' else f'   [{d}]'))
     if not denied:
         out("\nEvery grant is already in place. Nothing to apply.")
         return 0 if trust_ok else 1

@@ -287,3 +287,26 @@ Andrew's answers, 2026-11-24: he named a family member as the backup contact and
 
 ### Standing lessons from this session (the first is now a CLAUDE.md section)
 1. Names and weakness specifics never go in this public repo; role names do. 2. A "read-only managed policy covers it" assumption is not a check; the proof step caught `lambda:GetFunction`, and `GrantMatchesTool` now pins the grant to the tool's calls. 3. The Stubber layer caught three mistakes in my OWN test data (name lengths, key-id lengths); keep running it against the real models.
+
+## WHERE 2026-11-26 (WAFR SEC 2 SESSION) LEFT THINGS. SEC 2 IS BUILT AND NOT APPLIED. NO HIGH QUESTION IS CLOSED: THE COUNT IS STILL 23. READ THIS FIRST FOR THE WAFR THREAD.
+
+**Supersedes the "NEXT SESSION STARTS WITH SEC 2" bullet in "WHERE 2026-11-24 (END OF DAY, WAFR SEC 8 + SEC 10 SESSION)"; the rest of that section stands.**
+
+### The decision, and one correction to how it was framed
+The founder expected SEC 2 to be simple and to resolve one of the 23. It is three unmet practices under one question, and the Tool's threshold for clearing a question is invisible, so no build can promise the count moves. **Decision (asked once, recommendation attached, 2026-11-26): IAM Identity Center**, not an assumed role with MFA (which would cover "temporary credentials" only).
+
+### What was built (all on the branch, none applied to AWS, none run against AWS)
+* `tools/wafr_identity.py` + `tools/wafr_identity_spec.json`: dry run by default, refuses the wrong account. Steps: `org`, `instance`, `permission_sets`, `groups`, `assignments`, `membership` (`--add-user`, looked up by user name at runtime so no person's name or e-mail is in the repo), `legacy` (read-only report of IAM users holding a long-lived credential, terminal only, never to be wired into a workflow because Actions logs of a public repo are public), `responder`. `org` and `responder` write ONLY when named with `--step`; a bare `--apply` never creates the Organization or edits a trust policy. It never removes a policy or changes a session length on an existing permission set: it reports.
+* `test_wafr_identity.py`, 30 tests, two layers: fakes for the decisions and botocore Stubber over the REAL organizations, sso-admin, identitystore and iam models for the shapes. Three planted defects (bare `--apply` creating the org, trust replaced instead of merged, a wrong request parameter name) were each caught by the tests and then removed. Stubber again caught mistakes in my own fake responses (missing `GroupArn`, `UserArn`, `MembershipArn`, `Revision`; id lengths) before the tool's requests were ever validated.
+* `docs/security/identity_center_runbook.md`: ten labelled steps with EXPECT and STOP IF, then phase 2 and a table of what to cite when ticking.
+
+### Design points worth keeping
+1. **The responder role's trust requires `aws:MultiFactorAuthPresent`, and an Identity Center session is not expected to carry that flag. UNVERIFIED.** The `responder` step adds one statement admitting only the SSO admin role by `aws:PrincipalArn` pattern, keeping the MFA statement (merge, not replace), and the runbook ends step 8 with a real `assume-role` proof. MFA for that path is then the Identity Center setting "require every time", a console setting with no API here, so it is evidence by screenshot.
+2. **Profile naming: recommendation (mine, to be overruled) is that `relayshield` becomes the ADMIN SSO profile** so every `AWS_PROFILE=relayshield` command in this repo keeps working, with `relayshield-readonly` beside it and the old one kept as `relayshield-legacy` until proven. Least-privilege daily use is SEC 3, separate.
+3. **"Use temporary credentials" is NOT done by any of this.** It needs the `legacy` report empty or reduced to documented service keys. Deactivating a key that was used recently takes a service down, so phase 2 is deactivate, observe, then delete, oldest-unused first, one key at a time, handed over in a later session with that output.
+
+### Blocked on the founder (in order)
+1. Run the runbook (steps 1 to 8). Step 3 is console clicks: enable Identity Center (organization instance, us-east-1), set MFA to every sign-in, add his user. 2. Bring back any `BLOCKED`, `AccessDenied` at step 8, or the `legacy` output for phase 2. 3. Tick in the Tool only per the runbook's evidence table, and only after seeing the Tool's count move.
+
+### Not done, on purpose
+Nothing was applied or ticked. `data_at_rest_check.yml` and any other workflow that prints resource findings into a public repository's Actions logs should be reviewed against the public-repo rule: NOT checked this session.

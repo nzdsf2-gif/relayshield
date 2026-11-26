@@ -1,20 +1,33 @@
-/* RelayShield Shopify App : Cloudflare Worker (P0: order screening)
+/* RelayShield Shopify App : Cloudflare Worker (P1: hold-before-ship enhancements, 2026-11-26)
  *
  * Flow: orders/create webhook (HMAC-verified) -> extract buyer email + store
  * domain -> POST keyless /v1/composite-check -> map verdict to Admin API tags
  * and a timeline note -> embedded Polaris dashboard.
  *
  * Hard rules enforced here:
- *  - never auto-cancel or auto-refund an order (tag and note only)
+ *  - never auto-cancel or auto-refund an order (a hold is a fulfillment hold for merchant review, never a cancel or refund)
  *  - never call an order "safe" (best case: "no known red flags", with caveats)
  *  - never persist raw buyer PII (emails are SHA-256 hashed at rest)
  *  - fail open: any screening error means no tags, never a block
+ *
+ * P1 enhancements (2026-11-26, RS-ENH-2026-11-26-V2):
+ *  - 0-100 score with merchant thresholds (default hold >= 70, flag 40-69)
+ *  - hold-before-ship via fulfillmentOrderHold (HIGH_RISK_OF_FRAUD), $49 Prevention tier only
+ *  - Shopify Flow trigger (flowTriggerReceive) + Flow action endpoint (/flow/hold-order)
+ *  - custom rules / blocklists / allowlist, buyer-identifying values stored hashed
+ *  - device fingerprint reuse check via KV; phone/email vendor enrichment is a stub (corpus-first)
+ *  - $49/mo Prevention tier via Managed Pricing (a "Prevention" plan in the
+ *    Partner Dashboard); $29 stays tag-only
+ *  - a hold never cancels or refunds; hold/release errors fail open to tag + note
  */
 
 const API_VERSION = "2026-07";
 const RS_COMPOSITE_URL =
   "https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod/v1/composite-check";
-const OAUTH_SCOPES = "read_orders,write_orders";
+/* P1 (RS-ENH-2026-11-26-V2): fulfillment scopes power hold/release;
+ * write_flow_actions powers the Flow trigger. Adding scopes requires
+ * existing shops to re-authorize; new installs get them automatically. */
+const OAUTH_SCOPES = "read_orders,write_orders,read_merchant_managed_fulfillment_orders,write_merchant_managed_fulfillment_orders,write_flow_actions";
 const SCREEN_TIMEOUT_MS = 15000;
 /* Managed Pricing: plans are defined in the Partner Dashboard and Shopify hosts
  * the plan picker, so the app never creates charges itself. The handle is the
@@ -27,6 +40,34 @@ const SCREENINGS_CAP = 100;
 /* Buyer screening records (email stored only as SHA-256 hash) expire after
  * 90 days so personal data is never kept longer than needed. */
 const SCREENINGS_TTL_SECONDS = 90 * 24 * 60 * 60;
+
+/* P1 enhancements (RS-ENH-2026-11-26-V2): score thresholds and plan tiers.
+ * Default: hold at 70 and above, flag 40-69, pass below 40. The merchant
+ * can change both thresholds in the dashboard. */
+const DEFAULT_HOLD_THRESHOLD = 70;
+const DEFAULT_FLAG_THRESHOLD = 40;
+/* Tiers (Managed Pricing): the plan name comes from the live Shopify
+ * subscription. "Prevention" is the $49/mo plan defined in the Partner
+ * Dashboard; "Paid" is the $29/mo plan; no active subscription is Free.
+ * A tier is never stored on the shop record; it is re-read from Shopify. */
+const TIER_FREE = "free";
+const TIER_STANDARD = "standard"; /* $29/mo: screen + tag, as before */
+const TIER_PREVENTION = "prevention"; /* $49/mo: hold, Flow, rules, fingerprinting, enrichment */
+const PREVENTION_PLAN_NAME = "Prevention"; /* Partner Dashboard plan name for the $49 tier */
+/* Flow trigger handle (must match the handle in extensions/flow-trigger/shopify.extension.toml). */
+const FLOW_TRIGGER_HANDLE = "relayshield-high-risk-order";
+const FLOW_ACTION_HANDLE = "relayshield-hold-order";
+/* One hold handle per fulfillment order; a duplicate handle is rejected by
+ * Shopify, so a re-screened order reuses the same handle and is treated
+ * as already held. */
+const HOLD_HANDLE = "relayshield-fraud-review";
+
+const holdSettingsKey = (shop) => `hold_settings:${shop}`;
+const rulesKey = (shop) => `rules:${shop}`;
+const allowlistKey = (shop) => `allowlist:${shop}`;
+const flowStateKey = (shop) => `flow:${shop}`;
+const fingerprintKey = (hash) => `fp:${hash}`;
+const flowActionKey = (runId) => `flow_action:${runId}`;
 
 /* ------------------------------------------------------------------ */
 /* crypto helpers (Web Crypto; works in Workers and in Node >= 18)    */
@@ -170,8 +211,18 @@ export async function provisionShopKey(env, shop) {
 
 export function extractOrderSignals(order, shop) {
   const email = order.email || order.contact_email || "";
+  const phone = order.phone || order.billing_address?.phone || order.shipping_address?.phone || "";
+  const noteAttrs = Array.isArray(order.note_attributes) ? order.note_attributes : [];
+  const fpAttr = noteAttrs.find((a) => a && a.name === "relayshield_device_fingerprint");
+  const deviceFingerprint = fpAttr ? String(fpAttr.value || "") : "";
+  const clientIp = order.client_details?.browser_ip || "";
+  const country = order.shipping_address?.country_code || order.billing_address?.country_code || "";
   return {
     email: { from_address: email },
+    phone,
+    device_fingerprint: deviceFingerprint,
+    client_ip: clientIp,
+    country,
     url: `https://${shop}`,
     source: "shopify-app",
   };
@@ -294,6 +345,487 @@ async function recordScreening(env, shop, record) {
   const list = (await kvGet(env, screeningsKey(shop))) || [];
   list.unshift(record);
   await kvPut(env, screeningsKey(shop), list.slice(0, SCREENINGS_CAP), SCREENINGS_TTL_SECONDS);
+}
+
+/* ------------------------------------------------------------------ */
+/* P1 enhancements (RS-ENH-SECTION)                                   */
+/* Hold-before-ship, Flow, rules, fingerprinting, $49 Prevention tier */
+/* ------------------------------------------------------------------ */
+
+async function adminGraphql(shop, token, query, variables) {
+  const resp = await fetch(adminBase(shop) + "/graphql.json", {
+    method: "POST",
+    headers: { "X-Shopify-Access-Token": token, "Content-Type": "application/json" },
+    body: JSON.stringify({ query, variables }),
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => "");
+    throw new Error(`GraphQL -> ${resp.status}: ${text.slice(0, 200)}`);
+  }
+  const body = await resp.json();
+  if (body.errors && body.errors.length) {
+    throw new Error(`GraphQL errors: ${JSON.stringify(body.errors).slice(0, 200)}`);
+  }
+  return body.data;
+}
+
+/* --- tiers (Managed Pricing) --------------------------------------- */
+/* The tier is read from the live Shopify subscription, never from the
+ * shop record. getShopPlan(active, usage) in the base file returns a
+ * plan object; v2 adds a `tier` field to it (see the P7b patch below).
+ * "prevention" is the $49/mo plan named "Prevention" in the Partner
+ * Dashboard; "standard" is the $29/mo "Paid" plan; "free" is no
+ * subscription. A billing error fails open to "free", so an outage can
+ * never grant Prevention holds. */
+
+export function tierOfPlan(plan) {
+  if (!plan) return TIER_FREE;
+  if (plan.tier) return plan.tier;
+  if (plan.plan === PREVENTION_PLAN_NAME) return TIER_PREVENTION;
+  return plan.isPaid ? TIER_STANDARD : TIER_FREE;
+}
+
+export function isPreventionPlan(plan) {
+  return tierOfPlan(plan) === TIER_PREVENTION;
+}
+
+/* --- hold thresholds (separate KV key from the tag/note settings) --- */
+/* The base file stores tag_medium/add_note under settingsKey. Hold
+ * thresholds live under holdSettingsKey so the two never clobber each
+ * other in the same KV key. */
+
+export async function getHoldSettings(env, shop) {
+  const saved = (await kvGet(env, holdSettingsKey(shop))) || {};
+  return {
+    hold_threshold: Number.isFinite(saved.hold_threshold) ? saved.hold_threshold : DEFAULT_HOLD_THRESHOLD,
+    flag_threshold: Number.isFinite(saved.flag_threshold) ? saved.flag_threshold : DEFAULT_FLAG_THRESHOLD,
+    hold_enabled: saved.hold_enabled !== false,
+  };
+}
+
+export async function saveHoldSettings(env, shop, patch) {
+  const current = await getHoldSettings(env, shop);
+  const next = { ...current };
+  if (Number.isFinite(patch.hold_threshold)) next.hold_threshold = Math.max(0, Math.min(100, Math.round(patch.hold_threshold)));
+  if (Number.isFinite(patch.flag_threshold)) next.flag_threshold = Math.max(0, Math.min(100, Math.round(patch.flag_threshold)));
+  if (next.flag_threshold > next.hold_threshold) next.flag_threshold = next.hold_threshold;
+  if (typeof patch.hold_enabled === "boolean") next.hold_enabled = patch.hold_enabled;
+  await kvPut(env, holdSettingsKey(shop), next);
+  return next;
+}
+
+/* --- rules / allowlist -------------------------------------------- */
+/* Rule values that identify a buyer (email, phone, device fingerprint,
+ * address) are stored only as SHA-256 hashes, like buyer emails. Country
+ * and IP are stored plain: neither identifies a buyer on its own. */
+
+export function hashRuleValue(type, value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (type === "phone") return raw.replace(/[^0-9]/g, "");
+  return raw;
+}
+
+export async function hashRuleStored(type, value) {
+  const norm = hashRuleValue(type, value);
+  if (type === "email" || type === "phone" || type === "device" || type === "address") {
+    return sha256Hex(norm);
+  }
+  return norm;
+}
+
+export function ruleSignalValue(type, order, signals) {
+  if (type === "email") return signals.email.from_address;
+  if (type === "phone") return signals.phone;
+  if (type === "device") return signals.device_fingerprint;
+  if (type === "ip") return signals.client_ip;
+  if (type === "country") return signals.country;
+  if (type === "address") {
+    const a = order.shipping_address || order.billing_address || {};
+    return [a.address1, a.city, a.zip, a.country_code].filter(Boolean).join(" ");
+  }
+  return "";
+}
+
+export async function matchRules(rules, order, signals) {
+  for (const rule of rules || []) {
+    if (!rule || rule.enabled === false) continue;
+    const candidate = ruleSignalValue(rule.type, order, signals);
+    if (!candidate) continue;
+    const stored = await hashRuleStored(rule.type, candidate);
+    if (stored && stored === rule.value) return rule;
+  }
+  return null;
+}
+
+export async function isAllowlisted(allowlist, order, signals) {
+  return (await matchRules(allowlist, order, signals)) !== null;
+}
+
+export async function getShopRules(env, shop) {
+  return (await kvGet(env, rulesKey(shop))) || [];
+}
+
+export async function getShopAllowlist(env, shop) {
+  return (await kvGet(env, allowlistKey(shop))) || [];
+}
+
+/* --- hold decision (pure; unit-testable) --------------------------- */
+
+export function decideHold(input) {
+  const { tier, settings, score, ruleMatch, allowlisted, fingerprintReuse } = input;
+  if (tier !== TIER_PREVENTION) return { hold: false, reason: null };
+  if (!settings.hold_enabled) return { hold: false, reason: null };
+  if (allowlisted) return { hold: false, reason: null };
+  if (fingerprintReuse) return { hold: true, reason: "device fingerprint previously seen on a held order" };
+  if (ruleMatch) {
+    if (ruleMatch.action === "hold") return { hold: true, reason: `matched rule ${ruleMatch.type}` };
+    return { hold: false, reason: `matched rule ${ruleMatch.type} (flag only)` };
+  }
+  if (typeof score === "number" && score >= settings.hold_threshold) {
+    return { hold: true, reason: `score ${score}/100 at or above hold threshold ${settings.hold_threshold}` };
+  }
+  return { hold: false, reason: null };
+}
+
+/* --- device fingerprint enrichment (corpus-first) ------------------ */
+/* A fingerprint seen on a prior held order is a strong signal even when
+ * the email and address are new. Fingerprints are stored only as hashes,
+ * keyed fp:<sha256>, with a count of held orders. Vendor phone/email
+ * enrichment (carrier, line type, domain age, disposable, breach) is NOT
+ * wired yet: the corpus-first path above ships first, and a vendor call
+ * belongs in enrichSignals() below when Andrew picks one. */
+
+export async function checkFingerprintReuse(env, signals) {
+  const fp = String(signals.device_fingerprint || "");
+  if (!fp) return false;
+  const rec = await kvGet(env, fingerprintKey(await sha256Hex(fp)));
+  return Boolean(rec && rec.held_count > 0);
+}
+
+export async function noteFingerprintHold(env, signals, orderName) {
+  const fp = String(signals.device_fingerprint || "");
+  if (!fp) return;
+  const key = fingerprintKey(await sha256Hex(fp));
+  const rec = (await kvGet(env, key)) || { held_count: 0 };
+  rec.held_count = (rec.held_count || 0) + 1;
+  rec.last_held_order = orderName || null;
+  rec.last_seen = new Date().toISOString();
+  await kvPut(env, key, rec);
+}
+
+export async function enrichSignals(env, signals) {
+  const reasons = [];
+  const fingerprintReuse = await checkFingerprintReuse(env, signals);
+  if (fingerprintReuse) reasons.push("Device fingerprint previously seen on a held order");
+  return { reasons, fingerprintReuse };
+}
+
+/* --- fulfillment hold (GraphQL; $49 Prevention tier only) ---------- */
+/* Hold = fulfillment hold for merchant review. It never cancels or
+ * refunds an order, and it never blocks checkout. Any failure here fails
+ * open: the order keeps its tag + timeline note and the webhook still
+ * returns 200. Requires write_merchant_managed_fulfillment_orders (and
+ * read_merchant_managed_fulfillment_orders for the lookup). */
+
+const FO_QUERY = `query orderFulfillmentOrders($id: ID!) {
+  order(id: $id) {
+    fulfillmentOrders(first: 10) {
+      nodes { id status fulfillmentHolds { id handle reason } }
+    }
+  }
+}`;
+
+const HOLD_MUTATION = `mutation fulfillmentOrderHold($id: ID!, $fulfillmentHold: FulfillmentOrderHoldInput!) {
+  fulfillmentOrderHold(id: $id, fulfillmentHold: $fulfillmentHold) {
+    fulfillmentHold { id reason reasonNotes handle }
+    fulfillmentOrder { id status }
+    userErrors { field message }
+  }
+}`;
+
+const RELEASE_MUTATION = `mutation fulfillmentOrderReleaseHold($id: ID!, $holdIds: [ID!]) {
+  fulfillmentOrderReleaseHold(id: $id, holdIds: $holdIds) {
+    fulfillmentOrder { id status }
+    userErrors { field message }
+  }
+}`;
+
+export async function holdFulfillmentOrders(shop, token, order, score, reasons) {
+  const data = await adminGraphql(shop, token, FO_QUERY, { id: `gid://shopify/Order/${order.id}` });
+  const nodes = (data && data.order && data.order.fulfillmentOrders && data.order.fulfillmentOrders.nodes) || [];
+  const held = [];
+  const errors = [];
+  for (const fo of nodes) {
+    if (fo.status !== "OPEN") continue;
+    const already = (fo.fulfillmentHolds || []).find((h) => h.handle === HOLD_HANDLE);
+    if (already) { held.push({ fulfillmentOrderId: fo.id, holdId: already.id, already: true }); continue; }
+    const note = (score == null ? "RelayShield hold." : `RelayShield score ${score}/100. `) + (reasons || []).slice(0, 3).join("; ");
+    try {
+      const res = await adminGraphql(shop, token, HOLD_MUTATION, {
+        id: fo.id,
+        fulfillmentHold: { reason: "HIGH_RISK_OF_FRAUD", reasonNotes: note.slice(0, 500), handle: HOLD_HANDLE, notifyMerchant: true },
+      });
+      const errs = (res.fulfillmentOrderHold && res.fulfillmentOrderHold.userErrors) || [];
+      if (errs.length) { errors.push(errs.map((e) => e.message).join("; ")); continue; }
+      const h = res.fulfillmentOrderHold.fulfillmentHold;
+      held.push({ fulfillmentOrderId: fo.id, holdId: h ? h.id : null, already: false });
+    } catch (e) {
+      errors.push(e.message);
+    }
+  }
+  return { held, errors };
+}
+
+export async function releaseOrderHold(shop, token, orderId) {
+  const data = await adminGraphql(shop, token, FO_QUERY, { id: `gid://shopify/Order/${orderId}` });
+  const nodes = (data && data.order && data.order.fulfillmentOrders && data.order.fulfillmentOrders.nodes) || [];
+  const released = [];
+  const errors = [];
+  for (const fo of nodes) {
+    const ours = (fo.fulfillmentHolds || []).filter((h) => h.handle === HOLD_HANDLE);
+    if (!ours.length) continue;
+    try {
+      const res = await adminGraphql(shop, token, RELEASE_MUTATION, { id: fo.id, holdIds: ours.map((h) => h.id) });
+      const errs = (res.fulfillmentOrderReleaseHold && res.fulfillmentOrderReleaseHold.userErrors) || [];
+      if (errs.length) { errors.push(errs.map((e) => e.message).join("; ")); continue; }
+      released.push(fo.id);
+    } catch (e) {
+      errors.push(e.message);
+    }
+  }
+  return { released, errors };
+}
+
+/* --- Shopify Flow -------------------------------------------------- */
+/* Trigger: the app fires flowTriggerReceive with handle
+ * relayshield-high-risk-order when a Prevention-tier order scores high or
+ * is held. The trigger extension is declared in
+ * extensions/flow-trigger/shopify.extension.toml (created with
+ * `shopify app generate extension`, type Flow Trigger); the handle there
+ * must match FLOW_TRIGGER_HANDLE. Payload keys: order_id is the fixed key
+ * of the order_reference field (numeric legacy id); the rest are
+ * sentence-case custom fields declared in the TOML.
+ * The lifecycle callback (/flow/lifecycle) records whether any merchant
+ * has an enabled workflow using the trigger, so the mutation is only sent
+ * where it is used. An empty userErrors array means Flow accepted the
+ * event, not that a workflow ran: treat it as fire-and-forget.
+ * Action: Flow calls POST /flow/hold-order (runtime_url in the Flow Action
+ * extension) with an HMAC-signed JSON payload; the handler verifies the
+ * HMAC with the app secret, dedupes by action_run_id, and holds the order.
+ * Both endpoints fail open: a Flow failure never fails the webhook. */
+
+const FLOW_TRIGGER_MUTATION = `mutation FireTrigger($handle: String, $payload: JSON) {
+  flowTriggerReceive(handle: $handle, payload: $payload) {
+    userErrors { field message }
+  }
+}`;
+
+export async function sendFlowTrigger(env, shop, token, order, level, score, reasons) {
+  const state = (await kvGet(env, flowStateKey(shop))) || {};
+  if (!state.has_enabled_flow) return { sent: false, reason: "no enabled workflow" };
+  const data = await adminGraphql(shop, token, FLOW_TRIGGER_MUTATION, {
+    handle: FLOW_TRIGGER_HANDLE,
+    payload: {
+      order_id: Number(order.id),
+      "Risk score": Number(score),
+      "Risk level": String(level),
+      "Top signal": String((reasons && reasons[0]) || "no flags found"),
+    },
+  });
+  const errs = (data.flowTriggerReceive && data.flowTriggerReceive.userErrors) || [];
+  if (errs.length) throw new Error(errs.map((e) => e.message).join("; "));
+  return { sent: true };
+}
+
+export async function handleFlowLifecycle(request, env) {
+  const raw = await request.text();
+  const hmac = request.headers.get("X-Shopify-Hmac-Sha256") || "";
+  if (!(await verifyShopifyHmac(env.SHOPIFY_API_SECRET, raw, hmac))) {
+    return new Response("HMAC validation failed", { status: 401 });
+  }
+  let body = {};
+  try { body = JSON.parse(raw); } catch { return new Response("Bad JSON", { status: 400 }); }
+  const shop = String(body.shopify_domain || "");
+  if (!isValidShopDomain(shop)) return new Response("Bad shop", { status: 400 });
+  const prev = (await kvGet(env, flowStateKey(shop))) || {};
+  const seenAt = body.timestamp || new Date().toISOString();
+  if (prev.updated_at && prev.updated_at > seenAt) return json({ ok: true, stale: true });
+  await kvPut(env, flowStateKey(shop), {
+    has_enabled_flow: Boolean(body.has_enabled_flow),
+    flow_trigger_definition_id: body.flow_trigger_definition_id || null,
+    updated_at: seenAt,
+  });
+  return json({ ok: true });
+}
+
+export async function handleFlowAction(request, env) {
+  const raw = await request.text();
+  const hmac = request.headers.get("X-Shopify-Hmac-Sha256") || "";
+  if (!(await verifyShopifyHmac(env.SHOPIFY_API_SECRET, raw, hmac))) {
+    return new Response("HMAC validation failed", { status: 401 });
+  }
+  let body = {};
+  try { body = JSON.parse(raw); } catch { return new Response("Bad JSON", { status: 400 }); }
+  if (body.handle && body.handle !== FLOW_ACTION_HANDLE) {
+    return json({ ok: false, error: "unknown action handle" }, 400);
+  }
+  const shop = String(body.shopify_domain || "");
+  if (!isValidShopDomain(shop)) return new Response("Bad shop", { status: 400 });
+  const runId = String(body.action_run_id || "");
+  if (runId) {
+    if (await kvGet(env, flowActionKey(runId))) return json({ ok: true, deduped: true });
+    await kvPut(env, flowActionKey(runId), { shop, at: new Date().toISOString() }, 7 * 24 * 60 * 60);
+  }
+  const rawOrderId = body.order_id || body.orderId || body.Order || (body.order && body.order.id) || null;
+  if (!rawOrderId) return json({ ok: false, error: "no order_id in payload" }, 400);
+  const orderId = Number(String(rawOrderId).replace(/^gid:\/\/shopify\/Order\//, ""));
+  if (!Number.isFinite(orderId)) return json({ ok: false, error: "bad order_id in payload" }, 400);
+  const rec = await getShopRecord(env, shop);
+  if (!rec || !rec.access_token) return json({ ok: false, error: "shop not installed" }, 401);
+  if (!isPreventionPlan(await loadPlan(env, shop))) return json({ ok: false, error: "Prevention tier required" }, 402);
+  let token = rec.access_token;
+  try { token = await getFreshAccessToken(env, shop); } catch (e) { console.log(`flow action token refresh failed: ${e.message}`); }
+  const order = { id: orderId, name: `#${orderId}` };
+  try {
+    const res = await holdFulfillmentOrders(shop, token, order, null, ["Held by a Shopify Flow workflow"]);
+    return json({ ok: true, held: res.held });
+  } catch (e) {
+    console.log(`flow action hold failed order=${orderId}: ${e.message}`);
+    return json({ ok: false, error: "hold failed" }, 502);
+  }
+}
+
+/* --- $49 Prevention tier (Managed Pricing) ------------------------- */
+/* The $29 tier stays tag-only. The $49 Prevention tier is a second plan
+ * defined in the Partner Dashboard (name "Prevention", $49/mo, every 30
+ * days). Shopify hosts plan selection: the merchant picks the plan in
+ * the plan picker at pricingPlansUrl(), and the app re-reads the live
+ * subscription on every dashboard load. The app NEVER creates charges
+ * itself: no appSubscriptionCreate, no Stripe, no external checkout.
+ * That is the base file's deliberate design, and v2 keeps it.
+ * The $49 tier is a pricing change, so it needs advance notice to
+ * existing merchants per Shopify billing rules. The plan must exist in
+ * the Partner Dashboard before any merchant can pick it; until then the
+ * tier reads as "free" or "standard" and no holds happen.
+ * LIVE VERIFICATION OWED: confirm the "Prevention" plan exists in the
+ * Partner Dashboard and pick it on the dev shop before telling
+ * merchants about the tier. */
+
+export async function loadPlanForApi(env, shop) {
+  const plan = await loadPlan(env, shop);
+  return { plan, tier: tierOfPlan(plan) };
+}
+
+/* --- dashboard API (session-token authed) -------------------------- */
+
+export async function requireSessionShop(request, env, url) {
+  const auth = request.headers.get("Authorization") || "";
+  const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : url.searchParams.get("id_token") || "";
+  return verifySessionToken(env, bearer);
+}
+
+async function readJsonBody(request) {
+  try { return await request.json(); } catch { return {}; }
+}
+
+/* Thresholds live on /api/hold-settings, NOT /api/settings: the base
+ * file's /api/settings serves the tag/note settings (tag_medium,
+ * add_note) and returns 400 on a thresholds body, so a separate
+ * endpoint keeps the two from colliding. */
+export async function handleApiHoldSettings(request, env, shop) {
+  if (request.method === "GET") return json({ ok: true, settings: await getHoldSettings(env, shop) });
+  if (request.method === "POST") {
+    const body = await readJsonBody(request);
+    const saved = await saveHoldSettings(env, shop, {
+      hold_threshold: Number(body.hold_threshold),
+      flag_threshold: Number(body.flag_threshold),
+      hold_enabled: body.hold_enabled,
+    });
+    return json({ ok: true, settings: saved });
+  }
+  return new Response("Method not allowed", { status: 405 });
+}
+
+export async function handleApiRules(request, env, shop) {
+  if (request.method === "GET") return json({ ok: true, rules: await getShopRules(env, shop) });
+  if (request.method === "POST") {
+    const body = await readJsonBody(request);
+    const type = String(body.type || "");
+    const action = body.action === "hold" ? "hold" : "flag";
+    if (!["email", "phone", "ip", "device", "country", "address"].includes(type)) {
+      return json({ ok: false, error: "bad rule type" }, 400);
+    }
+    if (!String(body.value || "").trim()) return json({ ok: false, error: "empty rule value" }, 400);
+    const rules = await getShopRules(env, shop);
+    const rule = { id: randomHex(8), type, action, value: await hashRuleStored(type, body.value), enabled: true, created_at: new Date().toISOString() };
+    rules.push(rule);
+    await kvPut(env, rulesKey(shop), rules);
+    return json({ ok: true, rule: { id: rule.id, type, action, enabled: true } });
+  }
+  if (request.method === "DELETE") {
+    const id = new URL(request.url).searchParams.get("id") || "";
+    const rules = (await getShopRules(env, shop)).filter((r) => r.id !== id);
+    await kvPut(env, rulesKey(shop), rules);
+    return json({ ok: true });
+  }
+  return new Response("Method not allowed", { status: 405 });
+}
+
+export async function handleApiAllowlist(request, env, shop) {
+  if (request.method === "GET") return json({ ok: true, allowlist: await getShopAllowlist(env, shop) });
+  if (request.method === "POST") {
+    const body = await readJsonBody(request);
+    const type = String(body.type || "");
+    if (!["email", "phone", "device", "country"].includes(type)) {
+      return json({ ok: false, error: "bad allowlist type" }, 400);
+    }
+    if (!String(body.value || "").trim()) return json({ ok: false, error: "empty allowlist value" }, 400);
+    const list = await getShopAllowlist(env, shop);
+    const entry = { id: randomHex(8), type, action: "allow", value: await hashRuleStored(type, body.value), enabled: true, created_at: new Date().toISOString() };
+    list.push(entry);
+    await kvPut(env, allowlistKey(shop), list);
+    return json({ ok: true, entry: { id: entry.id, type, enabled: true } });
+  }
+  if (request.method === "DELETE") {
+    const id = new URL(request.url).searchParams.get("id") || "";
+    const list = (await getShopAllowlist(env, shop)).filter((r) => r.id !== id);
+    await kvPut(env, allowlistKey(shop), list);
+    return json({ ok: true });
+  }
+  return new Response("Method not allowed", { status: 405 });
+}
+
+export async function handleApiRelease(request, env, shop) {
+  if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
+  const body = await readJsonBody(request);
+  const orderId = body.order_id;
+  if (!orderId) return json({ ok: false, error: "no order_id" }, 400);
+  const rec = await getShopRecord(env, shop);
+  if (!rec || !rec.access_token) return json({ ok: false, error: "shop not installed" }, 401);
+  let token = rec.access_token;
+  try { token = await getFreshAccessToken(env, shop); } catch (e) { console.log(`release token refresh failed: ${e.message}`); }
+  try {
+    const res = await releaseOrderHold(shop, token, orderId);
+    if (res.released.length) {
+      const list = (await kvGet(env, screeningsKey(shop))) || [];
+      const row = list.find((s) => String(s.order_id) === String(orderId));
+      if (row) { row.released_at = new Date().toISOString(); await kvPut(env, screeningsKey(shop), list, SCREENINGS_TTL_SECONDS); }
+    }
+    return json({ ok: true, released: res.released, errors: res.errors });
+  } catch (e) {
+    console.log(`release failed order=${orderId}: ${e.message}`);
+    return json({ ok: false, error: "release failed; release the hold from the Shopify admin order page" }, 502);
+  }
+}
+
+/* Plan is read-only here: Managed Pricing means the merchant picks the
+ * plan in Shopify's plan picker (the dashboard links to it). The app
+ * never creates or cancels a subscription. GET returns the live plan
+ * (re-read from Shopify) and the plans URL. */
+export async function handleApiPlan(request, env, shop, url) {
+  if (request.method !== "GET") return new Response("Method not allowed", { status: 405 });
+  const { plan, tier } = await loadPlanForApi(env, shop);
+  return json({ ok: true, plan, tier, plansUrl: pricingPlansUrl(shop, env.SHOPIFY_APP_HANDLE) });
 }
 
 /* ------------------------------------------------------------------ */
@@ -599,7 +1131,8 @@ export async function getActiveSubscription(shop, token) {
     throw new Error(`subscription query failed: ${resp.status}`);
   }
   const subs = (data.data.currentAppInstallation && data.data.currentAppInstallation.activeSubscriptions) || [];
-  const paid = subs.find((x) => x.status === "ACTIVE" && x.name === PAID_PLAN_NAME);
+  /* P1 (RS-ENH-2026-11-26-V2): recognize the $49 "Prevention" plan as paid too. */
+  const paid = subs.find((x) => x.status === "ACTIVE" && (x.name === PAID_PLAN_NAME || x.name === PREVENTION_PLAN_NAME));
   return paid
     ? { isPaid: true, name: paid.name, test: Boolean(paid.test), subscriptionId: paid.id }
     : { isPaid: false, name: "Free", test: false, subscriptionId: null };
@@ -609,8 +1142,14 @@ export function getShopPlan(active, usage) {
   const isPaid = Boolean(active && active.isPaid);
   const limit = isPaid ? PAID_SCREENING_LIMIT : FREE_SCREENING_LIMIT;
   const used = isPaid ? usage.month : usage.lifetime;
+  /* P1 (RS-ENH-2026-11-26-V2): tier for the Prevention gate. The plan name
+   * is the live subscription name ("Paid", "Prevention", or "Free"), so the
+   * dashboard shows the real plan. Both paid tiers share the 2000/month
+   * screening limit; the $49 tier adds hold/Flow/rules, not screenings. */
+  const tier = active && active.name === PREVENTION_PLAN_NAME ? "prevention" : isPaid ? "standard" : "free";
   return {
-    plan: isPaid ? PAID_PLAN_NAME : "Free",
+    plan: isPaid ? active.name : "Free",
+    tier,
     isPaid,
     test: Boolean(active && active.test),
     limit,
@@ -694,7 +1233,7 @@ async function readRawBody(request) {
  * orders/create webhook and by the order sync, so the two can never disagree.
  * Returns null when screening itself failed (fail open: nothing is recorded and
  * nothing is tagged); otherwise { record } for the caller to store. */
-export async function screenAndApply(env, shop, rec, order, settingsIn) {
+export async function screenAndApply(env, shop, rec, order, settingsIn, tier = TIER_FREE) {
   const signals = extractOrderSignals(order, shop);
   let verdict;
   try {
@@ -712,9 +1251,31 @@ export async function screenAndApply(env, shop, rec, order, settingsIn) {
   } catch (e) {
     console.log(`token refresh failed order=${order.id}: ${e.message}`);
   }
+
+  /* P1 (RS-ENH-ORDERS-CREATE): Prevention-tier evaluation. Runs before the
+   * tag/note so a flag rule can upgrade an unknown verdict to review. */
+  let ruleMatch = null;
+  let allowlisted = false;
+  let enrichment = { reasons: [], fingerprintReuse: false };
+  let holdSettings = { hold_threshold: DEFAULT_HOLD_THRESHOLD, flag_threshold: DEFAULT_FLAG_THRESHOLD, hold_enabled: true };
+  if (tier === TIER_PREVENTION) {
+    try {
+      const rules = await getShopRules(env, shop);
+      const allow = await getShopAllowlist(env, shop);
+      allowlisted = await isAllowlisted(allow, order, signals);
+      if (!allowlisted) ruleMatch = await matchRules(rules, order, signals);
+      enrichment = await enrichSignals(env, signals);
+      holdSettings = await getHoldSettings(env, shop);
+    } catch (e) {
+      console.log(`rules/enrichment failed order=${order.id}: ${e.message}`);
+    }
+  }
+  const allReasons = [...reasons, ...enrichment.reasons];
+  const effectiveLevel = ruleMatch && ruleMatch.action === "flag" && level === "unknown" ? "medium" : level;
+
   try {
     const settings = settingsIn || (await getSettings(env, shop));
-    await applyVerdictToOrder(shop, token, order, level, verdict.score, reasons, settings);
+    await applyVerdictToOrder(shop, token, order, effectiveLevel, verdict.score, allReasons, settings);
   } catch (e) {
     console.log(`admin action failed order=${order.id}: ${e.message}`);
     // 401 means the stored token was revoked (uninstall then reinstall, or the
@@ -722,14 +1283,61 @@ export async function screenAndApply(env, shop, rec, order, settingsIn) {
     // load exchanges a fresh one instead of trusting a dead token forever.
     if (/-> 401:/.test(e.message)) await dropStaleToken(env, shop);
   }
+
+  /* Hold-before-ship: fulfillment hold only, never cancel or refund.
+   * Any failure here fails open to the tag + note above. The hold line
+   * goes into the order note (the REST Event resource is GET-only for
+   * apps, so there is no POST /orders/{id}/events.json). */
+  let held = null;
+  const decision = decideHold({ tier, settings: holdSettings, score: verdict.score, level: effectiveLevel, ruleMatch, allowlisted, fingerprintReuse: enrichment.fingerprintReuse });
+  if (decision.hold) {
+    try {
+      const res = await holdFulfillmentOrders(shop, token, order, verdict.score, allReasons);
+      if (res.held.length) {
+        held = { fulfillmentOrders: res.held.map((h) => h.fulfillmentOrderId), holdIds: res.held.map((h) => h.holdId).filter(Boolean), reason: decision.reason };
+        await noteFingerprintHold(env, signals, order.name);
+        try {
+          const current = ((await adminApi(shop, token, `/orders/${order.id}.json`)) || {}).order || {};
+          const existingNote = String(current.note || "");
+          const holdNote = `RelayShield held this order for review before shipping (${decision.reason}). Release the hold from the order page or the RelayShield dashboard; nothing was cancelled or refunded.`;
+          if (!existingNote.includes(holdNote)) {
+            await adminApi(shop, token, `/orders/${order.id}.json`, "PUT", { order: { id: order.id, note: existingNote ? `${existingNote}\n${holdNote}` : holdNote } });
+          }
+        } catch (e) {
+          console.log(`hold note failed order=${order.id}: ${e.message}`);
+        }
+      } else if (res.errors.length) {
+        console.log(`hold failed order=${order.id}: ${res.errors.join("; ")}`);
+      }
+    } catch (e) {
+      console.log(`hold failed order=${order.id}: ${e.message}`);
+    }
+  }
+
+  /* Flow trigger: fire-and-forget, only where a merchant has an enabled
+   * workflow using the trigger. Never fails the webhook. */
+  if (tier === TIER_PREVENTION && (effectiveLevel === "high" || held)) {
+    try {
+      await sendFlowTrigger(env, shop, token, order, effectiveLevel, verdict.score, allReasons);
+    } catch (e) {
+      console.log(`flow trigger failed order=${order.id}: ${e.message}`);
+    }
+  }
+
   return {
     record: {
       order_id: order.id,
       order_name: order.name,
       email_hash: await hashBuyerEmail(signals.email.from_address),
-      level,
+      level: effectiveLevel,
       score: verdict.score,
-      top_reason: reasons[0] || null,
+      top_reason: allReasons[0] || null,
+      held: Boolean(held),
+      hold_reason: held ? held.reason : null,
+      hold_ids: held ? held.holdIds : [],
+      fulfillment_order_ids: held ? held.fulfillmentOrders : [],
+      rule_id: ruleMatch ? ruleMatch.id : null,
+      released_at: null,
       screened_at: new Date().toISOString(),
     },
   };
@@ -789,7 +1397,7 @@ export async function syncOrders(env, shop) {
   let failed = 0;
   for (let i = 0; i < batch.length; i += SYNC_CONCURRENCY) {
     const outcomes = await Promise.all(batch.slice(i, i + SYNC_CONCURRENCY).map(async (o) => {
-      try { return await screenAndApply(env, shop, rec, o, settings); } catch { return null; }
+      try { return await screenAndApply(env, shop, rec, o, settings, tierOfPlan(gate && gate.plan)); } catch { return null; }
     }));
     for (const out of outcomes) { if (out) records.push(out.record); else failed++; }
   }
@@ -853,10 +1461,10 @@ async function handleOrdersCreate(request, env) {
   if (!gate.allowed) return json({ ok: true, screened: false, overLimit: true, plan: gate.plan.plan });
   await recordUsage(env, shop, 1);
 
-  const outcome = await screenAndApply(env, shop, rec, order);
+  const outcome = await screenAndApply(env, shop, rec, order, undefined, tierOfPlan(gate.plan));
   if (!outcome) return json({ ok: true, screened: false, error: "screening unavailable" });
   await recordScreening(env, shop, outcome.record);
-  return json({ ok: true, screened: true, level: outcome.record.level, score: outcome.record.score });
+  return json({ ok: true, screened: true, level: outcome.record.level, score: outcome.record.score, held: Boolean(outcome.record.held) });
 }
 
 /* GDPR: we store only hashed buyer emails plus screening metadata keyed by
@@ -931,6 +1539,13 @@ export function renderDashboard(shop, screenings, apiKey, host, extras = {}) {
   const settings = normalizeSettings(extras.settings);
   const plan = extras.plan === undefined ? null : extras.plan;
   const plansUrl = pricingPlansUrl(shop, extras.appHandle);
+  /* P1 (RS-ENH-2026-11-26-V2): hold thresholds, rules, allowlist, held count.
+   * plan is the plan object from getShopPlan (with a tier field); the hold
+   * settings come from extras.holdSettings, loaded by handleDashboard. */
+  const holdSettings = extras.holdSettings || { hold_threshold: DEFAULT_HOLD_THRESHOLD, flag_threshold: DEFAULT_FLAG_THRESHOLD, hold_enabled: true };
+  const rules = extras.rules || [];
+  const allowlist = extras.allowlist || [];
+  const heldCount = screenings.filter((s) => s.held && !s.released_at).length;
   const storeHandle = String(shop || "").replace(/\.myshopify\.com$/i, "");
   const counts = { high: 0, medium: 0, unknown: 0 };
   for (const s of screenings) if (counts[s.level] !== undefined) counts[s.level]++;
@@ -953,6 +1568,7 @@ export function renderDashboard(shop, screenings, apiKey, host, extras = {}) {
         <td><span class="badge badge-${esc(s.level)}">${esc(s.level)}</span></td>
         <td>${esc(s.score)}/100</td>
         <td>${esc(s.top_reason || "no flags found")}</td>
+        <td>${s.held ? `HELD${s.released_at ? " (released)" : ""} <button data-release="${esc(s.order_id)}" ${s.released_at ? "disabled" : ""}>Release</button>` : "—"}</td>
       </tr>`).join("");
   return `<!DOCTYPE html>
 <html lang="en">
@@ -1041,6 +1657,7 @@ export function renderDashboard(shop, screenings, apiKey, host, extras = {}) {
     <div class="card"><div class="n">${counts.high}</div><div>High risk (tagged relayshield-high-risk)</div></div>
     <div class="card"><div class="n">${counts.medium}</div><div>Needs review (tagged relayshield-review)</div></div>
     <div class="card"><div class="n">${counts.unknown}</div><div>No flags found (no tag)</div></div>
+    <div class="card"><div class="n">${heldCount}</div><div>Held for review (fulfillment hold)</div></div>
   </div>
   <div class="panel">
     <h2>Your plan</h2>
@@ -1067,12 +1684,60 @@ export function renderDashboard(shop, screenings, apiKey, host, extras = {}) {
     <span id="sync-status" role="status" aria-live="polite"></span>
   </div>
   <table>
-    <thead><tr><th>Order</th><th>Screened</th><th>Verdict</th><th>Score</th><th>Top signal</th></tr></thead>
-    <tbody id="rows">${rows || '<tr><td colspan="5">No orders screened yet.</td></tr>'}</tbody>
+    <thead><tr><th>Order</th><th>Screened</th><th>Verdict</th><th>Score</th><th>Top signal</th><th>Held</th></tr></thead>
+    <tbody id="rows">${rows || '<tr><td colspan="6">No orders screened yet.</td></tr>'}</tbody>
   </table>
   <p class="hint" id="filter-empty" hidden>No orders match this filter.</p>
   <p class="note"><a href="${SUPPORT_URL}" target="_blank" rel="noopener">Support</a> &middot; <a href="${PRIVACY_URL}" target="_blank" rel="noopener">Privacy policy</a></p>
-  <p class="note">A result of "no flags found" means nothing is known against the order right now, not proof of safety. RelayShield never blocks, cancels, or refunds orders; high-risk orders are tagged for your review before fulfillment.</p>
+  <p class="note">A result of "no flags found" means nothing is known against the order right now, not proof of safety. On the $49 Prevention tier, high-risk orders are held for your review before shipping; a hold is a fulfillment hold, never a cancel or refund. On the $29 tier, high-risk orders are tagged for your review and nothing is held.</p>
+    <h2>Plan and thresholds</h2>
+    <p>Current plan: <strong>${plan ? `${esc(plan.plan)} (${esc(plan.tier)})` : "could not tell"}</strong> &mdash; <a href="${esc(plansUrl)}" target="_blank" rel="noopener">View or change plan</a></p>
+    ${plan && plan.tier === "prevention" ? "<p>Prevention tier is active: hold-before-ship, Shopify Flow, custom rules and device fingerprinting are on.</p>" : "<p>Hold-before-ship, Shopify Flow, custom rules and device fingerprinting are on the $49/mo Prevention tier. Pick it in the plan picker above; the $29/mo Standard tier keeps screen-and-tag.</p>"}
+    <form id="rs-hold-settings">
+      <label>Hold threshold (0-100): <input type="number" name="hold_threshold" min="0" max="100" value="${esc(holdSettings.hold_threshold)}"></label>
+      <label>Flag threshold (0-100): <input type="number" name="flag_threshold" min="0" max="100" value="${esc(holdSettings.flag_threshold)}"></label>
+      <label><input type="checkbox" name="hold_enabled" ${holdSettings.hold_enabled ? "checked" : ""}> Hold-before-ship enabled</label>
+      <button type="submit">Save thresholds</button>
+    </form>
+    <h2>Custom rules and allowlist</h2>
+    <p>Rules only apply on the Prevention tier. A rule matches an order by email domain, phone, country, or risk score; an "allowlist" entry always screens normally. Values are stored as SHA-256 hashes, never as raw buyer data.</p>
+    <form id="rs-rules">
+      <input type="text" name="field" placeholder="email_domain" required>
+      <input type="text" name="value" placeholder="example.com" required>
+      <select name="action"><option value="flag">Flag</option><option value="allow">Allow</option></select>
+      <button type="submit">Add rule</button>
+    </form>
+    <ul>
+      ${rules.map((r) => `<li>${esc(r.field)}: ${esc(r.value_hash)} (${esc(r.action)}) <button data-rule="${esc(r.id)}">Delete</button></li>`).join("") || "<li>No rules yet.</li>"}
+    </ul>
+    <form id="rs-allowlist">
+      <input type="text" name="field" placeholder="email" required>
+      <input type="text" name="value" placeholder="customer@example.com" required>
+      <button type="submit">Allowlist</button>
+    </form>
+    <ul>
+      ${allowlist.map((r) => `<li>${esc(r.field)}: ${esc(r.value_hash)} <button data-allow="${esc(r.id)}">Delete</button></li>`).join("") || "<li>No allowlist entries yet.</li>"}
+    </ul>
+    <script>
+      document.getElementById("rs-hold-settings").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const f = new FormData(e.target);
+        await api("/api/hold-settings", "POST", { hold_threshold: Number(f.get("hold_threshold")), flag_threshold: Number(f.get("flag_threshold")), hold_enabled: f.get("hold_enabled") === "on" });
+      });
+      document.getElementById("rs-rules").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const f = new FormData(e.target);
+        await api("/api/rules", "POST", { field: f.get("field"), value: f.get("value"), action: f.get("action") });
+      });
+      document.getElementById("rs-allowlist").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const f = new FormData(e.target);
+        await api("/api/allowlist", "POST", { field: f.get("field"), value: f.get("value") });
+      });
+      document.querySelectorAll("[data-rule]").forEach((b) => b.addEventListener("click", async () => { await api("/api/rules/" + b.dataset.rule, "DELETE"); }));
+      document.querySelectorAll("[data-allow]").forEach((b) => b.addEventListener("click", async () => { await api("/api/allowlist/" + b.dataset.allow, "DELETE"); }));
+      document.querySelectorAll("[data-release]").forEach((b) => b.addEventListener("click", async () => { await api("/api/release/" + b.dataset.release, "POST"); }));
+    </script>
 </div>
 <script>
 (function() {
@@ -1195,9 +1860,14 @@ async function handleDashboard(request, env) {
   const plan = shop ? await loadPlan(env, shop) : null;
   const shopRec = shop ? await getShopRecord(env, shop) : null;
   const needsSync = Boolean(shop && shopRec && shopRec.access_token && !shopRec.orders_synced_at);
+  /* P1 (RS-ENH-2026-11-26-V2): hold thresholds, rules, allowlist for the
+   * dashboard. Defaults when there is no shop (unauthenticated load). */
+  const holdSettings = shop ? await getHoldSettings(env, shop) : { hold_threshold: DEFAULT_HOLD_THRESHOLD, flag_threshold: DEFAULT_FLAG_THRESHOLD, hold_enabled: true };
+  const rules = shop ? await getShopRules(env, shop) : [];
+  const allowlist = shop ? await getShopAllowlist(env, shop) : [];
   const host = url.searchParams.get("host") || "";
   return new Response(renderDashboard(shop || "", screenings, env.SHOPIFY_API_KEY, host, {
-    settings, plan, needsSync, appHandle: env.SHOPIFY_APP_HANDLE,
+    settings, plan, needsSync, appHandle: env.SHOPIFY_APP_HANDLE, holdSettings, rules, allowlist,
   }), {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
@@ -1276,6 +1946,32 @@ export default {
         return new Response(JSON.stringify({ ok: true, shop, installed: inst.installed }), {
           headers: { "Content-Type": "application/json" },
         });
+      }
+      if (url.pathname === "/flow/hold-order" && request.method === "POST") {
+        return handleFlowAction(request, env);
+      }
+      if (url.pathname === "/flow/lifecycle" && request.method === "POST") {
+        return handleFlowLifecycle(request, env);
+      }
+      if (url.pathname === "/api/hold-settings") {
+        const shop = await requireSessionShop(request, env, url);
+        if (!shop) return new Response(JSON.stringify({ ok: false }), { status: 401, headers: { "Content-Type": "application/json" } });
+        return handleApiHoldSettings(request, env, shop);
+      }
+      if (url.pathname === "/api/rules") {
+        const shop = await requireSessionShop(request, env, url);
+        if (!shop) return new Response(JSON.stringify({ ok: false }), { status: 401, headers: { "Content-Type": "application/json" } });
+        return handleApiRules(request, env, shop);
+      }
+      if (url.pathname === "/api/allowlist") {
+        const shop = await requireSessionShop(request, env, url);
+        if (!shop) return new Response(JSON.stringify({ ok: false }), { status: 401, headers: { "Content-Type": "application/json" } });
+        return handleApiAllowlist(request, env, shop);
+      }
+      if (url.pathname === "/api/release" && request.method === "POST") {
+        const shop = await requireSessionShop(request, env, url);
+        if (!shop) return new Response(JSON.stringify({ ok: false }), { status: 401, headers: { "Content-Type": "application/json" } });
+        return handleApiRelease(request, env, shop);
       }
       if (url.pathname === "/healthz") return new Response("ok");
       return new Response("Not found", { status: 404 });

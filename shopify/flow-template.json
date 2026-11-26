@@ -1,0 +1,45 @@
+{
+  "_generated_by": "shopify-order-screening-enhancements-patch-2026-11-26-v2",
+  "_note": "Build spec for the Shopify Flow template gallery entry. Flow templates are created in the Flow editor and submitted from the Partner Dashboard; this file is the definition to build from, not an import file. The trigger and action extensions are created with `shopify app generate extension` (types Flow Trigger and Flow Action); the TOML below is the starting point and the handles must match the Worker.",
+  "name": "Hold high-risk orders for review (RelayShield)",
+  "description": "When RelayShield screens an order as high risk, hold it before shipping so the merchant can review it.",
+  "trigger": {
+    "app": "RelayShield Order Screening",
+    "handle": "relayshield-high-risk-order",
+    "fields": {
+      "order_id": "order_reference (numeric legacy id)",
+      "Risk score": "number_decimal",
+      "Risk level": "single_line_text_field",
+      "Top signal": "single_line_text_field"
+    }
+  },
+  "steps": [
+    {
+      "step": 1,
+      "type": "condition",
+      "if": "Risk score >= 70",
+      "then": "continue",
+      "else": "end workflow"
+    },
+    {
+      "step": 2,
+      "type": "action",
+      "app": "RelayShield Order Screening",
+      "handle": "relayshield-hold-order",
+      "fields": {
+        "order_id": "{{ order_id }}"
+      },
+      "note": "Holds the fulfillment order (HIGH_RISK_OF_FRAUD). Never cancels or refunds."
+    },
+    {
+      "step": 3,
+      "type": "action",
+      "app": "Shopify Flow built-in",
+      "action": "Send internal email",
+      "to": "merchant",
+      "subject": "RelayShield held order {{ order_id }} (score {{ Risk score }})"
+    }
+  ],
+  "extension_toml_trigger": "[[extensions]]\nname = \"High-risk order screened\"\ntype = \"flow_trigger\"\nhandle = \"relayshield-high-risk-order\"\ndescription = \"Fires when RelayShield screens an order as high risk or holds it.\"\n\n[settings]\n  [[settings.fields]]\n  type = \"order_reference\"\n  description = \"The screened order.\"\n\n  [[settings.fields]]\n  type = \"number_decimal\"\n  key = \"Risk score\"\n\n  [[settings.fields]]\n  type = \"single_line_text_field\"\n  key = \"Risk level\"\n\n  [[settings.fields]]\n  type = \"single_line_text_field\"\n  key = \"Top signal\"\n",
+  "extension_toml_action": "[[extensions]]\nname = \"Hold order for review\"\ntype = \"flow_action\"\nhandle = \"relayshield-hold-order\"\ndescription = \"Holds the order's fulfillment for merchant review. Never cancels or refunds.\"\nruntime_url = \"/flow/hold-order\"\n\n[settings]\n  [[settings.fields]]\n  type = \"order_reference\"\n  key = \"Order\"\n  description = \"The order to hold.\"\n"
+}

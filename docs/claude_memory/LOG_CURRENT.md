@@ -333,3 +333,7 @@ Asked: does completing phase 2 give SEC 2 a passing score and reduce the open ga
 
 ### Not done, on purpose
 Nothing applied, nothing ticked. Replacing a service key with a role (for example a Cloudflare worker reaching AWS) is its own build and has not been scoped. SEC 3, 7 and 11 remain the next WAFR questions.
+
+## 2026-11-26 (SEC 2 PHASE 2, LATER): STATE CORRECTION. PHASE 1 WAS DONE; THIS LOG SAID IT WAS BLOCKED.
+
+The founder completed phase 1 steps 1 to 8 in the previous SEC 2 session and the handoff written then never recorded it, so this session asked him to run step 1 again. A clean `wafr_identity.py` run confirmed: organization, instance, permission sets, groups, assignments and responder all already fine; only the `legacy` report lists long-lived credentials. **Supersedes "Blocked on the founder" item 1 in the phase 2 handoff above.** First `wafr_keys.py` report run: the founder saw 7 long-lived credentials (one already Inactive), 1 console password, no root key. Detail stays in chat (public repository rule). Open: whether the founder's `relayshield` profile is now an SSO session, which decides whether the tool will accept a write.

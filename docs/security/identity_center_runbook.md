@@ -1,6 +1,6 @@
 # SEC 2 runbook: move human sign-in to IAM Identity Center
 
-STATUS: DRAFT. Nothing here has run against AWS. The tool is `tools/wafr_identity.py` (tests: `test_wafr_identity.py`, 30 tests, checked against the real boto3 service models). Decision (founder, 2026-11-26): IAM Identity Center.
+STATUS: steps 1 to 8 RUN AND PASSED on 2026-11-26 (phase 2 not started). The tool is `tools/wafr_identity.py` (tests: `test_wafr_identity.py`, 30 tests, checked against the real boto3 service models). Decision (founder, 2026-11-26): IAM Identity Center.
 
 What this is for: three unmet practices under Well-Architected SEC 2. "Rely on a centralized identity provider" and "Employ user groups and attributes" are what Identity Center is. "Use temporary credentials" is only true once nothing signs in with a long-lived key, which is PHASE 2 below and is NOT done by this runbook's first half.
 
@@ -10,7 +10,7 @@ What this is for: three unmet practices under Well-Architected SEC 2. "Rely on a
 
 * You sign in at an AWS access portal with MFA, and the CLI uses `aws sso login`. Credentials expire (Admin: 4 hours, ReadOnly: 8).
 * **Recommendation (mine, overrule it): the CLI profile `relayshield` points at the ADMIN permission set**, so every command already written in this repo, which says `AWS_PROFILE=relayshield`, keeps working. Add `relayshield-readonly` for dashboards and inventories. The cost is that your default profile can write. The benefit is that no existing doc, script or habit breaks, and the credential is temporary either way. Splitting your daily default to read-only is SEC 3 and is a separate step.
-* GitHub Actions deploys are unaffected: they use the OIDC role, not you.
+* GitHub Actions deploys are unaffected: they do not sign in as you.
 * The responder role (`relayshield-ir-responder`) trusts only an MFA-flagged principal. An Identity Center session is not expected to carry that flag (UNVERIFIED). Step 8 adds one trust statement for the SSO admin role and proves it.
 
 ## Order matters: never remove the old way in before the new way is proven
@@ -121,7 +121,7 @@ AWS_PROFILE=relayshield aws sts assume-role --role-arn arn:aws:iam::239677749008
 ```
 
 EXPECT: first command `TODO relayshield-ir-responder  add one trust statement ...`; second `CHANGED added the SSO admin statement ... (existing statement kept)`; third a single timestamp about an hour ahead.
-STOP IF: the third command says `AccessDenied`: send me the exact text. That is a finding about how an SSO session is evaluated, not a mistake on your side, and the original MFA statement is still in place so nothing is lost.
+STOP IF: the third command says `AccessDenied` on the FIRST try: IAM changes take several seconds to propagate (this happened on the first real run, 2026-11-26, and a retry passed), so wait 30 seconds and re-run only that command once. If it still fails, send me the exact text. That is a finding about how an SSO session is evaluated, not a mistake on your side, and the original MFA statement is still in place so nothing is lost.
 
 ---
 

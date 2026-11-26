@@ -136,6 +136,8 @@ STATUS: DRAFT, built and tested (`tools/wafr_keys.py`, `test_wafr_keys.py`, 48 t
 * A key used in the last 7 days is a service depending on it, and is refused.
 * Delete is refused unless the key is already Inactive and CloudTrail shows it was deactivated 7 or more days ago.
 
+Anywhere a key id is asked for, `user:NAME` works instead for that user's one Active key (deactivate) or one Inactive key (delete); zero or several is refused. Pasting an id through a chat or terminal can mask it, so prefer this form.
+
 Output names users and key ids. It stays in your terminal: never paste it into a repo file or an issue, and it is not wired into any workflow on purpose.
 
 **ANDREW RUNS THIS (P2.1: the ranked report, read-only; nothing here changes anything):**

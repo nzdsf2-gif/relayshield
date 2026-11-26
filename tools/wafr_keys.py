@@ -2,7 +2,7 @@
 """Well-Architected SEC 2, phase 2 ("Use temporary credentials"): retire long-lived IAM credentials, one at a time.
 
     AWS_PROFILE=relayshield python3 tools/wafr_keys.py                              # read-only report, ranked
-    AWS_PROFILE=relayshield python3 tools/wafr_keys.py --deactivate KEYID           # dry run
+    AWS_PROFILE=relayshield python3 tools/wafr_keys.py --deactivate KEYID           # dry run (or user:NAME for that user's one Active key)
     AWS_PROFILE=relayshield python3 tools/wafr_keys.py --deactivate KEYID --apply   # Inactive (reversible)
     AWS_PROFILE=relayshield python3 tools/wafr_keys.py --reactivate KEYID --apply   # the rollback
     AWS_PROFILE=relayshield python3 tools/wafr_keys.py --delete KEYID --apply       # permanent, after the observe window
@@ -184,6 +184,25 @@ def require_sso(arn, out, what):
     return False
 
 
+def resolve(iam, ref, want, out):
+    """A key id passes through. `user:NAME` picks that user's ONE key in state `want`; zero or several is refused, never guessed."""
+    if not (ref or "").startswith("user:"):
+        return ref
+    name = ref[5:]
+    if not USER.match(name):
+        out(f"REFUSED   '{name}' is not an IAM user name.")
+        return None
+    try:
+        ids = [k["AccessKeyId"] for k in iam.list_access_keys(UserName=name).get("AccessKeyMetadata", []) if k.get("Status") == want]
+    except Exception as e:
+        out(f"BLOCKED   cannot list the keys of {name} ({code(e)}). Nothing was changed.")
+        return None
+    if len(ids) != 1:
+        out(f"REFUSED   {name} has {len(ids)} {want} access keys; this needs exactly one. Use the key id from the report instead.")
+        return None
+    return ids[0]
+
+
 def locate(iam, key_id, out):
     if not KEY_ID.match(key_id or ""):
         out(f"REFUSED   '{key_id}' is not an access key id (16 to 128 capital letters and digits).")
@@ -350,6 +369,12 @@ def run(iam, ct, caller_of, spec, args, now=None, out=print):
             return 2
         return report(iam, now, out)
     action = chosen[0]
+    want = {"reactivate": "Inactive", "deactivate": "Active", "delete": "Inactive"}.get(action)
+    if want:
+        ref = resolve(iam, getattr(args, action), want, out)
+        if ref is None:
+            return 1
+        setattr(args, action, ref)
     if action == "reactivate":
         return do_reactivate(iam, args.reactivate, args.apply, out)
     # every other action is a write or a decision about one: it must be SSO, dry run included, so a dry run is a true preview

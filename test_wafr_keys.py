@@ -262,6 +262,37 @@ class Deactivate(unittest.TestCase):
         self.assertIn("BLOCKED", out)
 
 
+class ByUser(unittest.TestCase):
+    def test_user_ref_picks_that_users_single_key(self):
+        _rc, _o, iam = go(deactivate="user:human", apply=True)
+        self.assertEqual(iam.writes(), [("update_access_key", "human", K_OLD, "Inactive")])
+
+    def test_user_ref_for_delete_wants_the_inactive_one(self):
+        ct = FakeCt([event(K_OFF, "Inactive", ago(9))])
+        _rc, _o, iam = go(delete="user:svc-c", apply=True, ct=ct)
+        self.assertEqual(iam.writes(), [("delete_access_key", "svc-c", K_OFF)])
+
+    def test_zero_or_several_keys_is_refused_never_guessed(self):
+        rc, out, iam = go(deactivate="user:svc-c", apply=True)  # svc-c has only an Inactive key
+        self.assertEqual((rc, iam.writes()), (1, []))
+        self.assertIn("exactly one", out)
+        iam = FakeIam(keys={K_OLD: dict(user="u", status="Active", created=ago(9), used=ago(50)),
+                            K_NEVER: dict(user="u", status="Active", created=ago(9), used=None)}, pw={})
+        rc, out, iam = go(iam, deactivate="user:u", apply=True)
+        self.assertEqual((rc, iam.writes()), (1, []))
+        self.assertIn("has 2 Active", out)
+
+    def test_user_ref_does_not_bypass_the_sso_or_recency_guards(self):
+        rc, _o, iam = go(arn=USER_ARN, deactivate="user:human", apply=True)
+        self.assertEqual((rc, iam.writes()), (2, []))
+        rc, _o, iam = go(deactivate="user:svc-b", apply=True)  # used 1 day ago
+        self.assertEqual((rc, iam.writes()), (1, []))
+
+    def test_bad_user_name_refused(self):
+        rc, _o, iam = go(deactivate="user:a b;c", apply=True)
+        self.assertEqual((rc, iam.writes()), (1, []))
+
+
 class Reactivate(unittest.TestCase):
     def test_rollback_works_without_sso(self):
         rc, _o, iam = go(arn=USER_ARN, reactivate=K_OFF, apply=True)

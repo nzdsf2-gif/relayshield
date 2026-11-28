@@ -676,7 +676,9 @@ export async function handleFlowAction(request, env) {
     if (await kvGet(env, flowActionKey(runId))) return json({ ok: true, deduped: true });
     await kvPut(env, flowActionKey(runId), { shop, at: new Date().toISOString() }, 7 * 24 * 60 * 60);
   }
-  const rawOrderId = body.order_id || body.orderId || body.Order || (body.order && body.order.id) || null;
+  const props = body.properties || {};
+  const rawOrderId = body.order_id || body.orderId || body.Order || props.order_id || props.Order || (body.order && body.order.id) || null;
+  /* RS-FLOW-ACTION-PROPERTIES-2026-11-27: Flow sends action fields in body.properties. */
   if (!rawOrderId) return json({ ok: false, error: "no order_id in payload" }, 400);
   const orderId = Number(String(rawOrderId).replace(/^gid:\/\/shopify\/Order\//, ""));
   if (!Number.isFinite(orderId)) return json({ ok: false, error: "bad order_id in payload" }, 400);

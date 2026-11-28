@@ -1,13 +1,24 @@
 # RelayShield — Open Items
 
-## SEC 2 PHASE 2 FOLLOW-UPS (2026-11-26). DATED, DO NOT RUN EARLY.
+## SEC 2 PHASE 2 FOLLOW-UPS (updated 2026-11-28). DATED, DO NOT RUN EARLY.
 
-Context: `docs/security/identity_center_runbook.md` phase 2, `tools/wafr_keys.py`. Phase 1 is done. No credential names here (public repository): `python3 tools/wafr_keys.py` (P2.1) prints them to the terminal.
+Context: `docs/security/identity_center_runbook.md` phase 2, `tools/wafr_keys.py`. Phase 1 is done and two of the three SEC 2 practices are ticked. No credential names here (public repository): `python3 tools/wafr_keys.py` (P2.1) prints them to the terminal.
 
-- [ ] **ON OR AFTER 2026-12-03, NOT BEFORE: runbook P2.4b deletes** for the two keys deactivated on 2026-11-24 and 2026-11-26. Run P2.1 to find the Inactive ones; `--delete user:NAME --apply` for each. The tool refuses a key inside its 7 day window, so an early run is harmless but pointless. (The first becomes eligible about 2026-12-01.)
-- [ ] **OIDC for the five intel workflows (built 2026-11-26, on the branch).** Order matters: (1) merge the branch locally; (2) `AWS_PROFILE=relayshield python3 tools/oidc_workflow_grants.py` (read-only: trust check plus simulation as the role); (3) if it lists DENIED, `... --apply`; (4) ONLY THEN push `main`, because the workflows go live on push and a missing grant is a 403 on whichever day each next runs. Do not dispatch the substack workflow just to test: it redeploys that Lambda from the repo copy (DRIFT RULE). The first scheduled discovery run (Monday 2026-11-30) is the real test.
-- [ ] After that run is green: deactivate the stored-key IAM user's key (P2.2, P2.3), then observe 7 days. The key may also be in another repository's secrets; the observe window is how that would show.
-- [ ] Tick the SEC 2 practices in the Tool only per the runbook's evidence table. "Use temporary credentials" waits until P2.1 is clean except documented service keys.
+- [ ] **ON OR AFTER 2026-12-03, NOT BEFORE: runbook P2.4b deletes** for the two keys deactivated on 2026-11-24 and 2026-11-26. Run P2.1 to find the Inactive ones; `--delete user:NAME --apply` for each. The tool refuses a key inside its 7 day window, so an early run is harmless but pointless. (The first becomes eligible about 2026-12-01.) **A reminder is scheduled into the SEC 2 session for 2026-12-03; if it does not arrive, this line is the fallback.**
+- [x] **OIDC grants applied 2026-11-28** (`tools/oidc_workflow_grants.py --apply`, output `PROVED`): the deploy role now also carries the inline policy `relayshield-deploy-intel-ops`. The five intel workflows were already on `main` and none had run since the change (checked against the Actions history).
+- [ ] **FIRST REAL TEST: the scheduled INTEL Channel Discovery run, Monday 2026-11-30.** Check it ended green (Actions tab, or ask Claude to list the runs). A red run means a trust or grant problem: re-run `AWS_PROFILE=relayshield python3 tools/oidc_workflow_grants.py` and send the output. The monthly review (1 December) is the second test and needs `logs:FilterLogEvents`, which is now granted.
+- [ ] **After that run is green: deactivate the stored-key IAM user's key** (runbook P2.2 then P2.3), observe 7 days, then delete (P2.4b), so the earliest delete is about 2026-12-08. The key may also be in another repository's secrets; the observe window is how that would show.
+- [ ] **Remaining long-lived keys are service keys** (a Cloudflare worker with two keys mid-rotation, an SES SMTP credential, a deployer key). Consolidate the worker to one key once the older one goes idle; document the rest privately. None of them can assume a role.
+- [ ] **"Use temporary credentials" is the only SEC 2 practice still unticked.** Tick only when P2.1 is clean except documented service keys; realistic earliest mid-December. Ask the founder what the Tool's open count now shows (it was 23 before the two ticks and was never reported back).
+
+## WAFR GAP-FINDING, REQUESTED FOR THE NEXT SESSION (2026-11-28)
+
+**The ask, in the founder's words: identify some concise WAFR gap items we can easily resolve.** Deliver a ranked shortlist of 5 to 8, not an audit.
+
+- **Start:** `git fetch --all --prune`, read the last "WHERE ... LEFT THINGS" of `docs/claude_memory/LOG_CURRENT.md`, then `wafr_practice_map_2026-10-29.md` and the three High-risk practice lists in LOG_CURRENT (SEC 36, OPS 11, REL 37). Ask the founder what the Tool's open count is now.
+- **"Easy" means all of:** closes or moves at least one High question (say how many, per WAFR rule 4); no paid service; a dry-run-by-default tool with Stubber tests and planted defects (rule 3), or a document that needs no founder decision; evidence the founder can cite in the Note; about one session each. Anything needing a CONFIRM answer is grouped into one batch of questions, asked once, with a recommendation attached.
+- **Each item shows:** question and practice, why it is cheap, what already exists in the repo, who does what (labelled), and the evidence to cite. Recommend the order. Do not propose SEC5-style "not applicable" (rule 6) or GuardDuty (rule 4). SEC 3, 7 and 11 are the questions not yet worked.
+- **Public repository rule applies:** findings are reported in chat; the repo records the control built and the next action, never the gap.
 
 ## 🚪 FRONT-DOORS — discovery surfaces, added 2026-09-01
 

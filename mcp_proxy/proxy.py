@@ -1494,14 +1494,24 @@ class ProxyHandler(BaseHTTPRequestHandler):
         user's role. A RelayShield operator may also use the token
         directly. An unset token fails closed: mutations are
         rejected rather than silently open. Reads are not gated.
+
+        The operator token is read from the X-Operator-Token header
+        first, falling back to the Authorization Bearer token. This
+        is because the proxy's general auth requires the tenant
+        proxy token in Authorization, so a caller passes the proxy
+        token there and the operator token in X-Operator-Token.
         """
         expected = getattr(cfg, "fingerprint_denylist_token", "") or ""
         if not expected:
             return False
-        auth = (self.headers.get("Authorization") or "").strip()
-        if not auth.lower().startswith("bearer "):
+        provided = (self.headers.get("X-Operator-Token") or "").strip()
+        if not provided:
+            auth = (self.headers.get("Authorization") or "").strip()
+            if auth.lower().startswith("bearer "):
+                provided = auth[7:].strip()
+        if not provided:
             return False
-        return denylist_token_ok(auth[7:].strip(), expected)
+        return denylist_token_ok(provided, expected)
 
     def _audit_session_fields(self, session_key):
         """Phase 3a call-site helper: tenant and binding stamps.

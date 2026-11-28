@@ -34,6 +34,7 @@ from .telemetry import Telemetry
 from .verdicts import VerdictSigner, content_hash_of
 from .risk_profile import consult_profile, resolve_profile
 from .citations import citations_for_verdict
+from .fingerprint import FingerprintStore, fingerprint_for_request, denylist_token_ok
 
 log = logging.getLogger(__name__)
 
@@ -370,6 +371,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 "enabled": self.server.behavior.enabled,
             })
             return
+        if self.path == "/_rs/fingerprints":
+            self._send_json(self.server.fingerprints.summary())
+            return
+        if self.path == "/_rs/fingerprints/denylist":
+            store = self.server.fingerprints
+            self._send_json({"denylist": store.denylist_list(),
+                             "denylisted": len(store.denylist_list()),
+                             "file": store.denylist_path})
+            return
         if self.path.startswith("/_rs/killchain"):
             # Kill-chain score history: scored sessions per
             # correlation identity over a comparison window
@@ -440,6 +450,72 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 self.server.reputation.record_quarantine_cleared(
                     url, "cleared by operator")
             self._send_json({"cleared": ok, "url": url})
+            return
+        if self.path == "/_rs/fingerprints/flag":
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length) if length else b"{}"
+            try:
+                body = json.loads(raw)
+            except json.JSONDecodeError:
+                body = {}
+            fp = str(body.get("fingerprint") or "").strip()
+            reason = str(body.get("reason") or "operator flag").strip()
+            rec = self.server.fingerprints.flag(fp, reason)
+            self._send_json({"flagged": bool(rec), "fingerprint": fp})
+            return
+        if self.path == "/_rs/fingerprints/unflag":
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length) if length else b"{}"
+            try:
+                body = json.loads(raw)
+            except json.JSONDecodeError:
+                body = {}
+            fp = str(body.get("fingerprint") or "").strip()
+            reason = str(body.get("reason") or "operator clear").strip()
+            rec = self.server.fingerprints.unflag(fp, reason)
+            self._send_json({"unflagged": bool(rec), "fingerprint": fp})
+            return
+        if self.path == "/_rs/fingerprints/compact":
+            ok = self.server.fingerprints.compact()
+            self._send_json({"compacted": ok})
+            return
+        if self.path == "/_rs/fingerprints/denylist/add":
+            if not self._denylist_token_ok(cfg):
+                self._send_json({"error": "denylist mutation requires the operator token"}, 403)
+                return
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length) if length else b"{}"
+            try:
+                body = json.loads(raw)
+            except json.JSONDecodeError:
+                body = {}
+            fp = str(body.get("fingerprint") or "").strip()
+            reason = str(body.get("reason") or "operator denylist").strip()
+            added_by = str(body.get("added_by") or "").strip()
+            rec = self.server.fingerprints.denylist_add(fp, reason, added_by)
+            self._send_json({"denylisted": bool(rec), "fingerprint": fp,
+                             "reason": rec.get("reason", "") if rec else ""})
+            return
+        if self.path == "/_rs/fingerprints/denylist/remove":
+            if not self._denylist_token_ok(cfg):
+                self._send_json({"error": "denylist mutation requires the operator token"}, 403)
+                return
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length) if length else b"{}"
+            try:
+                body = json.loads(raw)
+            except json.JSONDecodeError:
+                body = {}
+            fp = str(body.get("fingerprint") or "").strip()
+            ok = self.server.fingerprints.denylist_remove(fp)
+            self._send_json({"removed": bool(ok), "fingerprint": fp})
+            return
+        if self.path == "/_rs/fingerprints/denylist/reload":
+            if not self._denylist_token_ok(cfg):
+                self._send_json({"error": "denylist mutation requires the operator token"}, 403)
+                return
+            count = self.server.fingerprints.denylist_reload()
+            self._send_json({"reloaded": True, "denylisted": count})
             return
         if self.path == "/_rs/policy/reload":
             ok = self.server.policy.reload()
@@ -547,6 +623,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.server.session_bindings = store
         if binding is None:
             store.pop(session_key, None)
+            self._remember_client_info(req, session_key)
             return self._forward_passthrough(req, req_id, cfg, screener)
         passport_compact = binding.get("passport_compact") or meta.get("passport")
         if not passport_compact:
@@ -596,6 +673,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             "distributor_id": (passport_doc.get("distributor_id") if isinstance(passport_doc, dict) else None) or _console_distributor_id or binding.get("distributor_id"),
             "tenant_verified": _tenant_verified,
         }
+        self._remember_client_info(req, session_key)
         return self._forward_passthrough(req, req_id, cfg, screener)
 
     def _verify_passport_via_gateway(self, passport_compact, binding_id=None):
@@ -1333,6 +1411,98 @@ class ProxyHandler(BaseHTTPRequestHandler):
             except Exception as exc:
                 log.error("kill-chain pivot register error: %s", exc)
 
+    def _remember_client_info(self, req, session_key):
+        """Remember MCP clientInfo per session key at initialize.
+
+        tools/call requests carry no clientInfo, so the handshake is
+        the only place to learn the client's name/version. Stored
+        product strings only; the fingerprint itself is a hash.
+        """
+        try:
+            params = req.get("params") or {}
+            info = params.get("clientInfo") or {}
+            store = getattr(self.server, "client_info", None)
+            if store is None:
+                store = {}
+                self.server.client_info = store
+            store[session_key] = {
+                "name": str(info.get("name") or ""),
+                "version": str(info.get("version") or ""),
+                "protocol_version": str(params.get("protocolVersion") or ""),
+            }
+        except Exception as exc:
+            log.error("remember client info error: %s", exc)
+
+    def _fingerprint_check(self, req, cfg):
+        """Compute, observe, and check the client fingerprint.
+
+        Returns (fingerprint_hash, flagged_bool, reasons_list,
+        denylist_entry_or_None). Flag-only for flagged
+        fingerprints: a flagged fingerprint adds reasons to the
+        call, never blocks it. A fingerprint on the denylist is
+        different: the caller blocks the call (standalone
+        blocking, see the denylist gate in _handle_tools_call).
+        Never raises.
+        """
+        fp_hash = ""
+        flagged = False
+        reasons = []
+        denylist_entry = None
+        try:
+            store = getattr(self.server, "fingerprints", None)
+            if store is None or not store.enabled:
+                return fp_hash, flagged, reasons, denylist_entry
+            corr = resolve_correlation_identity(
+                req, self.client_address[0], cfg.upstream_url)
+            session_key = corr.get("session_key", "")
+            client_info = (getattr(self.server, "client_info", None)
+                           or {}).get(session_key) or {}
+            _tenant, _binding, _location = self._audit_session_fields(
+                session_key)
+            out = fingerprint_for_request(
+                req, self.headers, self.client_address[0],
+                client_info=client_info, salt=store.salt)
+            fp_hash = out.get("fingerprint") or ""
+            if not fp_hash:
+                return fp_hash, flagged, reasons, denylist_entry
+            store.observe(fp_hash, tenant_id=_tenant,
+                          network=out.get("network") or "",
+                          label=out.get("label") or "")
+            # Denylist lookup: the only fingerprint check that
+            # can block. A flagged fingerprint never blocks; a
+            # denylisted one does (standalone blocking, gated
+            # in _handle_tools_call).
+            denylist_entry = store.is_denylisted(fp_hash)
+            status = store.check(fp_hash)
+            if status.get("status") == "flagged":
+                flagged = True
+                reasons = [
+                    "client fingerprint previously flagged: "
+                    + (f.get("reason") or "flagged")
+                    for f in status.get("flags", [])[-3:]
+                ] or ["client fingerprint previously flagged"]
+        except Exception as exc:
+            log.error("fingerprint check error: %s", exc)
+        return fp_hash, flagged, reasons, denylist_entry
+
+    def _denylist_token_ok(self, cfg):
+        """Operator-token gate for denylist mutations.
+
+        The proxy has no role system; the role check (Admin or
+        higher) lives in the console, which holds this token and
+        only calls the proxy with it after checking the signed-in
+        user's role. A RelayShield operator may also use the token
+        directly. An unset token fails closed: mutations are
+        rejected rather than silently open. Reads are not gated.
+        """
+        expected = getattr(cfg, "fingerprint_denylist_token", "") or ""
+        if not expected:
+            return False
+        auth = (self.headers.get("Authorization") or "").strip()
+        if not auth.lower().startswith("bearer "):
+            return False
+        return denylist_token_ok(auth[7:].strip(), expected)
+
     def _audit_session_fields(self, session_key):
         """Phase 3a call-site helper: tenant and binding stamps.
 
@@ -1405,6 +1575,80 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 "as a suspected poisoned neighbor. Clear the quarantine via "
                 "POST /_rs/neighbors/clear.",
                 {"tool": tool_name, "upstream": upstream_url},
+            )
+
+        # Device fingerprinting: stable per-client-instance id
+        # (hashed, never raw PII). A flagged fingerprint adds
+        # reasons to this call and to the audit record, and the
+        # store learns from this call's screens below (flag-only,
+        # never a block). A fingerprint on the DENYLIST is
+        # different: it blocks the call outright, before policy
+        # or any TI screening. The denylist is operator-managed
+        # only; a flag never denylists a fingerprint on its own.
+        _fp_hash = ""
+        _fp_flagged = False
+        _fp_reasons = []
+        _fp_denylist = None
+        try:
+            (_fp_hash, _fp_flagged, _fp_reasons,
+             _fp_denylist) = self._fingerprint_check(req, cfg)
+        except Exception as exc:
+            log.error("fingerprint check error: %s", exc)
+
+        # Standalone fingerprint-denylist block: the fingerprint
+        # alone is sufficient. Runs before Phase 4 policy and
+        # before any TI screening, so a denylisted client never
+        # reaches the upstream server. Follows the policy-deny
+        # shape (signed verdict, audit block, ERR_BLOCKED_BY_
+        # POLICY); policy_decision is "" here because policy
+        # has not run yet, the same as the quarantine block.
+        if _fp_denylist:
+            _deny_reason = (
+                "client fingerprint denylisted: "
+                + str(_fp_denylist.get("reason") or "operator denylist"))
+            signer = self.server.signer
+            _deny_evidence = [{
+                "type": "fingerprint_denylist",
+                "id": "fingerprint-denylist",
+                "detail": _deny_reason,
+            }]
+            signed = signer.issue(
+                decision="block",
+                tool_name=tool_name,
+                content_hash=content_hash_of(arguments),
+                evidence=_deny_evidence,
+                reasons=[_deny_reason],
+                poison_category="fingerprint_denylisted",
+                tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location)
+            log.warning(json.dumps({
+                "event": "tools_call_blocked_fingerprint_denylist",
+                "tool": tool_name,
+                "fingerprint": _fp_hash[:12],
+                "reason": _deny_reason,
+            }))
+            self.server.telemetry.record("fingerprint_denylisted", "call")
+            self.server.audit.record(
+                agent_id, upstream_url, tool_name, arguments,
+                decision="block",
+                poison_category="fingerprint_denylisted",
+                reasons=[_deny_reason],
+                evidence=_deny_evidence,
+                policy_decision="",
+                tenant_id=_audit_tenant, binding_id=_audit_binding, location_id=_audit_location, screened_call=True,
+                profile_version=_profile_version, profile_fallback=_profile_fallback, profile_high_risk=_profile_high_risk, citations=_audit_citations,
+                fingerprint=_fp_hash
+            )
+            return _error_response(
+                req_id,
+                ERR_BLOCKED_BY_POLICY,
+                f"Blocked by RelayShield: {_deny_reason}",
+                {
+                    "tool": tool_name,
+                    "poison_category": "fingerprint_denylisted",
+                    "reasons": [_deny_reason],
+                    "fingerprint": _fp_hash[:12],
+                    "verdict": signed,
+                },
             )
 
         # Phase 4: policy enforcement runs before TI screening. Policy
@@ -1657,12 +1901,23 @@ class ProxyHandler(BaseHTTPRequestHandler):
             "screen_ms": round(screen_ms, 1),
             "total_ms": round(total_ms, 1),
             "screening_enabled": cfg.screening_enabled,
+            "fingerprint": _fp_hash[:12],
+            "fingerprint_flagged": _fp_flagged,
         }))
 
         # Phase 3: behavioral flags feed server reputation. High risk
         # scores can trigger quarantine evaluation.
         if behavior_result.get("verdict") == "flag":
             bcat = behavior_result.get("poison_category", "clean")
+            # Fingerprint linkage: this call's behavior flag also
+            # flags the client instance (flag-only, never a block).
+            if _fp_hash:
+                try:
+                    self.server.fingerprints.flag(
+                        _fp_hash, f"behavior:{bcat}", tool_name=tool_name,
+                        tenant_id=_audit_tenant)
+                except Exception as exc:
+                    log.error("fingerprint flag error: %s", exc)
             for reason in behavior_result.get("reasons", []):
                 if bcat == "attack_chain":
                     reputation.record_attack_chain(upstream_url, reason)
@@ -1697,8 +1952,26 @@ class ProxyHandler(BaseHTTPRequestHandler):
         if sequence_result.get("verdict") == "flag":
             for reason in sequence_result.get("reasons", []):
                 reputation.record_attack_chain(upstream_url, reason)
+            # Fingerprint linkage: flag-only.
+            if _fp_hash:
+                try:
+                    self.server.fingerprints.flag(
+                        _fp_hash, "kill_chain:flag", tool_name=tool_name,
+                        tenant_id=_audit_tenant)
+                except Exception as exc:
+                    log.error("fingerprint flag error: %s", exc)
 
         if verdict.get("verdict") == "block":
+            # Fingerprint linkage: a TI block flags the client
+            # instance too (flag-only, never a block on its own).
+            if _fp_hash:
+                try:
+                    self.server.fingerprints.flag(
+                        _fp_hash,
+                        "ti_block:" + str(verdict.get("poison_category", "clean")),
+                        tool_name=tool_name, tenant_id=_audit_tenant)
+                except Exception as exc:
+                    log.error("fingerprint flag error: %s", exc)
             # Phase 2.5: issue a signed verdict tying the block to TI
             # evidence. A copied proxy cannot forge this signature.
             signer = self.server.signer
@@ -1908,7 +2181,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             agent_id, upstream_url, tool_name, arguments,
             decision="allow",
             poison_category=_audit_category,
-            reasons=_audit_reasons,
+            reasons=list(_audit_reasons) + list(_fp_reasons),
             risk_score=_audit_risk,
             policy_decision=policy_decision,
             duration_ms=(time.monotonic() - t0) * 1000,
@@ -1917,6 +2190,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             deciding_link=_dstamp.get("deciding_link", ""),
             deciding_field=_dstamp.get("deciding_field", ""),
             delegation_chain=_dstamp.get("delegation_chain", []),
+            fingerprint=_fp_hash
         )
 
         return upstream_resp
@@ -2196,6 +2470,28 @@ class ProxyServer(HTTPServer):
             kc_dir, "kill_chain_pivots.jsonl")
         self.kill_chain_history = ChainHistoryStore(history_path)
         self.kill_chain_pivots = PivotRegistry(pivots_path)
+        # Device fingerprinting: hashed per-client-instance IDs,
+        # flag-only. Path defaults beside the audit file; the salt
+        # keeps fingerprints from being precomputable across
+        # deployments. Follows the kill-chain store discipline.
+        # getattr() defaults keep an unpatched config.py from
+        # breaking the server if the files ever land separately.
+        _fp_path = getattr(cfg, "fingerprint_file", "") or os.path.join(
+            kc_dir, "fingerprints.jsonl")
+        # Denylist file: operator-managed config for standalone
+        # blocking. Defaults beside the fingerprints JSONL; the
+        # env var overrides the path. A missing file is an empty
+        # denylist (never blocks).
+        _denylist_path = getattr(cfg, "fingerprint_denylist_file", "") or os.path.join(
+            kc_dir, "fingerprints_denylist.json")
+        self.fingerprints = FingerprintStore(
+            path=_fp_path,
+            salt=getattr(cfg, "fingerprint_salt", ""),
+            enabled=getattr(cfg, "fingerprint_enabled", True),
+            denylist_path=_denylist_path)
+        # clientInfo remembered per session key at initialize, so
+        # tools/call requests can fingerprint the client instance.
+        self.client_info = {}
         self.schema_store = SchemaStore()
         self.audit = AuditTrail(capacity=cfg.audit_capacity,
                                 persist_path=cfg.audit_file)

@@ -98,6 +98,24 @@ class ProxyConfig:
         # Path to a YAML policy file (see policy.py for format).
         # When unset, the policy engine is disabled.
         self.policy_file = os.environ.get("MCP_PROXY_POLICY_FILE", "")
+        self.fingerprint_enabled = (
+            os.environ.get("MCP_PROXY_FINGERPRINT", "true").lower()
+            != "false")
+        self.fingerprint_file = os.environ.get(
+            "MCP_PROXY_FINGERPRINT_FILE", "")
+        self.fingerprint_salt = os.environ.get(
+            "MCP_PROXY_FINGERPRINT_SALT", "")
+        self.fingerprint_denylist_file = os.environ.get(
+            "MCP_PROXY_FINGERPRINT_DENYLIST_FILE", "")
+        # Operator bearer token for denylist mutations
+        # (add/remove/reload). A secret: set via the normal
+        # secret flow (Secrets Manager -> relayshield.env),
+        # never printed. Unset means mutations are rejected
+        # (fail closed); the role check (Admin or higher) lives
+        # in the console, which holds this token and only calls
+        # the proxy with it after checking the signed-in role.
+        self.fingerprint_denylist_token = os.environ.get(
+            "MCP_PROXY_FINGERPRINT_DENYLIST_TOKEN", "")
         # Optional JSONL file for durable audit persistence.
         self.audit_file = os.environ.get("MCP_PROXY_AUDIT_FILE", "")
         # In-memory audit ring capacity.

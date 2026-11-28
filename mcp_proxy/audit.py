@@ -97,7 +97,8 @@ class AuditTrail:
                binding_id: str = "", location_id: str = "", screened_call: bool = False,
                profile_version: int = 0, profile_fallback: bool = False,
                profile_high_risk: bool = False,
-               citations: list = None) -> dict:
+               citations: list = None,
+               fingerprint: str = "") -> dict:
         """Append one audit entry. Returns the entry."""
         args_hash = hashlib.sha256(
             _canonical(arguments or {})).hexdigest()
@@ -127,6 +128,7 @@ class AuditTrail:
                 "profile_fallback": bool(profile_fallback),
                 "profile_high_risk": bool(profile_high_risk),
                 "citations": list(citations or []),
+                "fingerprint": fingerprint or "",
                 "prev_hash": prev_hash,
             }
             entry["entry_hash"] = _entry_hash(entry)
